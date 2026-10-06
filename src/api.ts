@@ -1,0 +1,140 @@
+import type {
+  AttachmentDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto,
+} from './types'
+
+export class ApiError extends Error {
+  status: number
+  constructor(message: string, status: number) { super(message); this.status = status }
+  get unauthorized() { return this.status === 401 }
+}
+
+/** Thin wrapper over the server's REST API; every call carries the bearer token. */
+export class Api {
+  private serverUrl: () => string
+  private token: () => string | null
+  constructor(serverUrl: () => string, token: () => string | null) { this.serverUrl = serverUrl; this.token = token }
+
+  private async request<T>(method: string, path: string, body?: unknown, raw?: BodyInit): Promise<T> {
+    const headers: Record<string, string> = {}
+    const token = this.token()
+    if (token) headers.Authorization = `Bearer ${token}`
+    if (body !== undefined) headers['Content-Type'] = 'application/json'
+    const res = await fetch(this.serverUrl().replace(/\/$/, '') + path, {
+      method,
+      headers,
+      body: raw ?? (body === undefined ? undefined : JSON.stringify(body)),
+    })
+    if (!res.ok) {
+      let message = res.statusText || `HTTP ${res.status}`
+      try {
+        const data = await res.json()
+        message = data.error ?? data.title ?? message
+      } catch { /* non-JSON */ }
+      if (res.status === 401) message = 'Your session has expired. Please sign in again.'
+      throw new ApiError(message, res.status)
+    }
+    if (res.status === 204) return undefined as T
+    const text = await res.text()
+    return (text ? JSON.parse(text) : undefined) as T
+  }
+
+  /** Null when the server is unreachable or too old to say. */
+  meta(serverUrl: string) {
+    return fetch(serverUrl.replace(/\/$/, '') + '/api/meta').then(r => (r.ok ? (r.json() as Promise<ServerMetaDto>) : null)).catch(() => null)
+  }
+
+  // ---- auth ----
+  providers(serverUrl: string) {
+    return fetch(serverUrl.replace(/\/$/, '') + '/auth/providers').then(r => { if (!r.ok) throw new ApiError('Server unreachable', r.status); return r.json() as Promise<string[]> })
+  }
+  devLogin(serverUrl: string, username: string) {
+    return fetch(serverUrl.replace(/\/$/, '') + '/auth/dev-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username }) })
+      .then(async r => { if (!r.ok) throw new ApiError('Dev login failed', r.status); return (await r.json()) as TokenResponse })
+  }
+  exchangeCode(serverUrl: string, code: string) {
+    return fetch(serverUrl.replace(/\/$/, '') + '/auth/token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) })
+      .then(async r => { if (!r.ok) throw new ApiError('Sign-in failed', r.status); return (await r.json()) as TokenResponse })
+  }
+
+  // ---- me / guilds ----
+  me() { return this.request<UserDto>('GET', '/api/me') }
+  guilds() { return this.request<GuildSummaryDto[]>('GET', '/api/guilds') }
+  guild(id: string) { return this.request<GuildSummaryDto>('GET', `/api/guilds/${id}`) }
+  createGuild(name: string) { return this.request<GuildSummaryDto>('POST', '/api/guilds', { name }) }
+  deleteGuild(id: string) { return this.request<void>('DELETE', `/api/guilds/${id}`) }
+  leaveGuild(id: string) { return this.request<void>('POST', `/api/guilds/${id}/leave`) }
+  createInvite(guildId: string) { return this.request<InviteDto>('POST', `/api/guilds/${guildId}/invites`, { expiresInMinutes: null, maxUses: null }) }
+  joinInvite(code: string) { return this.request<GuildSummaryDto>('POST', `/api/invites/${encodeURIComponent(code.trim())}/join`) }
+  createChannel(guildId: string, name: string, type: number, parentId: string | null) {
+    return this.request<ChannelDto>('POST', `/api/guilds/${guildId}/channels`, { name, type, parentId })
+  }
+  deleteChannel(id: string) { return this.request<void>('DELETE', `/api/channels/${id}`) }
+  kick(guildId: string, userId: string) { return this.request<void>('DELETE', `/api/guilds/${guildId}/members/${userId}`) }
+  ban(guildId: string, userId: string) { return this.request<void>('POST', `/api/guilds/${guildId}/bans/${userId}`, { reason: null }) }
+
+  // ---- roles ----
+  roles(guildId: string) { return this.request<RoleDto[]>('GET', `/api/guilds/${guildId}/roles`) }
+  createRole(guildId: string, name: string, color: string | null, permissions: number) {
+    return this.request<RoleDto>('POST', `/api/guilds/${guildId}/roles`, { name, color, permissions })
+  }
+  updateRole(roleId: string, patch: { name?: string; color?: string | null; permissions?: number; position?: number }) {
+    return this.request<RoleDto>('PATCH', `/api/roles/${roleId}`, patch)
+  }
+  deleteRole(roleId: string) { return this.request<void>('DELETE', `/api/roles/${roleId}`) }
+  setMemberRoles(guildId: string, userId: string, roleIds: string[]) {
+    return this.request<unknown>('PUT', `/api/guilds/${guildId}/members/${userId}/roles`, { roleIds })
+  }
+
+  // ---- messages ----
+  messages(channelId: string, before?: string, limit = 50) {
+    return this.request<MessageDto[]>('GET', `/api/channels/${channelId}/messages?limit=${limit}${before ? `&before=${before}` : ''}`)
+  }
+  async upload(channelId: string, file: File) {
+    const form = new FormData()
+    form.append('file', file, file.name)
+    return this.request<AttachmentDto>('POST', `/api/channels/${channelId}/attachments`, undefined, form)
+  }
+
+  // ---- server settings ----
+  updateGuild(guildId: string, name: string) { return this.request<GuildDto>('PATCH', `/api/guilds/${guildId}`, { name }) }
+  async uploadGuildIcon(guildId: string, file: File) {
+    const form = new FormData()
+    form.append('file', file, file.name)
+    return this.request<GuildDto>('POST', `/api/guilds/${guildId}/icon`, undefined, form)
+  }
+  deleteGuildIcon(guildId: string) { return this.request<void>('DELETE', `/api/guilds/${guildId}/icon`) }
+
+  setNickname(guildId: string, userId: string, nickname: string | null) {
+    return this.request<MemberDto>('PUT', `/api/guilds/${guildId}/members/${userId}/nickname`, { nickname })
+  }
+
+  // ---- profiles ----
+  profile(userId: string) { return this.request<UserProfileDto>('GET', `/api/users/${userId}/profile`) }
+  updateProfile(patch: UpdateProfileRequest) { return this.request<UserProfileDto>('PATCH', '/api/me/profile', patch) }
+  private picture(kind: 'avatar' | 'banner', file: File) {
+    const form = new FormData()
+    form.append('file', file, file.name)
+    return this.request<UserProfileDto>('POST', `/api/me/${kind}`, undefined, form)
+  }
+  uploadAvatar(file: File) { return this.picture('avatar', file) }
+  uploadBanner(file: File) { return this.picture('banner', file) }
+  deleteAvatar() { return this.request<UserProfileDto>('DELETE', '/api/me/avatar') }
+  deleteBanner() { return this.request<UserProfileDto>('DELETE', '/api/me/banner') }
+  decorations() { return this.request<DecorationDto[]>('GET', '/api/decorations') }
+
+  // ---- friends / DMs ----
+  searchUsers(q: string) { return this.request<UserDto[]>('GET', `/api/users/search?q=${encodeURIComponent(q)}`) }
+  friends() { return this.request<FriendsDto>('GET', '/api/friends') }
+  addFriend(userId: string) { return this.request<FriendDto>('POST', `/api/friends/${userId}`) }
+  removeFriend(userId: string) { return this.request<void>('DELETE', `/api/friends/${userId}`) }
+  dms() { return this.request<DmChannelDto[]>('GET', '/api/dms') }
+  openDm(userId: string) { return this.request<DmChannelDto>('POST', `/api/dms/${userId}`) }
+
+  /** Raw PNG body; returns the server path to put on a roll's item so the whole party sees the icon. */
+  uploadItemIcon(png: Blob) { return this.request<ItemIconDto>('POST', '/api/item-icons', undefined, png) }
+
+  // ---- bots / voice ----
+  commands(guildId: string) { return this.request<CommandDto[]>('GET', `/api/guilds/${guildId}/commands`) }
+  /** STUN servers plus the relay for this voice channel (everyone in a channel is given the same one). */
+  iceServers(channelId: string) { return this.request<IceServerDto[]>('GET', `/api/voice/ice?channelId=${channelId}`) }
+}

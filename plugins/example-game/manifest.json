@@ -1,0 +1,19 @@
+{
+  "id": "com.example.demo-game",
+  "name": "Demo Game Items",
+  "version": "1.1.0",
+  "author": "Maplecord",
+  "description": "Example plugin. Supplies an item catalog so rolls show names and icons, and watches a log file for drops.",
+  "gameName": "Demo Game",
+  "itemsFile": "items.json",
+  "apiVersion": 1,
+  "logWatcher": {
+    "path": "%TEMP%/maplecord-demo-game.log",
+    "encoding": "utf8",
+    "cooldownSeconds": 2,
+    "patterns": [
+      { "regex": "^\\[loot\\] (?<itemId>\\d+)(?: x(?<quantity>\\d+))?(?: from (?<context>.+))?$" },
+      { "regex": "You have gained an item: (?<itemName>.+?)(?: \\((?<quantity>\\d+)\\))?$", "flags": "i" }
+    ]
+  }
+}

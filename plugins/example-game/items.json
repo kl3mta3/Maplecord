@@ -1,0 +1,23 @@
+[
+  {
+    "id": "1002357",
+    "name": "Zakum Helmet",
+    "iconPath": "icons/1002357.svg",
+    "rarity": "unique",
+    "category": "hat"
+  },
+  {
+    "id": "1122000",
+    "name": "Horntail Necklace",
+    "iconPath": "icons/1122000.svg",
+    "rarity": "legendary",
+    "category": "pendant"
+  },
+  {
+    "id": "4001126",
+    "name": "Maple Leaf",
+    "iconPath": "icons/4001126.svg",
+    "rarity": "common",
+    "category": "etc"
+  }
+]
