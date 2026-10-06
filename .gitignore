@@ -6,3 +6,5 @@ release/
 .env
 *.log
 tools/
+build/
+release/

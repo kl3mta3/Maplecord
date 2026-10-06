@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 type Action = string
 
@@ -36,6 +36,27 @@ contextBridge.exposeInMainWorld('maplecord', {
   pluginsPickLog: (): Promise<string | null> => ipcRenderer.invoke('plugins-pick-log'),
   onPluginsChanged: (handler: (list: unknown) => void) => subscribe<unknown>('plugins-changed', handler),
   onPluginDrop: (handler: (drop: unknown) => void) => subscribe<unknown>('plugin-drop', handler),
+
+  // sharing a screen or an app window
+  shareSources: (): Promise<unknown> => ipcRenderer.invoke('share-sources'),
+  shareChoose: (id: string | null): Promise<void> => ipcRenderer.invoke('share-choose', id),
+  systemIdleSeconds: (): Promise<number> => ipcRenderer.invoke('system-idle-seconds'),
+
+  // saving a file as it arrives from another person (see electron/saveStreams.ts)
+  saveBegin: (name: string): Promise<string | null> => ipcRenderer.invoke('save-begin', name),
+  saveWrite: (id: string, data: Uint8Array): Promise<void> => ipcRenderer.invoke('save-write', id, data),
+  saveEnd: (id: string): Promise<void> => ipcRenderer.invoke('save-end', id),
+  saveAbort: (id: string): Promise<void> => ipcRenderer.invoke('save-abort', id),
+
+  // files offered to other people, remembered across restarts (see electron/offeredFiles.ts). Where a file is comes
+  // from the File the person picked, here, and is never something the page can supply.
+  offerRemember: (offerId: string, file: File, scope: string): Promise<boolean> => {
+    const filePath = webUtils.getPathForFile(file)
+    return filePath ? ipcRenderer.invoke('offer-remember', offerId, filePath, scope) : Promise.resolve(false)
+  },
+  offerList: (scope: string): Promise<unknown> => ipcRenderer.invoke('offer-list', scope),
+  offerRead: (offerId: string, offset: number, length: number): Promise<Uint8Array> => ipcRenderer.invoke('offer-read', offerId, offset, length),
+  offerForget: (offerId: string): Promise<void> => ipcRenderer.invoke('offer-forget', offerId),
 
   // the user's own sound packs (see electron/soundPacks.ts)
   soundPacks: (): Promise<unknown> => ipcRenderer.invoke('sound-packs'),

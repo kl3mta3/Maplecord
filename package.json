@@ -2,6 +2,8 @@
   "name": "maplecord",
   "productName": "Maplecord",
   "private": true,
+  "license": "GPL-3.0-or-later",
+  "author": "Kenny Lasyone",
   "version": "0.1.0",
   "description": "Loot rolling, chat and voice for your party",
   "type": "module",
@@ -11,6 +13,7 @@
     "dev:web": "vite --mode web",
     "build": "tsc -b && vite build",
     "build:web": "tsc -b && vite build --mode web",
+    "build:server-web": "tsc -b && vite build --mode web --outDir ../Maplecord/src/Maplecord.Server/webapp --emptyOutDir",
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win",
     "dist:mac": "npm run build && electron-builder --mac",
@@ -18,7 +21,7 @@
     "lint": "oxlint .",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json",
-    "test": "node electron/plugins.test.ts && node electron/soundPacks.test.ts",
+    "test": "node electron/plugins.test.ts && node electron/soundPacks.test.ts && node electron/fileCache.test.ts && node electron/saveStreams.test.ts && node electron/offeredFiles.test.ts",
     "sounds": "node tools/make-sounds.mjs"
   },
   "dependencies": {
@@ -60,10 +63,16 @@
       "dist/**",
       "dist-electron/**"
     ],
+    "icon": "build/icon.png",
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "artifactName": "Maplecord-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
     },
     "mac": {
       "target": [

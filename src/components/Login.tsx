@@ -57,7 +57,7 @@ export default function Login({ store, onSignedIn }: { store: Store; onSignedIn:
   return (
     <div className="login">
       <div className="card">
-        <h1>Maplecord</h1>
+        <div className="brand"><img src={import.meta.env.BASE_URL + 'logo.png'} alt="" /><h1>Maplecord</h1></div>
         <div className="muted tagline">Loot rolling, chat and voice for your party</div>
 
         {showServer && (
@@ -83,7 +83,7 @@ export default function Login({ store, onSignedIn }: { store: Store; onSignedIn:
           </>
         )}
 
-        {status && <div className="muted" style={{ marginTop: 8 }}>{status}</div>}
+        {(status || store.error) && <div className="muted" style={{ marginTop: 8 }}>{status || store.error}</div>}
         <button className="subtle" style={{ alignSelf: 'flex-end', fontSize: 10, marginTop: 8 }} onClick={() => setShowServer(s => !s)} title="Connect to a self-hosted server">Advanced</button>
       </div>
     </div>

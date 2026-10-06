@@ -1,7 +1,7 @@
 import { HubConnection, HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/signalr'
 import type {
   ChannelDto, GuildDto, InteractionDto, MemberDto, MessageDto, RoleDto, RollChoice, RollItemDto, RollKind, RollResultDto, RollSessionDto,
-  RpsChoice, RpsResultDto, RpsSessionDto, VoiceParticipantDto, FriendDto, DmChannelDto, UserDto,
+  RpsChoice, RpsResultDto, RpsSessionDto, VoiceParticipantDto, FriendDto, DmChannelDto, UserDto, SystemMessageDto,
 } from './types'
 
 /** Server → client events, named exactly as IChatClient's methods. */
@@ -31,11 +31,17 @@ export interface ChatEvents {
   RpsUpdated: (session: RpsSessionDto) => void
   RpsEnded: (result: RpsResultDto) => void
   ServerNotice: (message: string) => void
+  SystemMessage: (message: SystemMessageDto) => void
+  FileRequested: (offerId: string, requesterConnectionId: string, requesterUserId: string, requesterName: string) => void
+  FileSignalReceived: (offerId: string, fromConnectionId: string, kind: string, payload: string) => void
+  FileOfferEnded: (channelId: string, offerId: string, withdrawn: boolean) => void
+  FileOfferResumed: (channelId: string, offerId: string) => void
   VoiceStateChanged: (channelId: string, participants: VoiceParticipantDto[]) => void
   FriendRequest: (friend: FriendDto) => void
   FriendAccepted: (friend: FriendDto) => void
   FriendRemoved: (userId: string) => void
   FriendPresence: (userId: string, online: boolean) => void
+  PresenceStatus: (userId: string, dnd: boolean) => void
   DmOpened: (dm: DmChannelDto) => void
   UserUpdated: (user: UserDto) => void
 }
@@ -45,6 +51,8 @@ export class ChatHub {
   private conn: HubConnection | null = null
   readonly state = { status: 'disconnected' as 'disconnected' | 'connecting' | 'connected' | 'reconnecting' }
   onStatus: ((s: string) => void) | null = null
+  /** How the server knows this app on the chat hub; file transfers are arranged between two of these. */
+  get connectionId() { return this.conn?.connectionId ?? null }
   private serverUrl: () => string
   private token: () => string | null
 
@@ -109,6 +117,11 @@ export class ChatHub {
   startRps(channelId: string) { return this.c.invoke<RpsSessionDto>('StartRps', channelId) }
   rpsPick(sessionId: string, choice: RpsChoice) { return this.c.invoke('RpsPick', sessionId, choice) }
   getActiveRps(channelId: string) { return this.c.invoke<RpsSessionDto | null>('GetActiveRps', channelId) }
+  offerFile(channelId: string, fileName: string, size: number) { return this.c.invoke<MessageDto>('OfferFile', channelId, fileName, size) }
+  cancelFileOffer(offerId: string) { return this.c.invoke('CancelFileOffer', offerId) }
+  resumeFileOffers(offerIds: string[]) { return this.c.invoke<{ resumed: string[]; gone: string[] }>('ResumeFileOffers', offerIds) }
+  requestFile(offerId: string) { return this.c.invoke('RequestFile', offerId) }
+  fileSignal(offerId: string, target: string, kind: string, payload: string) { return this.c.invoke<void>('FileSignal', offerId, target, kind, payload) }
   invokeCommand(channelId: string, commandId: string, args: Record<string, string>) {
     return this.c.invoke<InteractionDto>('InvokeCommand', channelId, commandId, args)
   }

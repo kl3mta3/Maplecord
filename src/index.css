@@ -84,6 +84,57 @@ input:focus, textarea:focus { border-color: var(--accent); }
 .message .meta .name { font-weight: 600; }
 .message .meta .tag { font-size: 10px; background: var(--accent); color: #fff; border-radius: 3px; padding: 0 4px; }
 .message .body { white-space: pre-wrap; word-break: break-word; }
+.message video.attachment { max-width: 420px; max-height: 320px; border-radius: 6px; margin-top: 6px; display: block; background: #000; }
+/* P2P voice channels are told apart three ways at once: slanted name, their own colour, and a tag. */
+.channel.p2p .grow { font-style: italic; color: var(--need); }
+.p2ptag { font-size: 9px; font-weight: 700; letter-spacing: 0.06em; color: #000; background: var(--need); border-radius: 3px; padding: 0 4px; line-height: 14px; font-style: normal; }
+.infotip { position: relative; display: inline-flex; vertical-align: middle; }
+.infodot { width: 16px; height: 16px; padding: 0; border-radius: 50%; border: 1px solid var(--muted); background: transparent; color: var(--muted); font-size: 11px; font-style: italic; font-weight: 700; line-height: 14px; font-family: Georgia, serif; cursor: help; }
+.infodot:hover, .infotip.open .infodot { color: var(--text); border-color: var(--text); filter: none; }
+.infobubble { display: none; position: absolute; z-index: 1200; left: 50%; bottom: calc(100% + 6px); transform: translateX(-50%); width: min(320px, 78vw); padding: 10px 12px; background: var(--bg0); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 6px 24px rgba(0,0,0,0.5); font-size: 12px; font-weight: 400; line-height: 1.45; color: var(--text); text-align: left; white-space: normal; }
+.infotip:hover .infobubble, .infotip:focus-within .infobubble, .infotip.open .infobubble { display: block; }
+
+/* Shared video: the stage above the chat, the LIVE badges in the voice roster, and the picker. */
+.stage { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px; background: #000; border-bottom: 1px solid var(--border); max-height: 60%; min-height: 0; flex: none; overflow-y: auto; }
+.stage .tile { position: relative; flex: 1 1 0; min-width: 240px; display: flex; flex-direction: column; background: #000; border-radius: 6px; overflow: hidden; border: 1px solid var(--border); }
+.stage .tile.own { flex: 0 0 220px; align-self: flex-start; }
+.stage .tile video { flex: 1; min-height: 0; width: 100%; max-height: 46vh; object-fit: contain; background: #000; display: block; }
+.stage .tile.own video { max-height: 135px; }
+.stage .tile.out { flex: 0 1 320px; }
+.stage .tile.out .waiting { min-height: 60px; }
+.stage .tile .bar button { white-space: nowrap; }
+.stage .tile video:fullscreen { max-height: none; width: 100vw; height: 100vh; }
+.stage .tile .waiting { flex: 1; min-height: 120px; display: grid; place-items: center; color: var(--muted); padding: 12px; text-align: center; }
+.stage .tile video + .waiting { position: absolute; inset: 0 0 34px 0; }
+.stage .tile .waiting.bad { color: #ffb3b3; }
+.stage .tile .bar { display: flex; align-items: center; gap: 8px; padding: 4px 8px; background: var(--bg1); font-size: 12px; min-height: 34px; }
+.stage .tile .bar .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live, .livebadge { font-size: 9px; font-weight: 700; letter-spacing: 0.06em; color: #fff; background: var(--red); border: none; border-radius: 3px; padding: 1px 5px; line-height: 14px; }
+button.livebadge { cursor: pointer; }
+button.livebadge.on { background: var(--accent); }
+.livebadge.still { opacity: 0.85; }
+.tabs { gap: 6px; }
+.sharegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; max-height: 46vh; overflow-y: auto; padding: 2px; }
+.sharetile { display: grid; gap: 6px; padding: 6px; text-align: left; background: var(--bg0); border: 1px solid var(--border); border-radius: 6px; font-weight: 500; }
+.sharetile:hover { border-color: var(--accent2); filter: none; }
+.sharetile > img, .sharetile .nothumb { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #000; border-radius: 4px; }
+.sharetile .row { gap: 6px; min-width: 0; }
+.sharetile .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.sharetile .appicon { width: 16px; height: 16px; flex: none; }
+.fileoffer { max-width: 460px; margin-top: 6px; padding: 10px; border: 1px solid var(--accent2); border-radius: 6px; background: var(--bg0); display: grid; gap: 8px; }
+.fileoffer .ico { font-size: 18px; color: var(--accent2); }
+.fileoffer .grow { min-width: 0; overflow-wrap: anywhere; }
+.fileoffer .progress { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 8px; }
+.fileoffer .progress .bar { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: var(--bg3); overflow: hidden; }
+.fileoffer .progress .bar > div { height: 100%; background: var(--accent2); transition: width 0.2s linear; }
+.fileoffer .ok { color: var(--green); }
+.fileoffer .bad { color: var(--red); }
+.filechip { display: flex; align-items: center; gap: 10px; max-width: 420px; margin-top: 6px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg0); color: inherit; text-decoration: none; }
+.filechip .grow { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filechip .ico { font-size: 18px; }
+.filechip .get { color: var(--accent2); font-weight: 600; }
+a.filechip:hover { border-color: var(--accent2); }
+.filechip.expired { color: var(--muted); border-style: dashed; }
 .message img.attachment { max-width: 420px; max-height: 320px; border-radius: 6px; margin-top: 6px; display: block; background: var(--bg0); }
 .message .card { margin-top: 4px; background: var(--bg1); border: 1px solid var(--accent); border-left-width: 4px; border-radius: 8px; padding: 8px 12px; max-width: 520px; }
 .message .card .title { font-weight: 700; color: var(--accent2); }
@@ -95,6 +146,10 @@ input:focus, textarea:focus { border-color: var(--accent); }
 .typing { padding: 0 18px 2px; height: 16px; }
 .error { margin: 2px 12px; padding: 6px 10px; background: rgba(255,0,140,0.2); border-radius: 4px; display: flex; gap: 8px; align-items: center; }
 .error .grow { white-space: pre-wrap; }
+.sysmsgs { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 1000; display: grid; gap: 6px; width: min(560px, calc(100vw - 24px)); }
+.sysmsg { display: flex; align-items: flex-start; gap: 10px; background: var(--bg3); border: 1px solid var(--accent2); border-radius: 6px; padding: 10px 12px; box-shadow: 0 6px 24px rgba(0,0,0,0.5); }
+.sysmsg .from { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent2); }
+.sysmsg .text { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .members { background: var(--bg1); border-left: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
 .members .list { flex: 1; overflow-y: auto; padding: 4px 0; }
@@ -175,6 +230,11 @@ html.overlay-mode, html.overlay-mode body, html.overlay-mode #root { background:
 
 /* ---- Rail: home button + guild icons ---- */
 .rail .guild.home { background: var(--bg3); font-size: 20px; }
+.rail .guild.home .logo { width: 34px; height: 34px; object-fit: contain; display: block; }
+/* The leaf carries its own colours, so the hover and selected states change the tile behind it rather than flooding it purple. */
+.rail .guild.home:hover, .rail .guild.home.active { background: var(--bg2); box-shadow: inset 0 0 0 2px var(--accent); }
+.login .card .brand { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.login .card .brand img { width: 84px; height: 84px; object-fit: contain; }
 .rail .guild.home.active, .rail .guild.home:hover { background: var(--green); color: #000; }
 .rail .guild img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
 .rail .sep { width: 32px; height: 2px; background: var(--bg3); border-radius: 1px; }
@@ -352,3 +412,102 @@ html.overlay-mode, html.overlay-mode body, html.overlay-mode #root { background:
 /* A picture always fills its circle exactly, whatever its own proportions (cropped, never stretched). */
 .av { overflow: visible; }
 .av img { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+/* Calls */
+.callbuttons { display: inline-flex; gap: 4px; margin-left: 8px; }
+.callbuttons button { padding: 2px 8px; font-size: 12px; }
+button.p2pcall { font-style: italic; color: var(--need); }
+.calllog { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.calllog.missed { color: var(--red); }
+
+button.danger { color: var(--red); border-color: var(--red); }
+button.danger:hover { background: var(--red); color: #fff; }
+
+/* The bottom of the sidebar: the voice box while connected, then yourself with mute, deafen and settings */
+.userpanel { padding: 8px; gap: 6px; }
+.voicebox { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.voicebox .signal { width: 30px; height: 30px; border-radius: 8px; background: var(--bg3); display: grid; place-items: center; flex-shrink: 0; }
+.voicebox .vstate { color: var(--green); font-weight: 700; }
+.voicebox.p2p .vstate { color: var(--need); }
+.voicebox .vwhere { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.voicebox .vnote { font-size: 11px; }
+.voicebox.p2p .vnote { color: var(--need); font-style: italic; }
+.voicebox .vactions { gap: 6px; }
+.voicebox .vactions .wide { flex: 1; padding: 6px 0; background: var(--bg3); border-color: transparent; border-radius: 8px; font-size: 15px; }
+.voicebox .vactions .wide.on { background: var(--accent); color: #fff; }
+.iconbtn { width: 30px; height: 30px; padding: 0; border-radius: 8px; background: transparent; border-color: transparent; display: grid; place-items: center; font-size: 15px; position: relative; flex-shrink: 0; }
+.iconbtn:hover, .caret:hover { background: var(--bg3); }
+.iconbtn.hangup { color: var(--red); }
+.iconbtn.hangup:hover { background: color-mix(in srgb, var(--red) 25%, transparent); }
+.iconbtn.off { background: color-mix(in srgb, var(--red) 28%, transparent); }
+.iconbtn.off::after { content: ''; position: absolute; left: 5px; right: 5px; top: 50%; height: 2px; background: var(--red); transform: rotate(-45deg); border-radius: 1px; }
+/* In a narrow sidebar the buttons drop below the name rather than squeezing it out. */
+.selfbar { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px; padding: 6px; border-radius: 8px; background: var(--bg2); border: 1px solid var(--border); }
+.selfbar .who { display: flex; align-items: center; gap: 8px; flex: 1 1 120px; min-width: 0; padding: 2px 4px; border-radius: 6px; cursor: pointer; }
+.selfbar .who:hover { background: rgba(255, 255, 255, .08); }
+.selfbar .self { min-width: 0; }
+.selfbar .muted { color: color-mix(in srgb, var(--text) 70%, transparent); }
+.avatarwrap { position: relative; flex-shrink: 0; display: inline-flex; }
+.statusdot { width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--bg0); background: #777788; display: inline-block; flex-shrink: 0; }
+.avatarwrap .statusdot { position: absolute; right: -2px; bottom: -2px; }
+.statusdot.online { background: var(--green); }
+.statusdot.dnd { background: var(--red); }
+.statusdot.invisible { background: transparent; box-shadow: inset 0 0 0 2px #8a8aa0; }
+.split { display: inline-flex; align-items: center; border-radius: 8px; background: rgba(0, 0, 0, .28); flex-shrink: 0; }
+.split .iconbtn { border-radius: 8px 0 0 8px; }
+.caret { width: 16px; height: 30px; padding: 0; border-radius: 0 8px 8px 0; background: transparent; border-color: transparent; font-size: 10px; color: var(--muted); }
+.userpanel .statsline { border-top: 0; padding: 0 4px; }
+.member.dnd .presence { background: var(--red); }
+
+/* Settings behind the cog */
+.usersettings { display: grid; grid-template-columns: 160px 1fr; gap: 16px; min-height: 380px; }
+.usersettings nav { display: flex; flex-direction: column; gap: 4px; border-right: 1px solid var(--border); padding-right: 12px; }
+.usersettings nav button { text-align: left; }
+.usersettings .pane { display: flex; flex-direction: column; gap: 10px; min-width: 0; max-height: 60vh; overflow-y: auto; padding-right: 4px; }
+.usersettings h4 { margin: 8px 0 0; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.usersettings h4:first-child { margin-top: 0; font-size: 16px; text-transform: none; letter-spacing: 0; color: var(--text); }
+.usersettings .choice { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.usersettings .idrow code { background: var(--bg0); padding: 3px 6px; border-radius: 4px; font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.usersettings .blockedrow { background: var(--bg2); border-radius: 6px; padding: 4px 4px 4px 10px; }
+.usersettings .themes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.themetile { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 10px; border-width: 2px; border-radius: 8px; color: #e8e8f0; font-weight: 600; }
+.themetile .swatches { display: inline-flex; gap: 4px; }
+.themetile .swatches i { width: 18px; height: 18px; border-radius: 50%; display: inline-block; }
+
+/* The panel sits under the server rail and the channel list together, as its own row of the layout. */
+.shell { grid-template-rows: minmax(0, 1fr) auto; }
+.shell > .rail { grid-area: 1 / 1 / 2 / 2; min-height: 0; overflow-y: auto; scrollbar-width: none; }
+.shell > .sidebar { grid-area: 1 / 2 / 2 / 3; }
+.shell > .userpanel { grid-area: 2 / 1 / 3 / 3; border-top: 1px solid var(--border); }
+.shell > .members { grid-area: 1 / 4 / 3 / 5; }
+.shell > :not(.rail):not(.sidebar):not(.userpanel):not(.members) { grid-column: 3; grid-row: 1 / 3; }
+.selfbar .controls { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+@media (max-width: 900px) { .shell > .members { display: none; } }
+.usersettings .themes { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); }
+.usersettings .choice { flex-wrap: wrap; }
+.usersettings .pane { overflow-x: hidden; }
+@media (max-width: 700px) {
+  .usersettings { grid-template-columns: minmax(0, 1fr); }
+  .usersettings nav { flex-direction: row; flex-wrap: wrap; border-right: 0; padding-right: 0; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+}
+
+/* The voice box as one compact row */
+.voicebox { flex-direction: row; align-items: center; gap: 6px; padding: 6px 8px; }
+.voicebox .vtext { min-width: 0; line-height: 1.25; }
+.voicebox .vstate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.voicebox .vwhere { font-size: 11px; }
+.voicebox .signal { width: 28px; height: 28px; }
+.voicebox .iconbtn { width: 28px; height: 28px; font-size: 14px; background: var(--bg3); }
+.voicebox .iconbtn.hangup { background: transparent; }
+.voicebox .iconbtn.on { background: var(--accent); color: #fff; }
+.userpanel .statsline { cursor: context-menu; }
+
+/* Folders of servers in the rail */
+.rail .folder { display: flex; flex-direction: column; align-items: center; gap: 8px; border-radius: 20px; }
+.rail .folder.open { background: color-mix(in srgb, var(--accent) 16%, var(--bg2)); padding: 2px 4px 6px; }
+.rail .folderhead { width: 48px; height: 48px; border-radius: 16px; border: none; padding: 0; background: color-mix(in srgb, var(--accent) 26%, var(--bg3)); display: grid; place-items: center; position: relative; cursor: pointer; flex-shrink: 0; }
+.rail .folderhead.active { box-shadow: inset 0 0 0 2px var(--accent); }
+.rail .folder.open .folderhead { height: 30px; background: transparent; font-size: 16px; }
+.rail .folderhead .mini { display: grid; grid-template-columns: 16px 16px; grid-auto-rows: 16px; gap: 3px; }
+.rail .folderhead .mini > * { width: 16px; height: 16px; border-radius: 50%; background: var(--bg0); font-size: 7px; font-style: normal; font-weight: 700; display: grid; place-items: center; overflow: hidden; object-fit: cover; }
+.rail .folderhead .badge { position: absolute; right: -2px; bottom: -2px; background: var(--pink); color: #fff; font-size: 10px; border-radius: 8px; min-width: 16px; height: 16px; padding: 0 4px; display: grid; place-items: center; }

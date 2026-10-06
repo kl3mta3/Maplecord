@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Store } from '../store'
-import { ChannelType, MessageKind, Permission, RollChoice, RollKind, RollRange, RpsChoice, hasPermission, type CommandDto, type MemberDto, type MessageDto, type RoleDto } from '../types'
+import type { TransferView } from '../transfer'
+import { ChannelType, MessageKind, Permission, UserStatus, RollChoice, RollKind, RollRange, RpsChoice, hasPermission, type AttachmentDto, type FileOfferDto, type CommandDto, type MemberDto, type MessageDto, type RoleDto } from '../types'
 
 const RPS_ICON: Record<number, string> = { [RpsChoice.Rock]: '✊', [RpsChoice.Paper]: '✋', [RpsChoice.Scissors]: '✌️' }
 const RPS_NAME: Record<number, string> = { [RpsChoice.Rock]: 'Rock', [RpsChoice.Paper]: 'Paper', [RpsChoice.Scissors]: 'Scissors' }
@@ -23,7 +24,7 @@ function parseRange(text: string): [number, number] | null {
   const min = parseInt(m[1], 10), max = parseInt(m[2], 10)
   return RollRange.isValid(min, max) ? [min, max] : null
 }
-import { AudioSettingsDialog, ConfirmDialog, CreateChannelDialog, NicknameDialog, PromptDialog, StartRollDialog, VoiceNoticeDialog } from './Dialogs'
+import { AllowDirectDialog, AudioSettingsDialog, ConfirmDialog, CreateChannelDialog, DirectChannelDialog, IncomingCallDialog, P2PCallDialog, NicknameDialog, PromptDialog, StartRollDialog } from './Dialogs'
 import { OverlaySettingsDialog, ServerSettingsDialog } from './Settings'
 import Friends from './Home'
 import { serverMediaUrl } from '../itemIcons'
@@ -31,14 +32,17 @@ import { isElectron } from '../platform'
 import { soundPackNames } from '../sounds'
 import { DEFAULT_NOTIFY, type NotifyLevel } from '../settings'
 import { ContextMenu, type MenuEntry } from './ContextMenu'
+import type { GuildFolder } from '../settings'
 import { Avatar, ProfileEditor, ProfilePopout, UserName } from './Profile'
-import { initials, shownName, type Appearance } from '../profile'
+import { assetUrl, initials, shownName, type Appearance } from '../profile'
+import { STATUSES, UserSettingsDialog } from './UserSettings'
 import { DropBanner, PluginsDialog } from './Plugins'
+import { SharePicker, StreamStage } from './Streams'
 
 type DialogState =
   | { kind: 'createGuild' } | { kind: 'joinGuild' } | { kind: 'createChannel'; category?: boolean } | { kind: 'startRoll'; rollKind: RollKind }
   | { kind: 'leaveGuild' } | { kind: 'kick'; member: MemberDto } | { kind: 'ban'; member: MemberDto }
-  | { kind: 'audio' } | { kind: 'overlay' } | { kind: 'server' } | { kind: 'plugins' } | { kind: 'profile' }
+  | { kind: 'audio' } | { kind: 'allowDirect' } | { kind: 'channelKind'; channelId: string; name: string; direct: boolean } | { kind: 'p2pCall'; userId: string; name: string } | { kind: 'share' } | { kind: 'settings' } | { kind: 'renameFolder'; folderId: string } | { kind: 'overlay' } | { kind: 'server' } | { kind: 'plugins' } | { kind: 'profile' }
   | { kind: 'nickname'; guildId: string; userId: string } | null
 
 export default function Shell({ store, onSignedOut }: { store: Store; onSignedOut: () => void }) {
@@ -57,17 +61,99 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   const can = (p: number) => hasPermission(myPerms, p)
   const voice = store.voice
   const speakingUsers = new Set(voice?.participants.filter(p => p.speaking).map(p => p.userId) ?? [])
-  const voiceChannelName = voice ? store.guilds.flatMap(x => x.channels).find(c => c.id === voice.channelId)?.name ?? '' : ''
+  const inCall = voice && store.call?.channelId === voice.channelId ? store.call : null
+  const voiceChannelName = voice ? (inCall ? inCall.otherName : store.guilds.flatMap(x => x.channels).find(c => c.id === voice.channelId)?.name ?? '') : ''
   const peers = voice?.participants.filter(p => p.userId !== me?.id) ?? []
-  const voiceStatus = voice?.status || (voice
-    ? `${voice.policy === 'relay' ? 'relayed' : 'direct'} · ${peers.length === 0 ? 'alone in channel' : `${peers.filter(p => p.state === 'connected').length}/${peers.length} connected`}`
-    : '')
+  // Only a P2P connection is remarked on; an ordinary one is simply a connection.
+  const voiceDetail = voice
+    ? voice.status || (inCall?.phase === 'calling' ? 'ringing…' : peers.length === 0 ? (inCall ? 'connecting…' : 'alone in channel') : `${peers.filter(p => p.state === 'connected').length}/${peers.length} connected`)
+    : ''
+  const voiceGuild = voice && !inCall ? store.guilds.find(x => x.channels.some(c => c.id === voice.channelId))?.guild.name ?? '' : ''
+  const myStatus = STATUSES.find(x => x.value === store.preferences.status) ?? STATUSES[0]
+  const banner = assetUrl(store.settings.serverUrl, store.ownLook.bannerUrl)
+  const accent = store.ownLook.accentColor
+  const selfStyle: React.CSSProperties | undefined = banner
+    ? { backgroundImage: `linear-gradient(rgba(11, 11, 16, .45), rgba(11, 11, 16, .8)), url("${banner}")`, backgroundSize: 'cover', backgroundPosition: 'center' }
+    : accent ? { background: `linear-gradient(135deg, color-mix(in srgb, ${accent} 60%, var(--bg0)), color-mix(in srgb, ${accent} 18%, var(--bg0)))` } : undefined
+  const screenSharing = store.sharing === 'screen' || store.sharing === 'window'
+  const toggleCamera = async () => {
+    if (store.sharing === 'camera') { await store.stopShare(); return }
+    if (store.sharing) await store.stopShare()
+    await store.loadStreamRules().catch(() => null)
+    await store.startShare({ type: 'camera' })
+  }
+  const statusEntries = (): MenuEntry[] => [
+    { kind: 'label', text: me ? shownName(me) : '' },
+    ...STATUSES.map(st => ({ kind: 'item', label: st.label + (st.hint ? ' · ' + st.hint.toLowerCase() : ''), icon: st.value === UserStatus.Online ? '🟢' : st.value === UserStatus.DoNotDisturb ? '⛔' : '⚪', checked: store.preferences.status === st.value, onClick: () => { void store.savePreferences({ status: st.value }) } } as MenuEntry)),
+    { kind: 'sep' },
+    { kind: 'item', label: 'Edit profile', icon: '✎', onClick: () => setDialog({ kind: 'profile' }) },
+    { kind: 'item', label: 'Copy user ID', icon: '🆔', onClick: () => { if (me) void navigator.clipboard.writeText(me.id) } },
+    { kind: 'sep' },
+    { kind: 'item', label: 'Roll buttons', checked: store.settings.showRollButtons !== false, onClick: () => store.updateSettings({ showRollButtons: store.settings.showRollButtons === false }) },
+    { kind: 'item', label: isElectron() ? 'In-game overlay' : 'In-game overlay (desktop app only)', disabled: !isElectron(), checked: isElectron() && store.settings.overlayEnabled, onClick: () => store.updateSettings({ overlayEnabled: !store.settings.overlayEnabled }) },
+  ]
+  // Servers can be grouped into folders in the rail: drag one onto another. Kept on this device.
+  const DRAG = 'text/maplecord-guild'
+  const folders = store.settings.guildFolders ?? []
+  const folderOf = (guildId: string) => folders.find(f => f.guildIds.includes(guildId)) ?? null
+  // A folder of one is not a folder, and a server we have left is not in any.
+  const saveFolders = (next: GuildFolder[]) => store.updateSettings({
+    guildFolders: next.map(f => ({ ...f, guildIds: f.guildIds.filter(id => store.guilds.some(x => x.guild.id === id)) })).filter(f => f.guildIds.length >= 2),
+  })
+  const moveToFolder = (guildId: string, folderId: string | null) =>
+    saveFolders(folders.map(f => ({ ...f, guildIds: f.id === folderId ? [...f.guildIds.filter(id => id !== guildId), guildId] : f.guildIds.filter(id => id !== guildId) })))
+  const dropOnGuild = (dragged: string, target: string) => {
+    if (dragged === target) return
+    const into = folderOf(target)
+    if (into) { moveToFolder(dragged, into.id); return }
+    saveFolders([...folders.map(f => ({ ...f, guildIds: f.guildIds.filter(id => id !== dragged) })), { id: crypto.randomUUID(), name: 'Folder', guildIds: [target, dragged], open: true }])
+  }
+  const dragged = (e: React.DragEvent) => (e.dataTransfer.types.includes(DRAG) ? e.dataTransfer.getData(DRAG) : '')
+  const allowDrop = (e: React.DragEvent) => { if (e.dataTransfer.types.includes(DRAG)) { e.preventDefault(); e.dataTransfer.dropEffect = 'move' } }
+  const folderEntries = (folderId: string): MenuEntry[] => {
+    const f = folders.find(x => x.id === folderId)
+    if (!f) return []
+    const inside = store.guilds.filter(x => f.guildIds.includes(x.guild.id))
+    return [
+      { kind: 'label', text: f.name },
+      { kind: 'item', label: 'Mark all as read', disabled: !inside.some(x => x.unread > 0), onClick: () => { for (const x of inside) store.markGuildRead(x.guild.id) } },
+      { kind: 'item', label: 'Rename folder', icon: '✎', onClick: () => setDialog({ kind: 'renameFolder', folderId }) },
+      { kind: 'sep' },
+      { kind: 'item', label: 'Ungroup', onClick: () => saveFolders(folders.filter(x => x.id !== folderId)) },
+    ]
+  }
+
+  const rollEntries = (): MenuEntry[] => [
+    { kind: 'label', text: 'Rolls' },
+    { kind: 'item', label: 'Roll buttons', checked: store.settings.showRollButtons !== false, onClick: () => store.updateSettings({ showRollButtons: store.settings.showRollButtons === false }) },
+    { kind: 'item', label: isElectron() ? 'In-game overlay' : 'In-game overlay (desktop app only)', disabled: !isElectron(), checked: isElectron() && store.settings.overlayEnabled, onClick: () => store.updateSettings({ overlayEnabled: !store.settings.overlayEnabled }) },
+  ]
+  const deviceEntries = (kind: 'audioinput' | 'audiooutput'): MenuEntry[] => {
+    const chosen = kind === 'audioinput' ? store.settings.audioInputDeviceId : store.settings.audioOutputDeviceId
+    const pick = (id: string | null) => void store.setAudioDevices(kind === 'audioinput' ? id : store.settings.audioInputDeviceId, kind === 'audiooutput' ? id : store.settings.audioOutputDeviceId)
+    const list = devices.filter(d => d.kind === kind && d.deviceId && d.deviceId !== 'default' && d.deviceId !== 'communications')
+    return [
+      { kind: 'label', text: kind === 'audioinput' ? 'Input device' : 'Output device' },
+      { kind: 'item', label: 'System default', checked: !chosen, onClick: () => pick(null) },
+      ...list.map((d, i) => ({ kind: 'item', label: d.label || `${kind === 'audioinput' ? 'Microphone' : 'Speakers'} ${i + 1}`, checked: chosen === d.deviceId, onClick: () => pick(d.deviceId) } as MenuEntry)),
+      ...(kind === 'audiooutput' ? [{ kind: 'slider', label: 'Output volume', min: 0, max: 100, step: 5, value: Math.round((store.settings.outputVolume ?? 1) * 100), format: (v: number) => v + '%', onChange: (v: number) => store.updateSettings({ outputVolume: v / 100 }) } as MenuEntry] : []),
+      { kind: 'sep' },
+      { kind: 'item', label: 'Voice settings', icon: '⚙', onClick: () => setDialog({ kind: 'audio' }) },
+    ]
+  }
   const colorOf = (userId: string) => (g ? roleColor(userId, g) : undefined)
-  const desktop = isElectron()
 
   // ---- Right-click menus ------------------------------------------------------
   // What they change about other people and servers is yours alone and kept on this device; nobody is told.
-  const [menu, setMenu] = useState<({ kind: 'guild'; guildId: string } | { kind: 'user'; userId: string; username: string }) & { x: number; y: number } | null>(null)
+  const [menu, setMenu] = useState<({ kind: 'guild'; guildId: string } | { kind: 'user'; userId: string; username: string } | { kind: 'channel'; channelId: string; name: string; direct: boolean } | { kind: 'status' } | { kind: 'mic' } | { kind: 'speaker' } | { kind: 'stats' } | { kind: 'folder'; folderId: string }) & { x: number; y: number } | null>(null)
+  /** Microphones and speakers, looked up each time one of the little menus beside the mute buttons opens. */
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
+  const openPanelMenu = (e: React.MouseEvent, kind: 'status' | 'mic' | 'speaker') => {
+    e.preventDefault(); e.stopPropagation()
+    const box = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    if (kind !== 'status') void navigator.mediaDevices?.enumerateDevices().then(setDevices).catch(() => setDevices([]))
+    setMenu({ kind, x: box.left, y: box.top - 8 })
+  }
   const openGuildMenu = (e: React.MouseEvent, guildId: string) => { e.preventDefault(); e.stopPropagation(); setMenu({ kind: 'guild', guildId, x: e.clientX, y: e.clientY }) }
   const openUserMenu = (e: React.MouseEvent, userId: string, username: string) => { e.preventDefault(); e.stopPropagation(); setMenu({ kind: 'user', userId, username, x: e.clientX, y: e.clientY }) }
   /** The profile card shown when you click someone. */
@@ -84,7 +170,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
     return known ? shownName(known) : fallback
   }
   const prefsOf = (userId: string) => store.settings.users?.[userId] ?? {}
-  const ignored = (userId: string) => !!prefsOf(userId).ignored
+  const ignored = (userId: string) => !!prefsOf(userId).ignored || store.blocked.some(u => u.id === userId)
   const requests = store.friends.incoming.filter(f => !ignored(f.user.id))
 
   const guildEntries = (guildId: string): MenuEntry[] => {
@@ -99,6 +185,9 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
     return [
       { kind: 'label', text: x.guild.name },
       { kind: 'item', label: 'Mark as read', disabled: !hasUnread, onClick: () => store.markGuildRead(guildId) },
+      ...(folderOf(guildId)
+        ? [{ kind: 'item', label: `Take out of "${folderOf(guildId)!.name}"`, icon: '📁', onClick: () => moveToFolder(guildId, null) } as MenuEntry]
+        : folders.map(f => ({ kind: 'item', label: `Put in "${f.name}"`, icon: '📁', onClick: () => moveToFolder(guildId, f.id) } as MenuEntry))),
       ...(allowed(Permission.CreateInvites) ? [{ kind: 'item', label: 'Invite people', icon: '✉', onClick: () => { void store.createInvite(guildId) } } as MenuEntry] : []),
       ...(me ? [{ kind: 'item', label: 'Change nickname', onClick: () => { store.selectGuild(guildId); setDialog({ kind: 'nickname', guildId, userId: me.id }) } } as MenuEntry] : []),
       { kind: 'sep' },
@@ -138,6 +227,11 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
     ]
     if (!isBot) {
       entries.push({ kind: 'item', label: 'Message', icon: '💬', onClick: () => { void store.openDm(userId) } })
+      // Calls are between friends. An ordinary call goes through the relay; a P2P one is asked for by name and confirmed.
+      if (isFriend && !store.call) {
+        entries.push({ kind: 'item', label: 'Call', icon: '📞', onClick: () => { void store.startCall(userId, false) } })
+        if (store.allowDirect) entries.push({ kind: 'item', label: 'P2P call…', icon: '📞', onClick: () => setDialog({ kind: 'p2pCall', userId, name: username }) })
+      }
       entries.push(isFriend ? { kind: 'item', label: 'Remove friend', onClick: () => { void store.removeFriend(userId) } }
         : theyAsked ? { kind: 'item', label: 'Accept friend request', icon: '➕', onClick: () => { void store.addFriend(userId) } }
         : iAsked ? { kind: 'item', label: 'Cancel friend request', onClick: () => { void store.removeFriend(userId) } }
@@ -147,6 +241,9 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       entries.push({ kind: 'slider', label: 'Voice volume', min: 0, max: 200, step: 5, value: Math.round((prefs.volume ?? 1) * 100), format: v => v + '%', onChange: v => store.setUserPrefs(userId, { volume: v / 100 }) })
     }
     entries.push({ kind: 'item', label: 'Ignore', checked: !!prefs.ignored, onClick: () => store.setUserPrefs(userId, { ignored: !prefs.ignored }) })
+    const isBlocked = store.blocked.some(u => u.id === userId)
+    if (!isBot) entries.push({ kind: 'item', label: isBlocked ? 'Unblock' : 'Block', icon: '🚫', danger: !isBlocked, onClick: () => { void store.setBlocked(userId, !isBlocked) } })
+    entries.push({ kind: 'item', label: 'Copy user ID', icon: '🆔', onClick: () => { void navigator.clipboard.writeText(userId) } })
     if (member && g && userId !== g.guild.ownerId && can(Permission.ManageGuild)) {
       entries.push({ kind: 'sep' })
       entries.push({ kind: 'item', label: 'Change nickname', onClick: () => setDialog({ kind: 'nickname', guildId: g.guild.id, userId }) })
@@ -170,19 +267,50 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   return (
     <div className="shell">
       {/* ===== Guild rail ===== */}
-      <div className="rail">
+      <div className="rail" onDragOver={allowDrop} onDrop={e => { const id = dragged(e); if (id) { e.preventDefault(); moveToFolder(id, null) } }}>
         <button className={'guild home' + (store.home ? ' active' : '')} title="Friends & direct messages" onClick={store.openHome}>
-          🏠{dmUnreadTotal > 0 && <span className="badge">{dmUnreadTotal}</span>}
+          <img className="logo" src={import.meta.env.BASE_URL + 'logo.png'} alt="Home" draggable={false} />{dmUnreadTotal > 0 && <span className="badge">{dmUnreadTotal}</span>}
         </button>
         <div className="sep" />
-        {store.guilds.map(x => (
-          <button key={x.guild.id} className={'guild' + (x.guild.id === g?.guild.id ? ' active' : '') + (store.settings.guilds?.[x.guild.id]?.muted ? ' muted' : '')}
-            title={x.guild.name + (store.settings.guilds?.[x.guild.id]?.muted ? ' (muted)' : '') + ' — right-click for options'}
-            onClick={() => store.selectGuild(x.guild.id)} onContextMenu={e => openGuildMenu(e, x.guild.id)}>
-            {x.guild.iconUrl ? <img src={x.guild.iconUrl} alt="" /> : initials(x.guild.name)}
-            {x.unread > 0 && <span className="badge">{x.unread}</span>}
-          </button>
-        ))}
+        {(() => {
+          const serverButton = (x: (typeof store.guilds)[number]) => (
+            <button key={x.guild.id} draggable className={'guild' + (x.guild.id === g?.guild.id ? ' active' : '') + (store.settings.guilds?.[x.guild.id]?.muted ? ' muted' : '')}
+              title={x.guild.name + (store.settings.guilds?.[x.guild.id]?.muted ? ' (muted)' : '') + ' — right-click for options · drag onto another server to make a folder'}
+              onClick={() => store.selectGuild(x.guild.id)} onContextMenu={e => openGuildMenu(e, x.guild.id)}
+              onDragStart={e => { e.dataTransfer.setData(DRAG, x.guild.id); e.dataTransfer.effectAllowed = 'move' }}
+              onDragOver={allowDrop} onDrop={e => { const id = dragged(e); if (id) { e.preventDefault(); e.stopPropagation(); dropOnGuild(id, x.guild.id) } }}>
+              {x.guild.iconUrl ? <img src={x.guild.iconUrl} alt="" draggable={false} /> : initials(x.guild.name)}
+              {x.unread > 0 && <span className="badge">{x.unread}</span>}
+            </button>
+          )
+          // A folder is drawn where its first server would be; servers in no folder stay where they were.
+          const drawn = new Set<string>()
+          return store.guilds.map(x => {
+            const f = folderOf(x.guild.id)
+            if (!f) return serverButton(x)
+            if (drawn.has(f.id)) return null
+            drawn.add(f.id)
+            const inside = store.guilds.filter(y => f.guildIds.includes(y.guild.id))
+            const unread = inside.reduce((n, y) => n + y.unread, 0)
+            return (
+              <div key={f.id} className={'folder' + (f.open ? ' open' : '')} onDragOver={allowDrop}
+                onDrop={e => { const id = dragged(e); if (id) { e.preventDefault(); e.stopPropagation(); moveToFolder(id, f.id) } }}>
+                <button className={'folderhead' + (!f.open && inside.some(y => y.guild.id === g?.guild.id) ? ' active' : '')}
+                  title={f.name + (f.open ? ' — click to close' : ' — click to open') + ' · right-click for options'}
+                  onClick={() => saveFolders(folders.map(y => (y.id === f.id ? { ...y, open: !y.open } : y)))}
+                  onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setMenu({ kind: 'folder', folderId: f.id, x: e.clientX, y: e.clientY }) }}>
+                  {f.open ? '📂' : (
+                    <span className="mini">
+                      {inside.slice(0, 4).map(y => (y.guild.iconUrl ? <img key={y.guild.id} src={y.guild.iconUrl} alt="" draggable={false} /> : <i key={y.guild.id}>{initials(y.guild.name)}</i>))}
+                    </span>
+                  )}
+                  {!f.open && unread > 0 && <span className="badge">{unread}</span>}
+                </button>
+                {f.open && inside.map(serverButton)}
+              </div>
+            )
+          })
+        })()}
         <div className="spacer" />
         <button className="guild" title="Create a server" onClick={() => setDialog({ kind: 'createGuild' })}>+</button>
         <button className="guild" title="Join with an invite code" onClick={() => setDialog({ kind: 'joinGuild' })}>⇲</button>
@@ -265,12 +393,19 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
                 : (
                   <div key={c.id}>
                     <div
-                      className={'channel' + (c.id === store.selectedChannel?.id ? ' active' : '') + ((g.channelUnread[c.id] ?? 0) > 0 ? ' unread' : '')}
+                      className={'channel' + (c.id === store.selectedChannel?.id ? ' active' : '') + ((g.channelUnread[c.id] ?? 0) > 0 ? ' unread' : '') + (c.directSince ? ' p2p' : '')}
                       style={c.id === voice?.channelId ? { color: 'var(--green)' } : undefined}
-                      title={c.type === ChannelType.Voice ? 'Click to join voice and open its chat' : undefined}
-                      onClick={() => c.type === ChannelType.Text ? store.selectChannel(c.id) : openVoice(c.id)}>
+                      title={c.type !== ChannelType.Voice ? undefined : c.directSince
+                        ? 'P2P voice channel: people in it connect straight to each other and can find each other\u2019s IP address. Click to join (you are asked first).'
+                        : 'Click to join voice and open its chat'}
+                      onClick={() => c.type === ChannelType.Text ? store.selectChannel(c.id) : openVoice(c.id)}
+                      onContextMenu={c.type === ChannelType.Voice && can(Permission.ManageChannels) && can(Permission.ManageDirectChannels) ? e => {
+                        e.preventDefault()
+                        setMenu({ kind: 'channel', channelId: c.id, name: c.name, direct: !!c.directSince, x: e.clientX, y: e.clientY })
+                      } : undefined}>
                       <span className="muted">{c.type === ChannelType.Text ? '#' : '🔊'}</span>
                       <span className="grow" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                      {c.directSince && <span className="p2ptag">P2P</span>}
                       {(g.channelUnread[c.id] ?? 0) > 0 && <span className="badge">{g.channelUnread[c.id]}</span>}
                     </div>
                     {c.type === ChannelType.Voice && (() => {
@@ -282,6 +417,18 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
                             <div key={p.connectionId} className={'u' + (p.userId === me?.id ? ' me' : '')} title="Right-click for volume and more" onContextMenu={e => openUserMenu(e, p.userId, p.username)}>
                               <span className={'dot' + (p.speaking ? ' speaking' : '')} />
                               <UserName who={store.appearanceOf(p.userId)} label={nameIn(p.userId, p.username)} roleColor={p.speaking ? '#ffffff' : colorOf(p.userId)} onClick={e => openCard(e, p.userId, p.username)} />
+                              {p.stream && (() => {
+                                // In my own channel a LIVE badge is a button: watch it, or stop watching.
+                                const mineHere = voice?.channelId === c.id
+                                const isMe = p.connectionId === voice?.participants.find(x => x.userId === me?.id)?.connectionId
+                                const on = store.watching.some(w => w.streamer === p.connectionId)
+                                const count = store.viewerCounts[p.connectionId]
+                                const what = p.stream === 'camera' ? 'camera' : p.stream === 'screen' ? 'screen' : 'app'
+                                return mineHere && !isMe
+                                  ? <button className={'livebadge' + (on ? ' on' : '')} title={on ? 'Stop watching' : `Watch their ${what}${count ? ` (${count} watching)` : ''}`}
+                                      onClick={() => void (on ? store.unwatchStream(p.connectionId) : store.watchStream(p.connectionId))}>{on ? 'WATCHING' : 'LIVE'}</button>
+                                  : <span className="livebadge still" title={mineHere ? `You are sharing your ${what}` : `Sharing their ${what}. Join the channel to watch.`}>LIVE</span>
+                              })()}
                               {p.muted && <span title="Microphone muted">🔇</span>}
                               {p.userId !== me?.id && prefsOf(p.userId).muted && <span title="You muted them">🔕</span>}
                               {voice?.channelId === c.id && p.userId !== me?.id && p.state !== 'connected' && <span style={{ fontSize: 10 }}>{p.state}</span>}
@@ -296,54 +443,61 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           </>
         )}
 
-        <div className="userpanel">
-          <div className="row">
-            <Avatar who={mine} name={me ? shownName(me) : '?'} serverUrl={serverUrl} size={34} animate="always" speaking={store.isSpeaking} title="Your profile · right-click for more"
-              onClick={e => me && openCard(e, me.id, shownName(me))} onContextMenu={e => me && openUserMenu(e, me.id, shownName(me))} />
-            <div className="grow self" title="Your profile · right-click for more" onClick={e => me && openCard(e, me.id, shownName(me))} onContextMenu={e => me && openUserMenu(e, me.id, shownName(me))}>
+      </div>
+
+      {/* ===== Yourself: voice, mute, settings. Spans the server rail and the channel list ===== */}
+      <div className="userpanel">
+        {voice && (
+          <div className={'voicebox' + (voice.directSince ? ' p2p' : '')}>
+            <span className="signal">{inCall ? '📞' : '📶'}</span>
+            <div className="grow vtext" title={(voiceGuild ? voiceGuild + ' / ' : '') + voiceChannelName + (voiceDetail ? ' · ' + voiceDetail : '')}>
+              <div className="vstate">{voice.directSince ? 'P2P · your IP is visible' : inCall ? (inCall.phase === 'calling' ? 'Calling…' : 'In a call') : 'Voice connected'}</div>
+              <div className="muted vwhere">{voiceGuild ? voiceGuild + ' / ' : ''}{voiceChannelName}{voiceDetail ? ' · ' + voiceDetail : ''}</div>
+            </div>
+            <button className={'iconbtn' + (store.sharing === 'camera' ? ' on' : '')} onClick={() => void toggleCamera()} title={store.sharing === 'camera' ? 'Turn your camera off' : 'Turn your camera on'}>📷</button>
+            <button className={'iconbtn' + (screenSharing ? ' on' : '')} title={screenSharing ? 'Stop sharing' : 'Share an app or a screen'}
+              onClick={() => { if (screenSharing) void store.stopShare(); else { void store.loadStreamRules().catch(() => null); setDialog({ kind: 'share' }) } }}>🖥</button>
+            <button className="iconbtn hangup" onClick={store.leaveVoice} title={inCall ? (inCall.phase === 'calling' ? 'Cancel the call' : 'Hang up') : 'Disconnect'}><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M3.5 14.5c5-5.5 12-5.5 17 0" stroke="currentColor" strokeWidth="4.5" strokeLinecap="round" fill="none" /></svg></button>
+          </div>
+        )}
+        <div className="selfbar" style={selfStyle}>
+          <div className="who" title="Status, profile and more" onClick={e => openPanelMenu(e, 'status')} onContextMenu={e => me && openUserMenu(e, me.id, shownName(me))}>
+            <span className="avatarwrap">
+              <Avatar who={mine} name={me ? shownName(me) : '?'} serverUrl={serverUrl} size={34} animate="always" speaking={store.isSpeaking} />
+              <span className={'statusdot ' + (store.status === 'Connected' ? myStatus.dot : 'invisible')} />
+            </span>
+            <div className="grow self">
               <div className="selfname"><UserName who={mine} label={me ? nameIn(me.id, shownName(me)) : ''} /></div>
-              <div className="muted">{me?.displayName ? '@' + me.username + ' · ' : ''}{store.status}</div>
+              <div className="muted">{store.status === 'Connected' ? myStatus.label : store.status}</div>
             </div>
-            <button className="subtle" onClick={async () => { await store.signOut(); onSignedOut() }}>Sign out</button>
           </div>
-          {voice && (
-            <div className="voicepanel">
-              <div className="grow" style={{ overflow: 'hidden' }}>
-                <div className="name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🔊 {voiceChannelName}</div>
-                <div className="muted" style={{ fontSize: 10 }}>{voiceStatus}</div>
-              </div>
-              <button className="subtle" onClick={store.leaveVoice}>Leave</button>
-            </div>
-          )}
-          <div className="row">
-            <button className="subtle" style={store.isMuted ? { color: 'var(--red)' } : undefined} onClick={store.toggleMute} title="Mute / unmute microphone">{store.isMuted ? '🔇 Unmute' : '🎙 Mute'}</button>
-            <span className="grow" />
-            <button className="subtle" onClick={() => setDialog({ kind: 'audio' })} title="Microphone, speakers, privacy">🎧 Audio</button>
-          </div>
-          <div className="statsline" title="Your roll stats on this device">
-            <span>Avg {s.totalRolls ? (s.rollSum / s.totalRolls).toFixed(1) : '0.0'}</span>
-            <span>W/L {s.losses ? (s.wins / s.losses).toFixed(2) : s.wins}</span>
-            <span>100s {s.perfect100s}</span>
-            <span>1s {s.ones}</span>
-            <span>Rolls {s.totalRolls}</span>
-          </div>
-          <div className="toggles">
-            <label className={'switch' + (desktop ? '' : ' disabled')} title={desktop ? 'Keep the small roll overlay on top of your game' : 'The in-game overlay needs the desktop app'}>
-              <input type="checkbox" disabled={!desktop} checked={desktop && store.settings.overlayEnabled} onChange={e => store.updateSettings({ overlayEnabled: e.target.checked })} />
-              <span className="track" /><span>Overlay</span>
-            </label>
-            <label className="switch" title="Show Roll, Need / Greed, Flip and RPS at the top of the chat. Slash commands, the overlay and hotkeys work either way.">
-              <input type="checkbox" checked={store.settings.showRollButtons !== false} onChange={e => store.updateSettings({ showRollButtons: e.target.checked })} />
-              <span className="track" /><span>Roll buttons</span>
-            </label>
-          </div>
+          <span className="controls">
+          <span className="split">
+            <button className={'iconbtn' + (store.isMuted ? ' off' : '')} onClick={store.toggleMute} title={store.isMuted ? 'Unmute your microphone' : 'Mute your microphone'}>🎙</button>
+            <button className="caret" onClick={e => openPanelMenu(e, 'mic')} title="Choose a microphone">▾</button>
+          </span>
+          <span className="split">
+            <button className={'iconbtn' + (store.deafened ? ' off' : '')} onClick={store.toggleDeafen} title={store.deafened ? 'Hear people again' : 'Stop hearing everyone'}>🎧</button>
+            <button className="caret" onClick={e => openPanelMenu(e, 'speaker')} title="Choose speakers and volume">▾</button>
+          </span>
+          <button className="iconbtn" onClick={() => setDialog({ kind: 'settings' })} title="Settings">⚙</button>
+          </span>
+        </div>
+        <div className="statsline" title="Your roll stats on this device · right-click for options"
+          onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setMenu({ kind: 'stats', x: e.clientX, y: e.clientY }) }}>
+          <span>Avg {s.totalRolls ? (s.rollSum / s.totalRolls).toFixed(1) : '0.0'}</span>
+          <span>W/L {s.losses ? (s.wins / s.losses).toFixed(2) : s.wins}</span>
+          <span>100s {s.perfect100s}</span>
+          <span>1s {s.ones}</span>
+          <span>Rolls {s.totalRolls}</span>
         </div>
       </div>
 
       {/* ===== Chat / friends ===== */}
       {store.home && !store.selectedChannel
         ? <Friends store={store} />
-        : <Chat store={store} openRollDialog={(rollKind: RollKind) => setDialog({ kind: 'startRoll', rollKind })} canRoll={g ? can(Permission.StartRolls) : !!store.selectedDm} colorOf={colorOf} onUserMenu={openUserMenu} isIgnored={ignored} onUserCard={openCard} nameIn={nameIn} />}
+        : <Chat store={store} openRollDialog={(rollKind: RollKind) => setDialog({ kind: 'startRoll', rollKind })} canRoll={g ? can(Permission.StartRolls) : !!store.selectedDm} colorOf={colorOf}
+          onCall={(userId, name, direct) => { if (direct) setDialog({ kind: 'p2pCall', userId, name }); else void store.startCall(userId, false) }} onUserMenu={openUserMenu} isIgnored={ignored} onUserCard={openCard} nameIn={nameIn} />}
 
       {/* ===== Members ===== */}
       <div className="members">
@@ -352,7 +506,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
             <div className="header">Friends <span className="muted">{store.friends.friends.filter(f => f.online).length} online</span></div>
             <div className="list">
               {[...store.friends.friends].sort((a, b) => Number(b.online) - Number(a.online) || a.user.username.localeCompare(b.user.username)).map(f => (
-                <div key={f.user.id} className={'member' + (f.online ? ' online' : ' offline')} title="Click to message · right-click for options" onClick={() => store.openDm(f.user.id)} onContextMenu={e => openUserMenu(e, f.user.id, shownName(f.user))}>
+                <div key={f.user.id} className={'member' + (f.online ? ' online' : ' offline') + (f.online && store.dndUsers.has(f.user.id) ? ' dnd' : '')} title="Click to message · right-click for options" onClick={() => store.openDm(f.user.id)} onContextMenu={e => openUserMenu(e, f.user.id, shownName(f.user))}>
                   <div className="row" style={{ gap: 0 }}><Avatar who={f.user} name={shownName(f.user)} serverUrl={serverUrl} size={28} /><div className="presence" /></div>
                   <div className="grow" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><UserName who={store.appearanceOf(f.user.id)} label={shownName(f.user)} /></div>
                 </div>
@@ -364,7 +518,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
             <div className="header">Members <span className="muted">{g?.members.filter(m => m.online).length ?? 0} online</span></div>
             <div className="list">
               {g && [...g.members].sort((a, b) => Number(b.online) - Number(a.online) || a.username.localeCompare(b.username)).map(m => (
-                <div key={m.userId} className={'member' + (m.online ? ' online' : ' offline') + (ignored(m.userId) ? ' ignoredmember' : '')} title={'@' + m.username + ' — click for profile, right-click for options'}
+                <div key={m.userId} className={'member' + (m.online ? ' online' : ' offline') + (m.online && store.dndUsers.has(m.userId) ? ' dnd' : '') + (ignored(m.userId) ? ' ignoredmember' : '')} title={'@' + m.username + ' — click for profile, right-click for options'}
                   onClick={e => openCard(e, m.userId, memberName(m))} onContextMenu={e => openUserMenu(e, m.userId, memberName(m))}>
                   <div className="row" style={{ gap: 0 }}><Avatar who={m} name={memberName(m)} serverUrl={serverUrl} size={28} speaking={speakingUsers.has(m.userId)} /><div className="presence" /></div>
                   <div className="grow" style={{ overflow: 'hidden' }}>
@@ -380,7 +534,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
 
       {dialog?.kind === 'createGuild' && <PromptDialog title="Create a server" label="Server name" onSubmit={store.createGuild} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'joinGuild' && <PromptDialog title="Join a server" label="Invite code" onSubmit={store.joinGuild} onClose={() => setDialog(null)} />}
-      {dialog?.kind === 'createChannel' && g && <CreateChannelDialog initialType={dialog.category ? ChannelType.Category : ChannelType.Text} categories={g.channels.filter(c => c.type === ChannelType.Category)} onSubmit={store.createChannel} onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'createChannel' && g && <CreateChannelDialog initialType={dialog.category ? ChannelType.Category : ChannelType.Text} categories={g.channels.filter(c => c.type === ChannelType.Category)} canDirect={can(Permission.ManageDirectChannels)} onSubmit={store.createChannel} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'startRoll' && <StartRollDialog kind={dialog.rollKind} onSubmit={store.startRoll} onClose={() => setDialog(null)} searchItems={store.plugins.some(x => x.items.length > 0) ? store.searchItems : undefined} />}
       {dialog?.kind === 'plugins' && <PluginsDialog store={store} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'leaveGuild' && g && (
@@ -401,12 +555,42 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           nickname={g?.members.find(m => m.userId === card.userId)?.nickname ?? null} serverName={g?.guild.name}
           roles={g ? (g.members.find(m => m.userId === card.userId)?.roleIds ?? []).map(id => g.roles?.find(r => r.id === id)).filter((r): r is RoleDto => !!r && !r.isEveryone).sort((a, b) => b.position - a.position) : undefined} />
       )}
-      {menu && <ContextMenu x={menu.x} y={menu.y} entries={menu.kind === 'guild' ? guildEntries(menu.guildId) : userEntries(menu.userId, menu.username)} onClose={() => setMenu(null)} />}
+      {menu && <ContextMenu x={menu.x} y={menu.y} entries={menu.kind === 'guild' ? guildEntries(menu.guildId) : menu.kind === 'user' ? userEntries(menu.userId, menu.username) : menu.kind === 'stats' ? rollEntries() : menu.kind === 'folder' ? folderEntries(menu.folderId) : menu.kind === 'status' ? statusEntries() : menu.kind === 'mic' ? deviceEntries('audioinput') : menu.kind === 'speaker' ? deviceEntries('audiooutput') : [
+        { kind: 'label', text: menu.name },
+        { kind: 'item', label: menu.direct ? 'Make it a relayed channel' : 'Make it a P2P channel', icon: '⇄', onClick: () => setDialog({ kind: 'channelKind', channelId: menu.channelId, name: menu.name, direct: !menu.direct }) },
+      ]} onClose={() => setMenu(null)} />}
       {dialog?.kind === 'kick' && <ConfirmDialog title={`Kick ${dialog.member.username}?`} message="They can rejoin with an invite." onConfirm={() => store.kickMember(dialog.member)} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'ban' && <ConfirmDialog title={`Ban ${dialog.member.username}?`} message="They will not be able to rejoin." onConfirm={() => store.banMember(dialog.member)} onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'share' && <SharePicker store={store} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'audio' && (
-        <AudioSettingsDialog inputId={store.settings.audioInputDeviceId} outputId={store.settings.audioOutputDeviceId} protectIp={store.settings.protectIp}
-          onSave={store.setAudioDevices} onProtectIp={store.setProtectIp} onClose={() => setDialog(null)} />
+        <AudioSettingsDialog inputId={store.settings.audioInputDeviceId} outputId={store.settings.audioOutputDeviceId} allowDirect={store.allowDirect}
+          onSave={store.setAudioDevices} onClose={() => setDialog(null)}
+          onAllowDirect={allow => {
+            // Saying no is immediate. Saying yes goes through signing in again.
+            if (allow) setDialog({ kind: 'allowDirect' })
+            else void store.setAllowDirect(false).catch(e => store.setError(e instanceof Error ? e.message : String(e)))
+          }} />
+      )}
+      {dialog?.kind === 'allowDirect' && <AllowDirectStep store={store} onClose={() => setDialog({ kind: 'audio' })} />}
+      {dialog?.kind === 'channelKind' && (
+        <ConfirmDialog title={dialog.direct ? `Make ${dialog.name} a P2P channel?` : `Make ${dialog.name} a relayed channel?`}
+          message={dialog.direct
+            ? 'People in it will connect straight to each other and be able to find each other\u2019s IP address. Everyone in the call now is taken out of it; to come back they must allow P2P and accept a warning.'
+            : 'It becomes an ordinary voice channel again. Everyone in the call now is taken out of it and can simply rejoin.'}
+          onConfirm={() => void store.setChannelDirect(dialog.channelId, dialog.direct)} onClose={() => setDialog(null)} />
+      )}
+      {dialog?.kind === 'p2pCall' && <P2PCallDialog name={dialog.name} onCall={() => void store.startCall(dialog.userId, true)} onClose={() => setDialog(null)} />}
+      {store.call?.phase === 'incoming' && (
+        <IncomingCallDialog name={store.call.otherName} direct={store.call.direct} allowed={!store.call.direct || store.allowDirect}
+          onAnswer={() => void store.answerCall()} onDecline={() => void store.declineCall()} onSettings={() => setDialog({ kind: 'audio' })} />
+      )}
+      {dialog?.kind === 'renameFolder' && (
+        <PromptDialog title="Rename folder" label="Folder name" onClose={() => setDialog(null)}
+          onSubmit={name => saveFolders(folders.map(f => (f.id === dialog.folderId ? { ...f, name: name.slice(0, 40) } : f)))} />
+      )}
+      {dialog?.kind === 'settings' && (
+        <UserSettingsDialog store={store} onOpen={what => setDialog({ kind: what })} onClose={() => setDialog(null)}
+          onSignOut={async () => { setDialog(null); await store.signOut(); onSignedOut() }} />
       )}
       {dialog?.kind === 'overlay' && (
         <OverlaySettingsDialog settings={store.settings} onChange={store.updateSettings} packs={soundPackNames(store.soundPacks)}
@@ -417,14 +601,19 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           onRename={store.renameGuild} onIcon={store.setGuildIcon} onCreateRole={store.createRole} onUpdateRole={store.updateRole} onDeleteRole={store.deleteRole} onSetMemberRoles={store.setMemberRoles}
           onClose={() => setDialog(null)} />
       )}
-      {store.voiceNotice && <VoiceNoticeDialog reason={store.voiceNotice.reason} onContinue={store.acknowledgeVoiceNotice} onClose={store.dismissVoiceNotice} />}
+      {store.directPrompt && (
+        <DirectChannelDialog kind={store.directPrompt.kind}
+          channelName={store.guilds.flatMap(x => x.channels).find(c => c.id === store.directPrompt?.channelId)?.name ?? 'This channel'}
+          onJoin={() => void store.confirmDirect()} onSettings={() => setDialog({ kind: 'audio' })} onClose={store.dismissDirectPrompt} />
+      )}
     </div>
   )
 }
 
 // ---- Chat column ------------------------------------------------------------
 
-function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, onUserCard, nameIn }: {
+function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, onUserCard, nameIn, onCall }: {
+  onCall: (userId: string, name: string, direct: boolean) => void
   store: Store; openRollDialog: (kind: RollKind) => void; canRoll: boolean; colorOf: (userId: string) => string | undefined
   onUserMenu: (e: React.MouseEvent, userId: string, username: string) => void; isIgnored: (userId: string) => boolean
   onUserCard: (e: React.MouseEvent, userId: string, name: string) => void; nameIn: (userId: string, fallback: string) => string
@@ -434,6 +623,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
   const [text, setText] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const directRef = useRef<HTMLInputElement>(null)
   const channel = store.selectedChannel
   const party = store.partyChannel
   const noParty = 'Join a voice channel first: rolls go to the people in voice with you'
@@ -453,6 +643,12 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
    * never a second "Roll" that means something else. Otherwise left-click starts an instant roll with no item and
    * right-click (or the *cust commands) opens the customize dialog.
    */
+  // What the ⇄ button can really do here: the size limit is the server's, and only P2P between friends goes past it.
+  const limits = store.transferLimits
+  const directSendTitle = 'Send a file from your computer to people who are online. It is not kept on the server.'
+    + (limits && limits.maxRelayedBytes > 0
+      ? ` Up to ${fileSize(limits.maxRelayedBytes)}${limits.maxDirectBytes === 0 || limits.maxDirectBytes > limits.maxRelayedBytes ? '; larger between friends who both allow P2P' : ''}.`
+      : '')
   const live = store.activeRoll && !store.activeRoll.result ? store.activeRoll.session : null
   const quickRoll = (kind: RollKind) => {
     if (live) {
@@ -494,14 +690,21 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
 
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault()
-    for (const f of Array.from(e.dataTransfer.files)) if (f.type.startsWith('image/')) await store.sendImage(f)
+    for (const f of Array.from(e.dataTransfer.files)) await store.sendFile(f)
   }
 
   return (
     <div className="chat" onDragOver={e => e.preventDefault()} onDrop={onDrop}>
+      <StreamStage store={store} nameOf={nameIn} />
       <div className="header">
         <span className="muted">{channel?.type === ChannelType.Voice ? '🔊' : channel?.type === ChannelType.DirectMessage ? '@' : '#'}</span><span>{channel?.name ?? 'Pick a channel'}</span>
-        {channel?.type === ChannelType.DirectMessage && <span style={{ width: 8, height: 8, borderRadius: 4, background: store.selectedDm?.online ? 'var(--green)' : '#555566', display: 'inline-block' }} title={store.selectedDm?.online ? 'Online' : 'Offline'} />}
+        {channel?.type === ChannelType.DirectMessage && <span style={{ width: 8, height: 8, borderRadius: 4, background: !store.selectedDm?.online ? '#555566' : store.dndUsers.has(store.selectedDm.other.id) ? 'var(--red)' : 'var(--green)', display: 'inline-block' }} title={!store.selectedDm?.online ? 'Offline' : store.dndUsers.has(store.selectedDm.other.id) ? 'Do not disturb' : 'Online'} />}
+        {channel?.type === ChannelType.DirectMessage && store.selectedDm && !store.call && store.friends.friends.some(f => f.user.id === store.selectedDm?.other.id) && (
+          <span className="callbuttons">
+            <button className="subtle" title="Call" onClick={() => onCall(store.selectedDm!.other.id, channel.name, false)}>📞 Call</button>
+            {store.allowDirect && <button className="subtle p2pcall" title="P2P call: your apps connect straight to each other, so each of you can find the other's IP address. They must allow P2P too." onClick={() => onCall(store.selectedDm!.other.id, channel.name, true)}>📞 P2P call</button>}
+          </span>
+        )}
         {channel && canRoll && store.settings.showRollButtons !== false && (
           <div className="actions">
             {/* Games are played with the people in voice with you (or the other person in a DM), wherever you happen to be looking. */}
@@ -520,6 +723,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
         {store.messages.map(m => isIgnored(m.authorId) && !m.webhookId && !revealed.has(m.id)
           ? <div key={m.id} className="message ignored"><span /><span className="muted">Message from {m.authorName}, who you ignore · <button className="subtle" onClick={() => setRevealed(new Set([...revealed, m.id]))}>show</button></span></div>
           : <Message key={m.id} m={m} color={colorOf(m.authorId)} icon={store.itemIcon(m.roll?.item)} serverUrl={store.settings.serverUrl}
+              fileOffer={m.fileOffer ? <FileOfferView store={store} offer={m.fileOffer} mine={m.authorId === (me?.id ?? '')} /> : undefined}
               author={m.webhookId ? null : store.appearanceOf(m.authorId)} name={m.webhookId ? m.authorName : nameIn(m.authorId, m.authorName)}
               mention={m.authorId !== me?.id && store.mentionsMe(m.content)}
               onUserMenu={m.webhookId ? undefined : e => onUserMenu(e, m.authorId, m.authorName)} onUserCard={m.webhookId ? undefined : e => onUserCard(e, m.authorId, m.authorName)} />)}
@@ -544,8 +748,10 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
           </div>
         )}
         <div className="composer">
-          <input ref={fileRef} type="file" accept="image/*" hidden onChange={async e => { const f = e.target.files?.[0]; if (f) await store.sendImage(f); e.target.value = '' }} />
-          <button title="Send an image (or drop one here)" onClick={() => fileRef.current?.click()} disabled={!channel}>📎</button>
+          <input ref={fileRef} type="file" hidden onChange={async e => { const f = e.target.files?.[0]; if (f) await store.sendFile(f); e.target.value = '' }} />
+          <button title={store.uploading ? `Sending ${store.uploading}…` : 'Send a file'} onClick={() => fileRef.current?.click()} disabled={!channel || !!store.uploading}>{store.uploading ? '⏳' : '📎'}</button>
+          <input ref={directRef} type="file" hidden onChange={async e => { const f = e.target.files?.[0]; if (f) await store.offerFile(f); e.target.value = '' }} />
+          <button title={directSendTitle} onClick={() => directRef.current?.click()} disabled={!channel}>⇄</button>
           <textarea
             placeholder={channel ? `Message ${channel.type === ChannelType.DirectMessage ? '@' : '#'}${channel.name}  —  type / for commands` : ''}
             value={text} disabled={!channel} rows={1}
@@ -559,8 +765,10 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
   )
 }
 
-function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu, onUserCard }: {
+function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu, onUserCard, fileOffer }: {
   m: MessageDto; color?: string; icon?: string | null; serverUrl: string; mention?: boolean
+  /** Rendered in place of the text when the message is a file offered straight from someone's app. */
+  fileOffer?: React.ReactNode
   /** How the author looks, when we know them (null for webhooks and people no longer around). */
   author: Appearance | null; name: string
   onUserMenu?: (e: React.MouseEvent) => void; onUserCard?: (e: React.MouseEvent) => void
@@ -589,12 +797,19 @@ function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu,
               <div>{m.content}</div>
               {m.rps?.entries.map(e => <div key={e.userId} className="line">{RPS_ICON[e.choice]} {e.username} — {RPS_NAME[e.choice]}{m.rps?.winnerIds.length === 1 && m.rps.winnerIds[0] === e.userId ? ' 🏆' : ''}</div>)}
             </div>
+          ) : m.kind === MessageKind.FileOffer && m.fileOffer ? (
+            fileOffer
+          ) : m.kind === MessageKind.Call && m.call ? (
+            <div className={'calllog' + (m.call.outcome === 'ended' ? '' : ' missed')}>
+              📞 {m.call.outcome === 'ended' ? `Call · ${callLength(m.call.seconds)}` : m.call.outcome === 'declined' ? 'Call declined' : 'Missed call'}
+              {m.call.direct && <span className="p2ptag">P2P</span>}
+            </div>
           ) : m.kind === MessageKind.Dice ? (
             <div className="row">🎲 rolled <b style={{ fontSize: 18 }}>{m.content}</b> <span className="muted">({m.dice?.min ?? 1}–{m.dice?.max ?? 100})</span></div>
           ) : m.kind === MessageKind.CoinFlip ? (
-            <div className="row"><img src={m.content === 'Tails' ? '/coin_tails.png' : '/coin_heads.png'} width={40} height={40} alt="" /> flipped a coin — <b>{m.content}</b></div>
+            <div className="row"><img src={import.meta.env.BASE_URL + (m.content === 'Tails' ? 'coin_tails.png' : 'coin_heads.png')} width={40} height={40} alt="" /> flipped a coin — <b>{m.content}</b></div>
           ) : <div className="body">{m.content}</div>}
-        {m.attachments.filter(a => a.contentType.startsWith('image/')).map(a => <img key={a.id} className="attachment" src={a.url} alt={a.fileName} title={a.fileName} />)}
+        {m.attachments.map(a => <AttachmentView key={a.id} file={a} />)}
         {m.embeds?.map((e, i) => (
           <div key={i} className="card" style={{ borderLeftColor: e.color != null ? '#' + e.color.toString(16).padStart(6, '0') : undefined }}>
             {e.title && <div className="title">{e.url ? <a href={e.url} target="_blank" rel="noreferrer" style={{ color: 'inherit' }}>{e.title}</a> : e.title}</div>}
@@ -606,6 +821,91 @@ function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu,
         ))}
       </div>
     </div>
+  )
+}
+
+/** Looks up how this server lets people sign in, then shows the sign-in-again step for allowing P2P. */
+function AllowDirectStep({ store, onClose }: { store: Store; onClose: () => void }) {
+  const [providers, setProviders] = useState<string[] | null>(null)
+  useEffect(() => {
+    let alive = true
+    store.api.providers(store.settings.serverUrl).then(list => { if (alive) setProviders(list) }).catch(() => { if (alive) setProviders([]) })
+    return () => { alive = false }
+  }, [store.api, store.settings.serverUrl])
+  return <AllowDirectDialog providers={providers} username={store.settings.user?.username ?? ''} onSignIn={store.reauthenticateForDirect} onClose={onClose} />
+}
+
+const fileSize = (bytes: number) => bytes >= 1024 ** 3 ? (bytes / 1024 ** 3).toFixed(2) + ' GB' : bytes >= 1048576 ? (bytes / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(bytes / 1024)) + ' KB'
+
+/**
+ * A file someone is offering straight from their app. It is not on the server: asking for it connects the two
+ * apps (through a relay unless both allowed direct connections) and the file streams across.
+ */
+function FileOfferView({ store, offer, mine }: { store: Store; offer: FileOfferDto; mine: boolean }) {
+  const all = store.transfers.filter(t => t.offerId === offer.id)
+  // The sender may be sending to several people at once; the receiver has one transfer of their own.
+  const active = all.filter(t => t.state === 'waiting' || t.state === 'connecting' || t.state === 'transferring')
+  const last = all[all.length - 1]
+  const route = (t: TransferView) => (t.relayed === false ? ' · P2P' : '')
+
+  return (
+    <div className="fileoffer">
+      <div className="row">
+        <span className="ico">⇄</span>
+        <span className="grow">
+          <b>{offer.fileName}</b><span className="muted"> · {fileSize(offer.size)}</span>
+          <div className="muted">
+            {mine
+              ? (offer.withdrawn ? 'You withdrew this.'
+                : offer.available ? 'Offered from your computer. People can download it while Maplecord is open here.'
+                : 'Not on offer right now. It comes back when Maplecord is open on the computer that has the file, if the file has not been moved or changed.')
+              : (offer.withdrawn ? 'The sender withdrew it.'
+                : offer.available ? 'Sent from their computer when you download it. Not stored on the server.'
+                : 'Not available right now. It comes back when the sender is online again and still has the file.')}
+          </div>
+        </span>
+        {!mine && offer.available && active.length === 0 && last?.state !== 'done' && <button className="accent" onClick={() => void store.downloadFile(offer)}>Download</button>}
+        {mine && !offer.withdrawn && <button className="subtle" onClick={() => void store.withdrawFile(offer.id)}>Withdraw</button>}
+      </div>
+      {active.map(t => (
+        <div key={t.key} className="progress">
+          <div className="bar"><div style={{ width: `${t.size ? Math.min(100, t.bytes / t.size * 100) : 0}%` }} /></div>
+          <span className="muted">
+            {t.state === 'transferring'
+              ? `${t.direction === 'send' ? 'Sending' : 'Receiving'} ${fileSize(t.bytes)} of ${fileSize(t.size)}${t.bytesPerSecond ? ' · ' + fileSize(t.bytesPerSecond) + '/s' : ''}${route(t)}`
+              : t.state === 'waiting' ? 'Asking the sender…' : 'Connecting…'}
+          </span>
+          <button className="subtle" onClick={() => store.cancelTransfer(t.key)}>Cancel</button>
+        </div>
+      ))}
+      {active.length === 0 && last && last.state === 'done' && <div className="muted ok">{last.direction === 'send' ? 'Sent' : 'Saved'}{route(last)}.</div>}
+      {active.length === 0 && last && (last.state === 'failed' || last.state === 'cancelled') && <div className="muted bad">{last.state === 'cancelled' ? 'Cancelled.' : last.error ?? 'The transfer failed.'}</div>}
+    </div>
+  )
+}
+
+/**
+ * One file on a message. Pictures and videos show in place; anything else is a download.
+ * The server only keeps a file for a while. The desktop app shows pictures and videos through its own copies
+ * (see electron/fileCache.ts), so one it has shown before still shows after the server has let it go.
+ */
+function AttachmentView({ file }: { file: AttachmentDto }) {
+  const [gone, setGone] = useState(false)
+  const desktop = isElectron()
+  const kind = file.contentType.startsWith('image/') ? 'image' : file.contentType.startsWith('video/') ? 'video' : 'file'
+  const src = desktop ? `maplecord-plugin://files/${file.id}/${encodeURIComponent(file.fileName)}?u=${encodeURIComponent(file.url)}` : file.url
+  const expired = <div className="filechip expired" title="The server keeps files for a limited time."><span className="ico">⌛</span><span className="grow"><b>{file.fileName}</b><span className="muted"> · no longer available</span></span></div>
+
+  // Without a copy of our own (the web version, or any plain download) an expired file is simply gone.
+  if (gone || (file.expired && (!desktop || kind === 'file'))) return expired
+  if (kind === 'image') return <img className="attachment" src={src} alt={file.fileName} title={file.fileName} onError={() => setGone(true)} />
+  if (kind === 'video') return <video className="attachment" src={src} controls preload={desktop ? 'none' : 'metadata'} title={file.fileName} onError={() => setGone(true)} />
+  return (
+    <a className="filechip" href={file.url} download={file.fileName} title={`Download ${file.fileName}`}>
+      <span className="ico">📄</span>
+      <span className="grow"><b>{file.fileName}</b><span className="muted"> · {fileSize(file.size)}</span></span>
+      <span className="get">Download</span>
+    </a>
   )
 }
 
@@ -718,6 +1018,8 @@ function RpsPanel({ store, meId }: { store: Store; meId: string }) {
 
 // ---- helpers ------------------------------------------------------------------
 
+
+const callLength = (seconds: number) => seconds < 60 ? `${seconds} s` : seconds < 3600 ? `${Math.floor(seconds / 60)} min ${seconds % 60} s` : `${Math.floor(seconds / 3600)} h ${Math.floor(seconds % 3600 / 60)} min`
 
 function channelRows(channels: Store['guilds'][number]['channels']) {
   const byPos = (a: { position: number }, b: { position: number }) => a.position - b.position

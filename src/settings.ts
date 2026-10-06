@@ -14,25 +14,40 @@ export interface Settings {
   showRollButtons: boolean
   lastGuildId: string | null
   lastChannelId: string | null
-  /** Voice: route media through the server's relay so peers never learn your IP. On by default; direct is the opt-in. */
-  protectIp: boolean
-  /** Guild ids where the "voice is direct, members can see your IP" notice has been acknowledged. */
-  voiceNoticeAcknowledged: string[]
+  /**
+   * P2P voice channels whose warning this person has read and accepted on this device: channel id → the moment that
+   * channel became P2P. A channel switched back and forth has a new moment, so it warns again.
+   */
+  directAcknowledged: Record<string, string>
   audioInputDeviceId: string | null
   audioOutputDeviceId: string | null
+  /** Send this computer's sound along with a shared app or screen. Remembered from the last time. */
+  shareSound?: boolean
+  /** How loud everyone in voice is played, 0 to 1. */
+  outputVolume?: number
+  /** The app's colours on this device (see theme.ts). */
+  theme?: { preset: string; accent: string | null }
   /** Per user id: how you hear them in voice and whether you see what they write. Yours alone; they are never told. */
   users: Record<string, UserPrefs>
   /** Per server id. */
   guilds: Record<string, GuildPrefs>
+  /** Folders of servers in the rail, in no particular order: a folder sits where its first server would. */
+  guildFolders?: GuildFolder[]
   /** Per game plugin, by plugin id. Detection and auto-rolling are both off until the user turns them on. */
   plugins: Record<string, PluginSettings>
 }
+
+/** Servers grouped together in the rail on this device. `open` shows its servers; closed shows a small grid of their icons. */
+export interface GuildFolder { id: string; name: string; guildIds: string[]; open: boolean }
 
 export interface UserPrefs {
   /** Voice volume for this person, 0 to 2 (1 = as sent). */
   volume?: number
   /** Do not play their voice at all. */
   muted?: boolean
+  /** How loud the sound of a stream they share is played, 0 to 1, and whether it is played at all. */
+  streamVolume?: number
+  streamMuted?: boolean
   /** Hide their messages, typing and friend requests, and never be notified about them. */
   ignored?: boolean
 }
@@ -74,8 +89,7 @@ const defaults = (): Settings => ({
   showRollButtons: true,
   lastGuildId: null,
   lastChannelId: null,
-  protectIp: true,
-  voiceNoticeAcknowledged: [],
+  directAcknowledged: {},
   audioInputDeviceId: null,
   audioOutputDeviceId: null,
   users: {},

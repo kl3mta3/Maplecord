@@ -3,24 +3,130 @@ import { ChannelType, RollKind, RollRange, type ChannelDto, type RollItemDto } f
 import { listAudioDevices } from '../voice'
 import type { CatalogHit } from '../store'
 
-/** Shown once per guild before the first direct (non-relayed) voice connection. */
-export function VoiceNoticeDialog({ reason, onContinue, onClose }: { reason: 'no-relay' | 'direct-chosen'; onContinue: () => void; onClose: () => void }) {
+/** What P2P means, in a sentence or two, wherever it is mentioned. Shows on hover, on focus, and on click (for touch). */
+export function P2PInfo() {
+  const [open, setOpen] = useState(false)
   return (
-    <Dialog title="Voice connects directly" onClose={onClose}>
+    <span className={'infotip' + (open ? ' open' : '')}>
+      <button type="button" className="infodot" aria-label="What is P2P?" aria-expanded={open} onClick={e => { e.preventDefault(); e.stopPropagation(); setOpen(o => !o) }} onBlur={() => setOpen(false)}>i</button>
+      <span className="infobubble" role="tooltip">
+        <b>P2P</b> means peer-to-peer: your app connects straight to the other person's app instead of going through Maplecord's relay.
+        To connect that way, each side has to be told the other's IP address. Maplecord never shows it, but anyone you connect to
+        can find it with ordinary tools. An IP address shows roughly where you are and can be used to knock your connection offline.
+      </span>
+    </span>
+  )
+}
+
+/**
+ * Stands between a person and a P2P voice channel. "warn" is the once-per-channel warning; "blocked" is what they
+ * see when their account does not allow P2P at all. Neither joins anything by itself.
+ */
+export function DirectChannelDialog({ kind, channelName, onJoin, onSettings, onClose }: {
+  kind: 'warn' | 'blocked'; channelName: string; onJoin: () => void; onSettings: () => void; onClose: () => void
+}) {
+  return (
+    <Dialog title={kind === 'warn' ? `Join ${channelName}? It is a P2P channel` : `${channelName} is a P2P channel`} onClose={onClose}>
       <div>
-        {reason === 'no-relay'
-          ? 'This server has no relay configured, so voice will connect directly between members.'
-          : 'You chose direct connections (Protect my IP is off), so voice will connect directly between members.'}
+        In a P2P channel your app connects straight to everyone else's, not through the relay. <b>Everyone in it can find your IP address</b>,
+        and so can anyone who joins while you are there. <P2PInfo />
       </div>
-      <div className="muted">Other people in this voice channel will be able to see your IP address. Audio itself is always encrypted end to end.</div>
-      <div className="buttons"><button onClick={onClose}>Cancel</button><button className="accent" onClick={() => { onContinue(); onClose() }}>Continue</button></div>
+      {kind === 'warn' ? (
+        <>
+          <div className="muted">Only join if you trust this server's owner and the people in this channel. You will not be asked again for this channel unless it is changed.</div>
+          <div className="buttons">
+            <button className="subtle" style={{ marginRight: 'auto' }} onClick={() => { onClose(); onSettings() }}>Settings</button>
+            <button onClick={onClose}>Cancel</button>
+            <button className="accent" onClick={onJoin}>Join anyway</button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="muted">Your account does not allow P2P connections, so you cannot join it. You can change that in Audio &amp; privacy settings; you will be asked to sign in again first.</div>
+          <div className="buttons"><button onClick={onClose}>Cancel</button><button className="accent" onClick={() => { onClose(); onSettings() }}>Open settings</button></div>
+        </>
+      )}
     </Dialog>
   )
 }
 
-export function AudioSettingsDialog({ inputId, outputId, protectIp, onSave, onProtectIp, onClose }: {
-  inputId: string | null; outputId: string | null; protectIp: boolean
-  onSave: (input: string | null, output: string | null) => void; onProtectIp: (on: boolean) => void; onClose: () => void
+/** Before a P2P call is placed: what it means, said once more, so one is never placed in passing. */
+export function P2PCallDialog({ name, onCall, onClose }: { name: string; onCall: () => void; onClose: () => void }) {
+  return (
+    <Dialog title={`Call ${name} over P2P?`} onClose={onClose}>
+      <div>
+        Your apps will connect straight to each other, not through the relay. <b>{name} will be able to find your IP address</b>, and you theirs. <P2PInfo />
+      </div>
+      <div className="muted">It only rings if {name} allows P2P connections too.</div>
+      <div className="buttons"><button onClick={onClose}>Cancel</button><button className="accent" onClick={() => { onClose(); onCall() }}>Call over P2P</button></div>
+    </Dialog>
+  )
+}
+
+/**
+ * A friend is calling. A P2P call says so before it can be answered, and cannot be answered at all by an account
+ * that does not allow P2P.
+ */
+export function IncomingCallDialog({ name, direct, allowed, onAnswer, onDecline, onSettings }: {
+  name: string; direct: boolean; allowed: boolean; onAnswer: () => void; onDecline: () => void; onSettings: () => void
+}) {
+  return (
+    // Only its buttons answer or decline: a stray click beside it, or Escape pressed for something else, does neither.
+    <Dialog title={`${name} is calling`} onClose={() => { /* stays until answered or declined */ }}>
+      {direct ? (
+        <div>
+          <span className="p2ptag">P2P</span> This is a P2P call: your apps would connect straight to each other. <b>{name} will be able to find your IP address</b>, and you theirs. <P2PInfo />
+        </div>
+      ) : null}
+      {!allowed && <div className="muted">Your account does not allow P2P connections, so you cannot answer it. You can change that in Audio &amp; privacy settings, or ask {name} to place an ordinary call.</div>}
+      <div className="buttons">
+        {!allowed && <button className="subtle" style={{ marginRight: 'auto' }} onClick={onSettings}>Settings</button>}
+        <button className="danger" onClick={onDecline}>Decline</button>
+        {allowed && <button className="accent" onClick={onAnswer}>{direct ? 'Answer P2P call' : 'Answer'}</button>}
+      </div>
+    </Dialog>
+  )
+}
+
+/**
+ * Allowing P2P takes a fresh sign-in, so that it is certainly the account's owner deciding and not just whoever has
+ * the app open. The server enforces that; this is only how the person gets there.
+ */
+export function AllowDirectDialog({ providers, username, onSignIn, onClose }: {
+  providers: string[] | null; username: string; onSignIn: (provider: string, devUsername?: string) => Promise<void>; onClose: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState('')
+  const go = async (provider: string) => {
+    setBusy(true); setProblem(provider === 'dev' ? '' : 'Waiting for you to sign in…')
+    try { await onSignIn(provider, username); onClose() }
+    catch (e) { setProblem(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+  const names: Record<string, string> = { google: 'Sign in with Google', github: 'Sign in with GitHub', dev: `Development sign-in as ${username}` }
+  return (
+    <Dialog title="Allow P2P connections?" onClose={onClose}>
+      <div>
+        With this allowed you can join P2P voice channels and connect straight to friends who allow it too.
+        <b> People you connect to that way can find your IP address.</b> <P2PInfo />
+      </div>
+      <div className="muted">To make sure it is really you deciding, sign in again:</div>
+      {providers === null && <div className="muted">Checking how you can sign in…</div>}
+      {providers?.length === 0 && <div className="muted">This server has no way to sign in again.</div>}
+      {providers?.map(p => <button key={p} className={p === 'dev' ? '' : 'provider'} disabled={busy} onClick={() => void go(p)}>{names[p] ?? p}</button>)}
+      {problem && <div className="muted">{problem}</div>}
+      <div className="buttons"><button onClick={onClose} disabled={busy}>Cancel</button></div>
+    </Dialog>
+  )
+}
+
+export function AudioSettingsDialog({ inputId, outputId, allowDirect, onSave, onAllowDirect, onClose }: {
+  inputId: string | null; outputId: string | null
+  /** Whether the account allows P2P. The box below is its opposite: ticked means "do not allow". */
+  allowDirect: boolean
+  onSave: (input: string | null, output: string | null) => void
+  /** Asked to change it. Turning P2P on does not happen here: it opens the sign-in-again step. */
+  onAllowDirect: (allow: boolean) => void; onClose: () => void
 }) {
   const [devices, setDevices] = useState<{ inputs: MediaDeviceInfo[]; outputs: MediaDeviceInfo[] }>({ inputs: [], outputs: [] })
   const [input, setInput] = useState(inputId ?? '')
@@ -47,12 +153,20 @@ export function AudioSettingsDialog({ inputId, outputId, protectIp, onSave, onPr
         <option value="">System default</option>
         {devices.outputs.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || 'Speakers'}</option>)}
       </select>
-      <label className="row" style={{ marginTop: 6 }}>
-        <input type="checkbox" checked={protectIp} onChange={e => onProtectIp(e.target.checked)} />
-        <span>Protect my IP <span className="muted">— route voice through the server's relay so other members never see your address</span></span>
-      </label>
+      <div className="row" style={{ marginTop: 6 }}>
+        <label className="row">
+          <input type="checkbox" checked={!allowDirect} onChange={e => onAllowDirect(!e.target.checked)} />
+          <span>Do not allow P2P connections</span>
+        </label>
+        <P2PInfo />
+      </div>
+      <div className="muted">
+        {allowDirect
+          ? 'P2P is allowed: you can join P2P voice channels and connect straight to friends who allow it too.'
+          : 'Unticking this asks you to sign in again.'}
+      </div>
       {note && <div className="muted">{note}</div>}
-      <div className="muted">Changes apply the next time you join a voice channel; if you are in one now you will be reconnected.</div>
+      <div className="muted">Microphone and speaker changes apply the next time you join a voice channel.</div>
       <div className="buttons"><button onClick={onClose}>Cancel</button><button className="accent" onClick={() => { onSave(input || null, output || null); onClose() }}>Save</button></div>
     </Dialog>
   )
@@ -110,13 +224,16 @@ export function ConfirmDialog({ title, message, onConfirm, onClose }: { title: s
   )
 }
 
-export function CreateChannelDialog({ categories, onSubmit, onClose, initialType = ChannelType.Text }: {
-  categories: ChannelDto[]; onSubmit: (name: string, type: number, parentId: string | null) => void; onClose: () => void; initialType?: number
+export function CreateChannelDialog({ categories, onSubmit, onClose, initialType = ChannelType.Text, canDirect = false }: {
+  categories: ChannelDto[]; onSubmit: (name: string, type: number, parentId: string | null, direct: boolean) => void; onClose: () => void; initialType?: number
+  /** This person may create P2P voice channels. */
+  canDirect?: boolean
 }) {
   const [name, setName] = useState('')
   const [type, setType] = useState<number>(initialType)
   const [parent, setParent] = useState<string>(categories[0]?.id ?? '')
-  const submit = () => { if (name.trim()) { onSubmit(name.trim(), type, type === ChannelType.Category ? null : parent || null); onClose() } }
+  const [direct, setDirect] = useState(false)
+  const submit = () => { if (name.trim()) { onSubmit(name.trim(), type, type === ChannelType.Category ? null : parent || null, type === ChannelType.Voice && direct); onClose() } }
   return (
     <Dialog title={type === ChannelType.Category ? 'Create category' : 'Create channel'} onClose={onClose}>
       <div className="row">
@@ -133,6 +250,15 @@ export function CreateChannelDialog({ categories, onSubmit, onClose, initialType
             <option value="">(none)</option>
             {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
+        </>
+      )}
+      {type === ChannelType.Voice && canDirect && (
+        <>
+          <div className="row">
+            <label className="row"><input type="checkbox" checked={direct} onChange={e => setDirect(e.target.checked)} /> <span>P2P channel</span></label>
+            <P2PInfo />
+          </div>
+          {direct && <div className="muted">People in it connect straight to each other and can find each other's IP address. Only people who allow P2P can join, and each is warned first.</div>}
         </>
       )}
       <div className="buttons"><button onClick={onClose}>Cancel</button><button className="accent" onClick={submit}>Create</button></div>

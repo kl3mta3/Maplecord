@@ -46,6 +46,24 @@ export class VoiceEngine {
   constructor(hub: VoiceHub, events: VoiceEngineEvents) { this.hub = hub; this.events = events }
 
   get active() { return this.local !== null }
+
+  /** The servers and relay-or-direct choice this call is using; shared video uses exactly the same. */
+  get rtcConfig(): RTCConfiguration { return this.config }
+
+  /** The most our microphone may send to each person, in kilobits per second; 0 = leave it to the browser. Set by the server. */
+  maxAudioKbps = 0
+
+  /** Caps what one connection sends. Safe to call more than once: before negotiation there may be nothing to cap yet. */
+  private limitBitrate(pc: RTCPeerConnection) {
+    if (this.maxAudioKbps <= 0) return
+    for (const sender of pc.getSenders()) {
+      if (sender.track?.kind !== 'audio') continue
+      const params = sender.getParameters()
+      if (!params.encodings || params.encodings.length === 0) continue
+      for (const encoding of params.encodings) encoding.maxBitrate = this.maxAudioKbps * 1000
+      sender.setParameters(params).catch(() => { /* not negotiated yet; tried again once connected */ })
+    }
+  }
   effectivePolicy: IcePolicy = 'direct'
 
   /** Returns the policy actually in effect: relay only if a TURN server is available. */
@@ -54,7 +72,8 @@ export class VoiceEngine {
     const policy: IcePolicy = wanted === 'relay' && hasTurn ? 'relay' : 'direct'
     this.config = {
       iceServers: ice.map(s => ({ urls: s.urls, username: s.username ?? undefined, credential: s.credential ?? undefined })),
-      iceTransportPolicy: policy === 'relay' ? 'relay' : 'all',
+      // Asked for relayed, it is relay-only even with no relay to use: such a call fails to connect rather than connecting some other way.
+      iceTransportPolicy: wanted === 'relay' ? 'relay' : 'all',
     }
     this.effectivePolicy = policy
     return policy
@@ -63,6 +82,54 @@ export class VoiceEngine {
   setDevices(inputDeviceId: string | null, outputDeviceId: string | null) {
     this.outputDeviceId = outputDeviceId
     this.inputDeviceId = inputDeviceId
+  }
+
+  /**
+   * Change microphone or speakers without leaving the call. False if the microphone could not be swapped in place
+   * (there was none to begin with, or the new one would not open); the choice is still remembered for next time.
+   */
+  async switchDevices(inputDeviceId: string | null, outputDeviceId: string | null): Promise<boolean> {
+    if (outputDeviceId !== this.outputDeviceId) {
+      this.outputDeviceId = outputDeviceId
+      for (const peer of this.peers.values()) {
+        const audio = peer.audio as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }
+        void audio.setSinkId?.(outputDeviceId ?? '').catch(() => {})
+        const ctx = peer.meter?.gain ? peer.meter.ctx as AudioContext & { setSinkId?: (id: string) => Promise<void> } : null
+        void ctx?.setSinkId?.(outputDeviceId ?? '').catch(() => {})
+      }
+    }
+    if (inputDeviceId === this.inputDeviceId) return true
+    this.inputDeviceId = inputDeviceId
+    if (!this.joined) return true
+    if (!this.local) return false
+    try {
+      const fresh = await navigator.mediaDevices.getUserMedia({
+        audio: { deviceId: inputDeviceId ? { exact: inputDeviceId } : undefined, echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+      })
+      const track = fresh.getAudioTracks()[0]
+      track.enabled = !this.muted
+      for (const peer of this.peers.values()) {
+        const sender = peer.pc.getSenders().find(s => s.track?.kind === 'audio')
+        if (sender) await sender.replaceTrack(track)
+      }
+      for (const old of this.local.getTracks()) old.stop()
+      if (this.localMeter) { this.localMeter.src.disconnect(); void this.localMeter.ctx.close() }
+      this.local = fresh
+      this.localMeter = this.makeMeter(fresh)
+      return true
+    } catch (e) {
+      this.events.log(`Could not switch microphone: ${e instanceof Error ? e.message : e}`)
+      return false
+    }
+  }
+
+  private master = 1
+  private deafened = false
+  /** Everyone at once: how loud they are played (0 to 1), or not at all. */
+  setOutput(volume: number, deafened: boolean) {
+    this.master = Math.max(0, Math.min(1, volume))
+    this.deafened = deafened
+    for (const [id, peer] of this.peers) this.applyAudio(id, peer)
   }
   private inputDeviceId: string | null = null
 
@@ -125,7 +192,8 @@ export class VoiceEngine {
   }
 
   private applyAudio(connectionId: string, peer: Peer) {
-    const want = this.wanted.get(connectionId) ?? { volume: 1, muted: false }
+    const chosen = this.wanted.get(connectionId) ?? { volume: 1, muted: false }
+    const want = { volume: chosen.volume * this.master, muted: chosen.muted || this.deafened }
     const meter = peer.meter
     if (!want.muted && want.volume > 1 && meter) {
       // An audio element cannot go above 100%, so louder than that is played through a gain node instead. The
@@ -196,6 +264,8 @@ export class VoiceEngine {
     const pc = new RTCPeerConnection(this.config)
     if (this.local) for (const track of this.local.getAudioTracks()) pc.addTrack(track, this.local)
     else pc.addTransceiver('audio', { direction: 'recvonly' })
+    this.limitBitrate(pc)
+    pc.addEventListener('connectionstatechange', () => { if (pc.connectionState === 'connected') this.limitBitrate(pc) })
 
     const audio = document.createElement('audio')
     audio.autoplay = true

@@ -1,10 +1,13 @@
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, net, protocol, screen, shell } from 'electron'
+import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, net, powerMonitor, protocol, screen, session, shell } from 'electron'
 import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { PluginHost } from './plugins'
 import { listSoundPacks, resolveSound } from './soundPacks'
+import { FileCache, respondWithFile } from './fileCache'
+import { SaveStreams } from './saveStreams'
+import { OfferedFiles } from './offeredFiles'
 import { PLUGIN_ICON_SCHEME, type PluginRuntimeConfig } from '../src/pluginTypes'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -25,6 +28,8 @@ function createWindow() {
     minWidth: 900,
     minHeight: 560,
     title: 'Maplecord',
+    // Running from source the picture is in public/; built, it sits beside the page.
+    icon: path.join(VITE_DEV_SERVER_URL ? path.join(RENDERER_DIST, '..', 'public') : RENDERER_DIST, 'logo.png'),
     backgroundColor: '#14141c',
     autoHideMenuBar: true,
     webPreferences: {
@@ -35,14 +40,32 @@ function createWindow() {
   })
 
   // Links open in the system browser, never inside the app.
-  win.webContents.setWindowOpenHandler(({ url }) => {
+  win.webContents.setWindowOpenHandler(({ url, frameName }) => {
+    // A stream popped out into a window of its own (see src/popout.ts): a blank page the app fills in itself.
+    if (url === 'about:blank' && frameName.startsWith('maplecord-stream-')) {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: { width: 960, height: 540, minWidth: 320, minHeight: 180, backgroundColor: '#000000', autoHideMenuBar: true, title: 'Maplecord stream' },
+      }
+    }
     if (/^https?:/.test(url)) shell.openExternal(url)
     return { action: 'deny' }
+  })
+  // A popped-out stream never opens anything itself, and never goes anywhere else.
+  win.webContents.on('did-create-window', child => {
+    child.removeMenu()
+    child.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    child.webContents.on('will-navigate', event => event.preventDefault())
   })
 
   if (VITE_DEV_SERVER_URL) win.loadURL(VITE_DEV_SERVER_URL)
   else win.loadFile(path.join(RENDERER_DIST, 'index.html'))
-  win.on('closed', () => { win = null; overlay?.close() })
+  win.on('closed', () => {
+    win = null
+    overlay?.close()
+    // Popped-out streams belong to the main window and go with it.
+    for (const other of BrowserWindow.getAllWindows()) other.close()
+  })
 }
 
 // ---- In-game overlay ----------------------------------------------------------
@@ -151,11 +174,20 @@ const plugins = new PluginHost(path.join(app.getPath('userData'), 'plugins'), {
   log: message => console.log('[plugins]', message),
 })
 
+// Pictures and videos from messages are kept on this computer once shown, because the server only holds them for a while.
+const fileCache = new FileCache(path.join(app.getPath('userData'), 'file-cache'), url => net.fetch(url, { credentials: 'omit' }))
+
 function registerPluginProtocol() {
   // maplecord-plugin://icons/<pluginId>/<path inside the plugin folder>
-  protocol.handle(PLUGIN_ICON_SCHEME, request => {
+  protocol.handle(PLUGIN_ICON_SCHEME, async request => {
     const url = new URL(request.url)
     const [first, ...rest] = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
+    // maplecord-plugin://files/<attachment id>/<name>?u=<the file's address on the server>
+    if (url.hostname === 'files') {
+      const cached = first ? await fileCache.get(first, url.searchParams.get('u') ?? '') : null
+      // The Range header is honoured so a video can be skipped through.
+      return cached ? respondWithFile(cached, request.headers.get('Range')) : new Response(null, { status: 404 })
+    }
     // maplecord-plugin://sounds/<pack>/<file> serves a sound from one of the user's own packs.
     const file = url.hostname === 'icons' && first && rest.length > 0 ? plugins.resolveIcon(first, rest.join('/'))
       : url.hostname === 'sounds' && first && rest.length === 1 ? resolveSound(soundsDirectory(), first, rest[0])
@@ -193,6 +225,65 @@ ipcMain.handle('plugins-pick-log', async () => {
   return picked.canceled ? null : picked.filePaths[0] ?? null
 })
 
+// ---- Sharing a screen or an app window ------------------------------------------
+// The page shows its own picker (like Discord's) from this list, tells us which one was chosen, and then asks the
+// browser engine for a display capture; the handler below answers that request with the chosen source and nothing else.
+let chosenSource: string | null = null
+ipcMain.handle('share-sources', async () => {
+  const sources = await desktopCapturer.getSources({ types: ['window', 'screen'], thumbnailSize: { width: 320, height: 180 }, fetchWindowIcons: true })
+  return sources
+    // Our own overlay is not something to share.
+    .filter(s => s.name !== 'Maplecord overlay')
+    .map(s => ({
+      id: s.id,
+      name: s.name,
+      kind: s.id.startsWith('screen:') ? 'screen' : 'window',
+      thumbnail: s.thumbnail.isEmpty() ? null : s.thumbnail.toDataURL(),
+      icon: s.appIcon && !s.appIcon.isEmpty() ? s.appIcon.toDataURL() : null,
+    }))
+})
+ipcMain.handle('share-choose', (_event, id: string | null) => { chosenSource = typeof id === 'string' ? id : null })
+ipcMain.handle('system-idle-seconds', () => powerMonitor.getSystemIdleTime())
+
+function registerDisplayCapture() {
+  session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+    const id = chosenSource
+    chosenSource = null
+    const deny = () => { try { callback({}) } catch { /* the page's request simply fails */ } }
+    if (!id) { deny(); return }
+    desktopCapturer.getSources({ types: ['window', 'screen'], thumbnailSize: { width: 0, height: 0 } })
+      .then(sources => {
+        const source = sources.find(s => s.id === id)
+        // With sound: what this computer is playing. The page asks for it with our own sound left out (see the store's
+        // startShare), so the call itself is not sent back to the people in it.
+        if (source) callback(request.audioRequested ? { video: source, audio: 'loopback' } : { video: source })
+        else deny()
+      })
+      .catch(deny)
+  })
+}
+
+// Files received from other people are written to disk as they arrive (see electron/saveStreams.ts).
+const saves = new SaveStreams()
+ipcMain.handle('save-begin', async (_event, name: string) => {
+  if (!win) return null
+  // Only the name: whatever folders the sender's file name claims are not followed.
+  const safe = path.basename(String(name)).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_') || 'file'
+  const picked = await dialog.showSaveDialog(win, { title: 'Save file', defaultPath: path.join(app.getPath('downloads'), safe) })
+  return picked.canceled || !picked.filePath ? null : saves.begin(picked.filePath)
+})
+ipcMain.handle('save-write', (_event, id: string, data: Uint8Array) => saves.write(id, data))
+ipcMain.handle('save-end', async (_event, id: string) => { await saves.end(id) })
+ipcMain.handle('save-abort', (_event, id: string) => saves.abort(id))
+
+// Files offered to other people are remembered, so the offers come back after a restart (see electron/offeredFiles.ts).
+// The window names an offer, never a path: the path only ever comes from a file the person picked (see preload).
+const offered = new OfferedFiles(path.join(app.getPath('userData'), 'offered-files.json'))
+ipcMain.handle('offer-remember', (_event, offerId: string, filePath: string, scope: string) => offered.remember(offerId, filePath, scope))
+ipcMain.handle('offer-list', (_event, scope: string) => offered.list(String(scope)))
+ipcMain.handle('offer-read', (_event, offerId: string, offset: number, length: number) => offered.read(offerId, offset, length))
+ipcMain.handle('offer-forget', (_event, offerId: string) => offered.forget(offerId))
+
 ipcMain.handle('open-external', (_event, url: string) => { if (/^https?:/.test(url)) shell.openExternal(url) })
 
 // Global roll hotkeys work while a game has focus; the renderer decides what they mean for the active roll.
@@ -205,10 +296,11 @@ function registerHotkeys() {
 
 app.whenReady().then(() => {
   registerPluginProtocol()
+  registerDisplayCapture()
   try { plugins.reload() } catch (e) { console.error('[plugins]', e) }
   createWindow()
   registerHotkeys()
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
 })
-app.on('will-quit', () => { globalShortcut.unregisterAll(); plugins.stopAll() })
+app.on('will-quit', () => { globalShortcut.unregisterAll(); plugins.stopAll(); void saves.abortAll(); offered.closeAll() })
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })

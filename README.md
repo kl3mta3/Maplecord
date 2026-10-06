@@ -8,11 +8,26 @@ It needs a Maplecord server to connect to.
 ## Features
 
 - Servers, text and voice channels, roles, friends, DMs
+- Call a friend from your conversation with them (📞). Calls go through the relay. "P2P call" is a separate button
+  that only shows if you allow P2P, asks first, and only rings if your friend allows P2P too.
+- Send any kind of file. Pictures and videos show in the chat.
+- Send a file of any size straight to people who are online (the ⇄ button). It goes from your computer to theirs,
+  through a relay unless you are friends and both allow P2P, and is never stored on the server. The desktop app
+  writes it to disk as it arrives; in a browser without that ability the limit is 512 MB.
+  The desktop app remembers what you offered (for 30 days): close it, open it again, and the file can be downloaded
+  again as long as it hasn't been moved or changed. In a browser the offer lasts until you close the tab.
 - Rolls: roll, need/greed, rock paper scissors, coin flip, dice. The server does the rolling.
   Rolls go to whoever is in voice with you.
+- Share an app window, a whole screen or your camera with your voice channel. Others click LIVE to watch;
+  nothing is sent until they do. The desktop app can send the computer's sound with it (everything it plays except
+  Maplecord itself, so the call doesn't echo); tick "Share this computer's sound too" in the picker.
+  A stream you are watching can go full screen or be popped out into its own window. Right-click it to mute it,
+  change its volume, or ask to be sent a lower quality on a slow connection.
 - In-game overlay with global hotkeys (desktop only)
 - Game plugins: item names and icons, optional drop detection from the game's log (desktop only)
 - Profiles with display names, avatars, banners, name fonts and animated decorations
+- Status (online, do not disturb, invisible), blocking, and who may send you friend requests
+- Mute, deafen and device menus at the bottom left; everything else behind the cog, including colour themes
 - Custom sound packs
 
 ## Development
@@ -44,6 +59,12 @@ npm run dist:win
 Also `dist:mac` and `dist:linux`. Installers end up in `release/`. Set `VITE_SERVER_URL` to your server before
 building.
 
+## Web version
+
+`npm run build:web` builds the app for a browser into `dist/`. A Maplecord server can serve it itself:
+`npm run build:server-web` puts the build straight into the server repo next door
+(`../Maplecord/src/Maplecord.Server/webapp`), and the server hands it out on the hostname set in `WebApp__Host`.
+
 ## Hotkeys
 
 | | |
@@ -74,7 +95,13 @@ as `.wav`, `.mp3` or `.ogg`. Missing ones fall back to the default.
 - Plugin log watching is off until you turn it on, and only reads the file the plugin names. The log contents stay
   on your machine.
 - Images, fonts and animations only ever load from the server you're signed in to.
-- Voice is relayed by default so others in the call don't see your IP.
+- The server only keeps uploaded files for a while. The desktop app keeps its own copy of pictures and videos it
+  has shown (up to 2 GB, oldest out first) in its data folder, so they still show after that.
+- Voice, shared video and file transfers go through a relay, so the people you talk to can't find your IP address.
+- P2P (straight from your computer to theirs) only happens if you allow it: untick "Do not allow P2P connections"
+  in Audio & privacy, which asks you to sign in again. After that you can join P2P voice channels (shown in
+  italics with a P2P tag, with a warning the first time you join each one) and send files straight to friends
+  who allow it too. In a P2P channel everyone there can find your IP address.
 - Sign in happens in your browser. The app never sees a password.
 
 ## Layout
@@ -96,4 +123,4 @@ Animations use [lottie-web](https://github.com/airbnb/lottie-web).
 
 ## License
 
-Not decided yet.
+GPL-3.0-or-later. See [LICENSE](LICENSE).

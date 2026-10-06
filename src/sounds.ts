@@ -18,14 +18,49 @@ function urlFor(event: SoundEvent, packName: string): string {
   const file = packs.find(p => p.name === packName)?.events[event]
   // Packs are served by the desktop app from the user's own folder, through the same private scheme as plugin icons.
   if (file) return `maplecord-plugin://sounds/${encodeURIComponent(packName)}/${encodeURIComponent(file)}`
-  return `/sounds/default/${event}.wav`
+  return `${import.meta.env.BASE_URL}sounds/default/${event}.wav`
 }
 
+let quiet = false
+/** Do not disturb: nothing plays, rings included. */
+export function setQuiet(on: boolean) { quiet = on; if (on) stopRing() }
+
 export function playSound(event: SoundEvent, pack: string, enabled: boolean) {
-  if (!enabled) return
+  if (!enabled || quiet) return
   try {
     const audio = new Audio(urlFor(event, pack))
     audio.volume = 0.8
     void audio.play().catch(() => { /* autoplay blocked until first interaction */ })
   } catch { /* no audio device */ }
 }
+
+let ring: { stop(): void } | null = null
+
+/**
+ * A phone ringing, made here rather than shipped as a sound file. 'incoming' is the ring of a call for you;
+ * 'outgoing' is the quieter tone you hear while a call you placed rings at the other end.
+ */
+export function startRing(kind: 'incoming' | 'outgoing', enabled: boolean) {
+  stopRing()
+  if (!enabled || quiet) return
+  try {
+    const ctx = new AudioContext()
+    const gain = ctx.createGain()
+    gain.gain.value = 0
+    gain.connect(ctx.destination)
+    const tones = (kind === 'incoming' ? [440, 480] : [440]).map(frequency => {
+      const o = ctx.createOscillator()
+      o.frequency.value = frequency
+      o.connect(gain)
+      o.start()
+      return o
+    })
+    const level = kind === 'incoming' ? 0.1 : 0.04
+    const burst = () => { const t = ctx.currentTime; gain.gain.setValueAtTime(level, t); gain.gain.setValueAtTime(0, t + 1.2) }
+    burst()
+    const timer = window.setInterval(burst, kind === 'incoming' ? 3000 : 4000)
+    ring = { stop: () => { window.clearInterval(timer); for (const o of tones) { try { o.stop() } catch { /* already stopped */ } } void ctx.close().catch(() => { /* already closed */ }) } }
+  } catch { /* no audio device */ }
+}
+
+export function stopRing() { ring?.stop(); ring = null }

@@ -57,6 +57,9 @@ export type OverlayAction =
   | `select-channel:${string}`
   | 'drop-roll' | 'drop-need' | 'drop-dismiss'
 
+/** Something on this computer that can be shared: a whole screen or one app's window. */
+export interface ShareSource { id: string; name: string; kind: 'screen' | 'window'; thumbnail: string | null; icon: string | null }
+
 /** What the Electron preload exposes. In a plain browser `window.maplecord` is undefined and we fall back gracefully. */
 export interface MaplecordBridge {
   isElectron: true
@@ -82,6 +85,22 @@ export interface MaplecordBridge {
   pluginsPickLog(): Promise<string | null>
   onPluginsChanged(handler: (list: PluginInfo[]) => void): () => void
   onPluginDrop(handler: (drop: PluginDrop) => void): () => void
+  // sharing a screen or an app window: list what there is, say which one, then call getDisplayMedia()
+  shareSources(): Promise<ShareSource[]>
+  shareChoose(id: string | null): Promise<void>
+  /** Seconds since the keyboard or mouse was last used, anywhere on the computer. */
+  systemIdleSeconds(): Promise<number>
+  // saving a file as it arrives from another person; saveBegin shows the Save dialog and is null if cancelled
+  saveBegin(name: string): Promise<string | null>
+  saveWrite(id: string, data: Uint8Array): Promise<void>
+  saveEnd(id: string): Promise<void>
+  saveAbort(id: string): Promise<void>
+  // files this computer has offered, remembered so the offers come back after a restart. `scope` is whose they are.
+  offerRemember(offerId: string, file: File, scope: string): Promise<boolean>
+  /** The remembered offers whose file is still there, unchanged. */
+  offerList(scope: string): Promise<{ offerId: string; name: string; size: number }[]>
+  offerRead(offerId: string, offset: number, length: number): Promise<Uint8Array>
+  offerForget(offerId: string): Promise<void>
   // the user's own sound packs
   soundPacks(): Promise<SoundPack[]>
   soundsOpenFolder(): Promise<unknown>
@@ -105,4 +124,7 @@ export const isElectron = () => !!window.maplecord
  * The public Maplecord server every install connects to. Set VITE_SERVER_URL at build time for release.
  * Users never see this unless they open "Advanced" on the login screen or the default server is unreachable.
  */
-export const DEFAULT_SERVER_URL: string = (import.meta.env.VITE_SERVER_URL as string | undefined) ?? 'http://localhost:5080'
+export const DEFAULT_SERVER_URL: string = (import.meta.env.VITE_SERVER_URL as string | undefined)
+  // A Maplecord server that hosts this page says who it is as it hands the page out.
+  ?? (window as unknown as { __MAPLECORD_SERVER__?: string }).__MAPLECORD_SERVER__
+  ?? 'http://localhost:5080'

@@ -6,26 +6,39 @@ import { DEFAULT_NOTIFY, defaultPluginSettings, loadSettings, saveSettings, type
 import { pluginIconUrl, type PluginDrop, type PluginInfo, type PluginItem } from './pluginTypes'
 import { serverIconUrl, shareIcon, withTimeout } from './itemIcons'
 import { appearanceOfMember, appearanceOfUser, shrinkPicture, type Appearance } from './profile'
-import { playSound, setSoundPacks, type SoundPack } from './sounds'
+import { playSound, setQuiet, setSoundPacks, startRing, stopRing, type SoundPack } from './sounds'
+import { applyTheme } from './theme'
 import { VoiceEngine, type IcePolicy } from './voice'
 import { VoiceHub } from './voiceHub'
+import { TransferEngine, fileSource, rememberedSource, openSink, type TransferView } from './transfer'
+import { StreamEngine, applyHint, canShareSound, soundConstraints, videoConstraints, type StreamKind } from './stream'
+import { anyPopoutVisible } from './popout'
 import {
-  ChannelType, MessageKind, RollChoice, RollKind,
+  ChannelType, MessageKind, RollChoice, RollKind, UserStatus, type PreferencesDto, type TransferSettingsDto,
   type ChannelDto, type CommandDto, type GuildSummaryDto, type MemberDto, type MessageDto, type RollItemDto, type RollResultDto, type RollSessionDto,
   type VoiceParticipantDto, type RpsSessionDto, type RpsResultDto, RpsChoice, type FriendsDto, type DmChannelDto, type RoleDto,
-  type DecorationDto, type UpdateProfileRequest, type UserDto, type UserProfileDto,
+  type DecorationDto, type UpdateProfileRequest, type UserDto, type UserProfileDto, type SystemMessageDto, type FileOfferDto, type TokenResponse, type StreamSettingsDto,
 } from './types'
 
 /** A DM rendered as a channel so chat, rolls and the overlay treat it like any other. */
 const dmChannel = (dm: DmChannelDto): ChannelDto => ({ id: dm.channelId, guildId: null, parentId: null, name: dm.other.displayName || dm.other.username, type: ChannelType.DirectMessage, position: 0 })
 const EMPTY_FRIENDS: FriendsDto = { friends: [], incoming: [], outgoing: [] }
+/** Whose remembered file offers are whose: one account on one server. */
+const offerScope = (serverUrl: string, userId: string) => `${serverUrl.replace(/\/$/, '').toLowerCase()}|${userId}`
+/** Set (to the account id) while a browser is away signing in again in order to allow P2P. */
+export const PENDING_DIRECT = 'maplecord.pendingDirect'
 
 export interface ActiveRps { session: RpsSessionDto; result: RpsResultDto | null; myPick: RpsChoice | null }
 
 export interface VoiceParticipant extends VoiceParticipantDto { state: string; speaking: boolean }
+/** A call with a friend, as this app sees it: ringing there ('calling'), ringing here ('incoming'), or answered. */
+export interface CallState { id: string; channelId: string; direct: boolean; otherId: string; otherName: string; phase: 'calling' | 'incoming' | 'active' }
+
 export interface VoiceState {
   channelId: string
   guildId: string
+  /** Set when this is a P2P call: the moment the channel became P2P. Null for a relayed call. */
+  directSince: string | null
   participants: VoiceParticipant[]
   policy: IcePolicy
   status: string
@@ -85,11 +98,53 @@ export function useMaplecord() {
   const [voice, setVoice] = useState<VoiceState | null>(null)
   const [isMuted, setIsMuted] = useState(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
-  const [voiceNotice, setVoiceNotice] = useState<{ channelId: string; guildId: string; reason: 'no-relay' | 'direct-chosen' } | null>(null)
+  /** A P2P voice channel the person tried to join and has to decide about: read its warning, or first allow P2P at all. */
+  const [directPrompt, setDirectPrompt] = useState<{ channelId: string; kind: 'warn' | 'blocked' } | null>(null)
+  /** Whether this account allows P2P connections. Kept on the server; until we have heard from it, the answer is no. */
+  const [allowDirect, setAllowDirectState] = useState(false)
+  const allowDirectRef = useRef(false)
   const voiceRef = useRef<VoiceState | null>(null)
   const joinVoiceRef = useRef<(channelId: string, acknowledged?: boolean) => Promise<void>>(async () => { /* set below */ })
   useEffect(() => { voiceRef.current = voice }, [voice])
+  /** The call we are placing, being rung for, or in. Once answered its sound is `voice`, exactly like a voice channel's. */
+  const [call, setCallState] = useState<CallState | null>(null)
+  const callRef = useRef<CallState | null>(null)
+  const setCall = useCallback((c: CallState | null) => { callRef.current = c; setCallState(c) }, [])
+  const answeringRef = useRef(false)
 
+  /** How we chose to appear and who may send us friend requests. Kept on the account, so it follows us between devices. */
+  const [preferences, setPreferencesState] = useState<PreferencesDto>({ status: UserStatus.Online, ignoreFriendRequests: false, friendRequestsSharedOnly: false })
+  const preferencesRef = useRef(preferences)
+  const applyPreferences = useCallback((p: PreferencesDto) => { preferencesRef.current = p; setPreferencesState(p); setQuiet(p.status === UserStatus.DoNotDisturb) }, [])
+  /** People we blocked: no friend requests, messages or calls from them, and what they write in servers is hidden. */
+  const [blocked, setBlockedList] = useState<UserDto[]>([])
+  const blockedRef = useRef(new Set<string>())
+  useEffect(() => { blockedRef.current = new Set(blocked.map(u => u.id)) }, [blocked])
+  /** People who are online and asked not to be disturbed. */
+  const [dndUsers, setDndUsers] = useState<Set<string>>(new Set())
+  const markDnd = useCallback((userId: string, dnd: boolean) => setDndUsers(cur => {
+    if (cur.has(userId) === dnd) return cur
+    const next = new Set(cur)
+    if (dnd) next.add(userId); else next.delete(userId)
+    return next
+  }), [])
+  /** Hearing nobody, without leaving the call. */
+  const [deafened, setDeafened] = useState(false)
+  /** The colour and picture from our own profile, drawn behind our name at the bottom of the sidebar. */
+  const [ownLook, setOwnLook] = useState<{ accentColor: string | null; bannerUrl: string | null }>({ accentColor: null, bannerUrl: null })
+  const [transferLimits, setTransferLimits] = useState<TransferSettingsDto | null>(null)
+
+  /** Files moving straight between this app and someone else's, in either direction. */
+  const [transfers, setTransfers] = useState<TransferView[]>([])
+  const [transferEngine] = useState(() => new TransferEngine({
+    signal: (offerId, target, kind, payload) => hub.fileSignal(offerId, target, kind, payload),
+    ice: (offerId, requester) => api.transferIce(offerId, requester),
+    self: () => hub.connectionId,
+    settings: () => api.transferSettings(),
+    // The same choice as for voice: unless the person allowed direct connections, only ever through a relay.
+    wantRelay: () => !allowDirectRef.current,
+    changed: setTransfers,
+  }))
   const [voiceEngine] = useState(() => new VoiceEngine(voiceHub, {
     peerState: (id, state) => setVoice(v => (v ? { ...v, participants: v.participants.map(p => (p.connectionId === id ? { ...p, state } : p)) } : v)),
     speaking: (id, speaking) => {
@@ -99,6 +154,22 @@ export function useMaplecord() {
     },
     level: () => { /* used by the audio settings meter */ },
     log: m => console.debug('[voice]', m),
+  }))
+
+  // ---- Shared video (see stream.ts). The engine holds the live MediaStreams; `streamTick` re-renders when it changes.
+  const [, setStreamTick] = useState(0)
+  const [streamRules, setStreamRules] = useState<StreamSettingsDto | null>(null)
+  const streamRulesRef = useRef<StreamSettingsDto | null>(null)
+  /** How many people are watching each stream in the voice channel we are in, by the sharer's connection. */
+  const [viewerCounts, setViewerCounts] = useState<Record<string, number>>({})
+  const stopShareRef = useRef<(reason?: string) => Promise<void>>(async () => {})
+  const [streamEngine] = useState(() => new StreamEngine({
+    signal: (target, kind, payload) => voiceHub.streamSignal(target, kind, payload),
+    rtcConfig: () => voiceEngine.rtcConfig,
+    settings: () => streamRulesRef.current,
+    changed: () => setStreamTick(t => t + 1),
+    // The shared window was closed, or the browser's own "stop sharing" bar was used.
+    captureEnded: () => { void stopShareRef.current() },
   }))
 
   const [guilds, setGuilds] = useState<GuildState[]>([])
@@ -122,6 +193,11 @@ export function useMaplecord() {
   useEffect(() => { activeRpsRef.current = activeRps }, [activeRps])
   const [typing, setTyping] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /** Messages from the server's admin, shown until dismissed. */
+  const [systemMessages, setSystemMessages] = useState<SystemMessageDto[]>([])
+  /** signOut is defined further down; the connection's status handler needs to reach it. */
+  const signOutRef = useRef<() => Promise<void>>(async () => {})
+  const dismissSystemMessage = useCallback((id: string) => setSystemMessages(list => list.filter(m => m.id !== id)), [])
   const [status, setStatus] = useState('Connecting…')
   const [commands, setCommands] = useState<CommandDto[]>([])
   const [stats, setStats] = useState<Stats>(loadStats)
@@ -181,7 +257,7 @@ export function useMaplecord() {
   // current choice; ?? {} because a window opened before these settings existed has neither map yet.
   const userPrefs = (userId: string): UserPrefs => settingsRef.current.users?.[userId] ?? {}
   const guildPrefs = (guildId: string): GuildPrefs => settingsRef.current.guilds?.[guildId] ?? {}
-  const isIgnored = (userId: string) => !!userPrefs(userId).ignored
+  const isIgnored = (userId: string) => !!userPrefs(userId).ignored || blockedRef.current.has(userId)
   /** "@name" as a word of its own, any case. */
   const mentionsMe = (content: string) => {
     const user = settingsRef.current.user
@@ -194,6 +270,7 @@ export function useMaplecord() {
   }
   /** A desktop notification, only while the app is not the focused window. Clicking it opens the channel. */
   const notifyDesktop = (title: string, body: string, channelId: string) => {
+    if (preferencesRef.current.status === UserStatus.DoNotDisturb) return
     if (document.hasFocus() || !('Notification' in window) || Notification.permission !== 'granted') return
     try {
       const n = new Notification(title, { body: body.length > 140 ? body.slice(0, 140) + '…' : body, silent: !settingsRef.current.soundEnabled })
@@ -270,7 +347,44 @@ export function useMaplecord() {
   }, [api])
 
   const connect = useCallback(async () => {
-    hub.onStatus = s => setStatus(s === 'connected' ? 'Connected' : s === 'reconnecting' ? 'Reconnecting…' : s === 'connecting' ? 'Connecting…' : 'Disconnected')
+    hub.onStatus = s => {
+      setStatus(s === 'connected' ? 'Connected' : s === 'reconnecting' ? 'Reconnecting…' : s === 'connecting' ? 'Connecting…' : 'Disconnected')
+      // The server closes the connection of an account it has just suspended. Ask it why we were dropped, and
+      // if this sign-in is no longer accepted, say so and go back to the sign-in screen instead of sitting dead.
+      // Offers are live on the connection that made them. We still have the files, so back online they are offered again.
+      if (s === 'connected') void resumeOffers()
+      if (s === 'disconnected' || s === 'reconnecting') {
+        api.me().catch(e => { if (e instanceof ApiError && e.unauthorized) { setError(e.message); void signOutRef.current() } })
+      }
+    }
+    // Files this app has offered and still has: the ones picked while it has been open, and in the desktop app the ones
+    // it remembered from before it was last closed, as long as each file is still where it was and unchanged.
+    const resumeOffers = async () => {
+      try {
+        const desktop = bridge()
+        const user = settingsRef.current.user
+        if (!user) return
+        const remembered = desktop?.offerList ? await desktop.offerList(offerScope(settingsRef.current.serverUrl, user.id)).catch(() => []) : []
+        for (const r of remembered) if (!transferEngine.hasOffer(r.offerId)) transferEngine.addOffer(r.offerId, rememberedSource(r.offerId, r.name, r.size, desktop!.offerRead))
+        const ids = transferEngine.offerIds()
+        for (let i = 0; i < ids.length; i += 20) {
+          const { resumed, gone } = await hub.resumeFileOffers(ids.slice(i, i + 20))
+          // Withdrawn, deleted, or not ours: there is nothing to keep the file ready for.
+          for (const id of gone) { transferEngine.removeOffer(id); void desktop?.offerForget?.(id) }
+          if (resumed.length) setMessages(ms => ms.map(m => (m.fileOffer && resumed.includes(m.fileOffer.id) ? { ...m, fileOffer: { ...m.fileOffer, available: true } } : m)))
+        }
+      } catch { /* offline again already; the next reconnect tries again */ }
+    }
+    // A channel switched between relayed and P2P ends the call for everyone in it: the server drops them, and we stop
+    // showing the call and say why. Nobody is carried from one kind of call into the other.
+    const dropForKindChange = (now: string | null) => {
+      void Promise.resolve(voiceEngine.leave()).catch(() => { /* nothing to stop */ })
+      streamEngine.leaveAll()
+      setViewerCounts({})
+      voiceRef.current = null
+      setVoice(null); setIsSpeaking(false)
+      setError(now ? 'That voice channel was changed to a P2P channel, so you were taken out of it. Join again if you want to.' : 'That voice channel is no longer a P2P channel, so you were taken out of it. Join again to carry on.')
+    }
     await hub.connect({
       MessageReceived: m => {
         if (selected.current.channel === m.channelId) {
@@ -317,6 +431,7 @@ export function useMaplecord() {
         friends: fr.friends.filter(x => x.user.id !== userId), incoming: fr.incoming.filter(x => x.user.id !== userId), outgoing: fr.outgoing.filter(x => x.user.id !== userId),
       })),
       FriendPresence: (userId, online) => {
+        if (!online) markDnd(userId, false)
         const mark = <T extends { user: { id: string } }>(f: T): T => (f.user.id === userId ? { ...f, online } : f)
         setFriends(fr => ({ friends: fr.friends.map(mark), incoming: fr.incoming.map(mark), outgoing: fr.outgoing.map(mark) }))
         setDms(ds => ds.map(d => (d.other.id === userId ? { ...d, online } : d)))
@@ -338,7 +453,9 @@ export function useMaplecord() {
         window.clearTimeout(typingTimer.current)
         typingTimer.current = window.setTimeout(() => setTyping(null), 4000)
       },
+      PresenceStatus: (userId, dnd) => markDnd(userId, dnd),
       MemberPresence: (guildId, userId, online) => {
+        if (!online) markDnd(userId, false)
         const g = guildsRef.current.find(x => x.guild.id === guildId)
         const m = g?.members.find(x => x.userId === userId)
         if (!g || !m) return
@@ -355,7 +472,11 @@ export function useMaplecord() {
       GuildUpdated: guild => patchGuild(guild.id, g => ({ ...g, guild })),
       GuildDeleted: guildId => setGuilds(gs => gs.filter(g => g.guild.id !== guildId)),
       ChannelCreated: c => { if (c.guildId) patchGuild(c.guildId, g => (g.channels.some(x => x.id === c.id) ? g : { ...g, channels: [...g.channels, c] })) },
-      ChannelUpdated: c => { if (c.guildId) patchGuild(c.guildId, g => ({ ...g, channels: g.channels.map(x => (x.id === c.id ? c : x)) })) },
+      ChannelUpdated: c => {
+        if (c.guildId) patchGuild(c.guildId, g => ({ ...g, channels: g.channels.map(x => (x.id === c.id ? c : x)) }))
+        const cur = voiceRef.current
+        if (cur && cur.channelId === c.id && (c.directSince ?? null) !== cur.directSince) dropForKindChange(c.directSince ?? null)
+      },
       ChannelDeleted: (guildId, channelId) => patchGuild(guildId, g => ({ ...g, channels: g.channels.filter(x => x.id !== channelId) })),
       PermissionsChanged: async guildId => { try { const fresh = await api.guild(guildId); patchGuild(guildId, g => ({ ...g, ...fresh })) } catch { /* lost access; MemberLeft handles it */ } },
       CommandsChanged: async guildId => { if (selected.current.guild === guildId) setCommands(await api.commands(guildId).catch(() => [])) },
@@ -375,15 +496,50 @@ export function useMaplecord() {
         if (!result.replay) rpsClearTimer.current = window.setTimeout(() => setActiveRps(cur => (cur?.result ? null : cur)), 12_000)
       },
       ServerNotice: n => { if (n.startsWith('guild-membership-changed:')) void loadGuilds(); else setError(n) },
+      FileRequested: (offerId, requester) => { void transferEngine.requested(offerId, requester) },
+      FileSignalReceived: (offerId, from, kind, payload) => { void transferEngine.signal(offerId, from, kind, payload) },
+      FileOfferEnded: (_channelId, offerId, withdrawn) => {
+        // Withdrawn is for good. Otherwise the sender is only offline: if that is us, we keep the file ready.
+        if (withdrawn) { transferEngine.removeOffer(offerId); void bridge()?.offerForget?.(offerId) }
+        setMessages(ms => ms.map(m => (m.fileOffer?.id === offerId ? { ...m, fileOffer: { ...m.fileOffer, available: false, withdrawn: withdrawn || m.fileOffer.withdrawn } } : m)))
+      },
+      FileOfferResumed: (_channelId, offerId) => setMessages(ms => ms.map(m => (m.fileOffer?.id === offerId ? { ...m, fileOffer: { ...m.fileOffer, available: true } } : m))),
+      SystemMessage: m => setSystemMessages(list => [...list.filter(x => x.id !== m.id), m].slice(-4)),
     })
 
     // The server knows voice membership per connection. After a reconnect (network blip, server restart) it has forgotten
     // us while we still look connected, so walk back into the channel. If the connection is gone for good, stop
     // showing us as in voice: nobody can hear us, and rolls would be refused.
-    voiceHub.onReconnected = () => { const cur = voiceRef.current; if (cur) void joinVoiceRef.current(cur.channelId, true) }
+    // The call we were placing or in is over (hung up there, declined, cut off, no longer allowed): stop all of it here.
+    const dropCall = (why: string | null) => {
+      const cur = callRef.current
+      setCall(null)
+      if (cur && voiceRef.current?.channelId === cur.channelId) {
+        void Promise.resolve(voiceEngine.leave()).catch(() => { /* nothing to stop */ })
+        streamEngine.leaveAll()
+        setViewerCounts({})
+        voiceRef.current = null
+        setVoice(null); setIsSpeaking(false)
+      }
+      if (why) setError(why)
+    }
+    voiceHub.onReconnected = () => {
+      const cur = voiceRef.current
+      if (!cur) return
+      // A call does not outlive its connection: the server ended it when ours dropped.
+      if (callRef.current?.channelId === cur.channelId) { dropCall('The call was cut off.'); return }
+      // We only walk back into the same kind of call we were in. If the channel was switched between relayed and
+      // P2P while we were away, rejoining is the person's decision to make again, not ours.
+      const now = findChannel(cur.channelId)?.channel.directSince ?? null
+      if (now !== cur.directSince) { dropForKindChange(now); return }
+      void joinVoiceRef.current(cur.channelId, true)
+    }
     voiceHub.onClosed = () => {
+      if (callRef.current) setCall(null)
       if (!voiceRef.current) return
       void Promise.resolve(voiceEngine.leave()).catch(() => { /* nothing to stop */ })
+      streamEngine.leaveAll()
+      setViewerCounts({})
       voiceRef.current = null
       setVoice(null); setIsSpeaking(false)
     }
@@ -401,16 +557,62 @@ export function useMaplecord() {
         if (cur?.channelId === c && cur.participants.some(x => x.connectionId === id))
           playSound('leave', settingsRef.current.soundProfile, settingsRef.current.soundEnabled)
         void voiceEngine.removePeer(id)
+        streamEngine.viewerLeft(id)
+        streamEngine.unwatch(id)
         setVoice(v => (v && v.channelId === c ? { ...v, participants: v.participants.filter(p => p.connectionId !== id) } : v))
       },
-      ParticipantUpdated: (c, p) => setVoice(v => (v && v.channelId === c
-        ? { ...v, participants: v.participants.map(x => (x.connectionId === p.connectionId ? { ...x, muted: p.muted } : x)) } : v)),
+      ParticipantUpdated: (c, p) => {
+        // They stopped sharing: whatever we were watching of theirs is over.
+        if (!p.stream) streamEngine.unwatch(p.connectionId)
+        setVoice(v => (v && v.channelId === c
+          ? { ...v, participants: v.participants.map(x => (x.connectionId === p.connectionId ? { ...x, muted: p.muted, stream: p.stream ?? null } : x)) } : v))
+      },
       SignalReceived: (_c, s) => { void voiceEngine.handleSignal(s) },
+      CallIncoming: c => {
+        // One call at a time: the server does not ring someone who is in one, and neither do we.
+        if (callRef.current || c.calleeId !== settingsRef.current.user?.id) return
+        setCall({ id: c.id, channelId: c.channelId, direct: c.direct, otherId: c.callerId, otherName: c.callerName, phase: 'incoming' })
+        if (document.hidden && preferencesRef.current.status !== UserStatus.DoNotDisturb && 'Notification' in window && Notification.permission === 'granted') {
+          try { new Notification(`${c.callerName} is calling`, { body: c.direct ? 'P2P call on Maplecord' : 'Call on Maplecord' }) } catch { /* not available here */ }
+        }
+      },
+      CallAnswered: c => {
+        const cur = callRef.current
+        if (!cur || cur.id !== c.id) return
+        if (cur.phase === 'calling') setCall({ ...cur, phase: 'active' })
+        // Answered on another of our own apps: this one stops ringing.
+        else if (cur.phase === 'incoming' && !answeringRef.current) setCall(null)
+      },
+      CallEnded: (id, outcome) => {
+        const cur = callRef.current
+        if (!cur || cur.id !== id) return
+        dropCall(cur.phase !== 'calling' ? null : outcome === 'declined' ? `${cur.otherName} declined the call.` : outcome === 'missed' ? `${cur.otherName} did not answer.` : null)
+      },
+      StreamWatchRequested: viewer => { void streamEngine.viewerRequested(viewer) },
+      // To a sharer this names a viewer who left; to a viewer it names a sharer whose stream is over.
+      StreamWatchEnded: id => { streamEngine.viewerLeft(id); streamEngine.unwatch(id) },
+      StreamSignalReceived: (from, kind, payload) => { void streamEngine.signal(from, kind, payload) },
+      StreamViewersChanged: (id, viewers) => setViewerCounts(counts => ({ ...counts, [id]: viewers })),
+      StreamEnded: (id, reason) => {
+        if (id === voiceHub.connectionId) { streamEngine.stopSharing(); if (reason) setError(reason) }
+        else streamEngine.unwatch(id)
+      },
     })
 
     const list = await loadGuilds()
     const [fr, dmList, decos] = await Promise.all([api.friends().catch(() => EMPTY_FRIENDS), api.dms().catch(() => [] as DmChannelDto[]), api.decorations().catch(() => [] as DecorationDto[])])
     setFriends(fr); setDms(dmList); dmsRef.current = dmList; setDecorations(decos)
+    void api.privacy().then(p => { allowDirectRef.current = p.allowDirect; setAllowDirectState(p.allowDirect) }).catch(() => { /* stays "no" */ })
+    void api.preferences().then(applyPreferences).catch(() => { /* shown as online */ })
+    void api.blocks().then(setBlockedList).catch(() => { /* none shown */ })
+    void api.transferSettings().then(setTransferLimits).catch(() => { /* the tooltip says less */ })
+    const self = settingsRef.current.user
+    if (self) void api.profile(self.id).then(p => setOwnLook({ accentColor: p.accentColor, bannerUrl: p.bannerUrl })).catch(() => { /* plain background */ })
+    setDndUsers(new Set([
+      ...list.flatMap(g => g.members.filter(m => m.dnd).map(m => m.userId)),
+      ...fr.friends.filter(f => f.dnd).map(f => f.user.id),
+      ...dmList.filter(d => d.dnd).map(d => d.other.id),
+    ]))
     const s = settingsRef.current
     const guild = list.find(g => g.guild.id === s.lastGuildId) ?? list[0]
     if (guild) {
@@ -420,7 +622,7 @@ export function useMaplecord() {
       if (channel) setSelectedChannelId(channel.id)
     } else setHome(true)
     setReady(true)
-  }, [api, hub, loadGuilds, onRollEnded, onRollStarted, patchGuild, updateSettings, voiceEngine, voiceHub])
+  }, [api, applyPreferences, hub, loadGuilds, markDnd, onRollEnded, onRollStarted, patchGuild, setCall, updateSettings, voiceEngine, voiceHub])
 
   // ---- Selection ----------------------------------------------------------
 
@@ -516,11 +718,66 @@ export function useMaplecord() {
     await run(() => hub.sendMessage(channelId, text.trim(), attachmentIds))
   }, [hub])
 
-  const sendImage = useCallback(async (file: File, text = '') => {
+  /** Keep the file behind an offer ready to send. The desktop app also remembers where it is, for after a restart. */
+  const holdOffer = useCallback((offerId: string, file: File) => {
+    transferEngine.addOffer(offerId, fileSource(file))
+    const user = settingsRef.current.user
+    if (user) void bridge()?.offerRemember?.(offerId, file, offerScope(settingsRef.current.serverUrl, user.id))?.catch(() => { /* offered for this run only */ })
+  }, [transferEngine])
+
+  /** Offer a file straight from this app: nothing is stored on the server, and people must be online to get it. */
+  const offerFile = useCallback(async (file: File) => {
     const channelId = selected.current.channel
     if (!channelId) return
-    await run(async () => { const a = await api.upload(channelId, file); await hub.sendMessage(channelId, text, [a.id]) })
-  }, [api, hub])
+    await run(async () => {
+      const m = await hub.offerFile(channelId, file.name, file.size)
+      if (m.fileOffer) holdOffer(m.fileOffer.id, file)
+    })
+  }, [hub, holdOffer])
+
+  const withdrawFile = useCallback(async (offerId: string) => {
+    transferEngine.removeOffer(offerId)
+    void bridge()?.offerForget?.(offerId)
+    await run(() => hub.cancelFileOffer(offerId))
+  }, [hub, transferEngine])
+
+  /** Ask where to save an offered file, then ask its sender for it. */
+  const downloadFile = useCallback(async (offer: FileOfferDto) => {
+    await run(async () => {
+      const sink = await openSink(offer.fileName, offer.size, bridge())
+      if (!sink) return
+      transferEngine.receive(offer.id, offer.fileName, offer.size, sink)
+      try { await hub.requestFile(offer.id) }
+      catch (e) { transferEngine.cancel(`${offer.id}<`); throw e }
+    })
+  }, [hub, transferEngine])
+
+  const cancelTransfer = useCallback((key: string) => transferEngine.cancel(key), [transferEngine])
+
+  const [uploading, setUploading] = useState<string | null>(null)
+  const sendFile = useCallback(async (file: File, text = '') => {
+    const channelId = selected.current.channel
+    if (!channelId) return
+    await run(async () => {
+      // Ask first, so a file that is too big is refused before it is uploaded rather than after.
+      const rules = await api.uploadSettings().catch(() => null)
+      if (rules && !rules.enabled) throw new Error('Uploads are turned off on this server right now.')
+      if (rules && file.size > rules.maxBytes) {
+        // Too big to keep on the server, but it can still go straight to whoever is online.
+        const direct = await api.transferSettings().catch(() => null)
+        if (direct?.enabled) {
+          const m = await hub.offerFile(channelId, file.name, file.size)
+          if (m.fileOffer) holdOffer(m.fileOffer.id, file)
+          setError(`${file.name} is over the ${(rules.maxBytes / 1048576).toFixed(0)} MB upload limit, so it is offered directly from your computer instead. People can download it while Maplecord is open here.`)
+          return
+        }
+        throw new Error(`${file.name} is ${(file.size / 1048576).toFixed(1)} MB. The limit here is ${(rules.maxBytes / 1048576).toFixed(0)} MB.`)
+      }
+      setUploading(file.name)
+      try { const a = await api.upload(channelId, file); await hub.sendMessage(channelId, text, [a.id]) }
+      finally { setUploading(null) }
+    })
+  }, [api, hub, holdOffer])
 
   const notifyTyping = useCallback(() => {
     const channelId = selected.current.channel
@@ -615,9 +872,9 @@ export function useMaplecord() {
     })
   }, [api])
 
-  const createChannel = useCallback(async (name: string, type: number, parentId: string | null) => {
+  const createChannel = useCallback(async (name: string, type: number, parentId: string | null, direct = false) => {
     const g = selected.current.guild
-    if (g) await run(() => api.createChannel(g, name, type, parentId))
+    if (g) await run(() => api.createChannel(g, name, type, parentId, direct))
   }, [api])
 
   const leaveGuild = useCallback(async () => {
@@ -666,14 +923,145 @@ export function useMaplecord() {
   const leaveVoice = useCallback(async () => {
     if (!voiceRef.current) return
     const left = voiceRef.current.channelId
+    streamEngine.leaveAll()
+    setViewerCounts({})
     try { await voiceEngine.leave() } catch { /* nothing to stop */ }
     try { await voiceHub.leave() } catch { /* hub gone */ }
     voiceRef.current = null
     setVoice(null); setIsSpeaking(false)
+    // Leaving a call is hanging up (or giving up on one that is still ringing): the server ends it for both.
+    if (callRef.current?.channelId === left) setCall(null)
     // We walked out of that party: its roll is no longer ours (the server passes for us).
     setActiveRoll(cur => (cur && cur.session.channelId === left ? null : cur))
     setActiveRps(cur => (cur && cur.session.channelId === left ? null : cur))
-  }, [voiceEngine, voiceHub])
+  }, [setCall, voiceEngine, voiceHub])
+
+  // ---- Sharing a screen, an app window or a camera with the voice channel -----------------------------------------
+
+  const loadStreamRules = useCallback(async () => {
+    const rules = await api.streamSettings()
+    streamRulesRef.current = rules
+    setStreamRules(rules)
+    return rules
+  }, [api])
+
+  /** Tell the channel we are sharing and hand the capture to the engine. Nothing is sent until someone watches. */
+  const shareStream = useCallback(async (media: MediaStream, kind: StreamKind) => {
+    try { await voiceHub.startStream(kind) }
+    catch (e) { media.getTracks().forEach(t => t.stop()); throw e }
+    streamEngine.start(media, kind)
+  }, [streamEngine, voiceHub])
+
+  /**
+   * Start sharing. In the desktop app `sourceId` is the window or screen picked in our own dialog; in a browser it
+   * is null and the browser shows its own picker.
+   */
+  const startShare = useCallback(async (source: { type: 'camera' } | { type: 'display'; sourceId: string | null; kind: StreamKind | null }, hint: 'motion' | 'detail' = 'motion', sound = false) => {
+    if (!voiceRef.current) { setError('Join a voice channel first, then share with the people in it.'); return }
+    await run(async () => {
+      const rules = await loadStreamRules()
+      if (!rules.enabled) throw new Error('Sharing video is turned off on this server right now.')
+      let media: MediaStream
+      let kind: StreamKind
+      try {
+        if (source.type === 'camera') {
+          media = await navigator.mediaDevices.getUserMedia({ video: { ...videoConstraints(rules), height: { max: rules.maxHeight, ideal: rules.maxHeight } }, audio: false })
+          kind = 'camera'
+        } else {
+          if (source.sourceId) await bridge()?.shareChoose(source.sourceId)
+          // Sound is only ever asked for where this app's own sound can be left out of it: otherwise everyone in the
+          // call would hear themselves coming back.
+          media = await navigator.mediaDevices.getDisplayMedia({ video: videoConstraints(rules), audio: sound && canShareSound() ? soundConstraints() : false })
+          kind = source.kind ?? (media.getVideoTracks()[0]?.getSettings().displaySurface === 'monitor' ? 'screen' : 'window')
+        }
+      } catch (e) {
+        // Closing the browser's picker is not an error worth a message.
+        if (e instanceof DOMException && (e.name === 'NotAllowedError' || e.name === 'AbortError') && source.type === 'display' && !source.sourceId) return
+        throw new Error(source.type === 'camera' ? 'The camera could not be opened. Is another app using it?' : 'That could not be shared. If it is a window, make sure it is not minimised.')
+      }
+      applyHint(media, kind === 'camera' ? 'motion' : hint)
+      await shareStream(media, kind)
+    })
+  }, [loadStreamRules, shareStream])
+
+  const stopShare = useCallback(async (reason?: string) => {
+    streamEngine.stopSharing()
+    try { await voiceHub.stopStream(reason ?? null) } catch { /* not in voice any more */ }
+  }, [streamEngine, voiceHub])
+  stopShareRef.current = stopShare
+
+  const watchStream = useCallback(async (streamer: string) => {
+    await run(async () => {
+      if (!streamRulesRef.current) await loadStreamRules().catch(() => null)
+      streamEngine.watch(streamer)
+      try { await voiceHub.watchStream(streamer) }
+      catch (e) { streamEngine.unwatch(streamer); throw e }
+    })
+  }, [loadStreamRules, streamEngine, voiceHub])
+
+  const unwatchStream = useCallback(async (streamer: string) => {
+    streamEngine.unwatch(streamer)
+    try { await voiceHub.unwatchStream(streamer) } catch { /* the stream or the call is already gone */ }
+  }, [streamEngine, voiceHub])
+
+  const sharing = streamEngine.sharing
+
+  // A stream whose sharer has walked away ends: no speech and no keyboard or mouse for the time the server sets.
+  // Only the desktop app can know about the keyboard and mouse, so only it applies this.
+  const speakingRef = useRef(false)
+  const lastSpokeRef = useRef(0)
+  useEffect(() => { speakingRef.current = isSpeaking; if (isSpeaking) lastSpokeRef.current = Date.now() }, [isSpeaking])
+  useEffect(() => {
+    const desktop = bridge()
+    const minutes = streamRules?.inactiveMinutes ?? 0
+    if (!sharing || !desktop || minutes <= 0) return
+    lastSpokeRef.current = Date.now()
+    const timer = window.setInterval(async () => {
+      const idle = await desktop.systemIdleSeconds().catch(() => 0)
+      const quiet = speakingRef.current ? 0 : (Date.now() - lastSpokeRef.current) / 1000
+      if (Math.min(idle, quiet) < minutes * 60) return
+      const span = minutes === 1 ? 'a minute' : `${minutes} minutes`
+      setError(`Your stream ended because you were away for ${span}.`)
+      void stopShareRef.current(`The stream ended because its sharer was away for ${span}.`)
+    }, 15000)
+    return () => window.clearInterval(timer)
+  }, [sharing, streamRules])
+
+  // Video is not sent to someone who is not looking: when this window has been hidden for a little while we stop
+  // watching, and pick the same streams up again when it comes back.
+  const pausedRef = useRef<string[]>([])
+  useEffect(() => {
+    let timer: number | undefined
+    const onChange = () => {
+      window.clearTimeout(timer)
+      // "Not looking" means the app is hidden and no stream is showing in a window of its own.
+      const watchingSomewhere = !document.hidden || anyPopoutVisible()
+      if (!watchingSomewhere) {
+        timer = window.setTimeout(() => {
+          if (!document.hidden || anyPopoutVisible()) return
+          const live = streamEngine.watching().filter(w => w.state !== 'failed').map(w => w.streamer)
+          if (live.length === 0) return
+          pausedRef.current = live
+          for (const streamer of live) void unwatchStream(streamer)
+        }, 15000)
+      } else if (pausedRef.current.length > 0) {
+        const resume = pausedRef.current
+        pausedRef.current = []
+        const stillSharing = new Set((voiceRef.current?.participants ?? []).filter(p => p.stream).map(p => p.connectionId))
+        for (const streamer of resume) if (stillSharing.has(streamer)) void watchStream(streamer)
+      }
+    }
+    document.addEventListener('visibilitychange', onChange)
+    return () => { document.removeEventListener('visibilitychange', onChange); window.clearTimeout(timer) }
+  }, [streamEngine, unwatchStream, watchStream])
+
+  // In development only: lets a test hand the app a made-up video to share, since a real capture needs a person to pick it.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return
+    const w = window as unknown as { __maplecordDev?: unknown }
+    w.__maplecordDev = { shareStream: async (media: MediaStream, kind: StreamKind) => { await loadStreamRules(); await shareStream(media, kind) } }
+    return () => { delete w.__maplecordDev }
+  }, [loadStreamRules, shareStream])
 
   /**
    * Join a voice channel. Relay is the default; if the server has no relay (or the user chose direct),
@@ -684,21 +1072,26 @@ export function useMaplecord() {
     if (!found?.guild || found.channel.type !== ChannelType.Voice) return
     const guildId = found.guild.guild.id
     const s = settingsRef.current
+    // A P2P channel is never joined in passing. The account must allow P2P at all, and the person must have read this
+    // channel's warning (once per channel, and again if the channel has been switched since).
+    const directSince = found.channel.directSince ?? null
+    if (directSince) {
+      if (!allowDirectRef.current) { setDirectPrompt({ channelId, kind: 'blocked' }); return }
+      if (!acknowledged && s.directAcknowledged[channelId] !== directSince) { setDirectPrompt({ channelId, kind: 'warn' }); return }
+    }
     await run(async () => {
+      // For a relayed channel the server hands out a relay or refuses: there is nothing here to fall back to.
       const ice = await api.iceServers(channelId)
-      const wanted: IcePolicy = s.protectIp ? 'relay' : 'direct'
-      const policy = voiceEngine.configure(ice, wanted)
-      if (policy === 'direct' && !acknowledged && !s.voiceNoticeAcknowledged.includes(guildId)) {
-        setVoiceNotice({ channelId, guildId, reason: wanted === 'relay' ? 'no-relay' : 'direct-chosen' })
-        return
-      }
+      voiceEngine.maxAudioKbps = (await api.voiceSettings().catch(() => null))?.audioKbps ?? 0
+      const policy = voiceEngine.configure(ice, directSince ? 'direct' : 'relay')
+      if (!directSince && policy !== 'relay') throw new Error('No voice relay is available right now, so this channel cannot connect.')
       if (voiceRef.current) await leaveVoice()
       voiceEngine.setDevices(s.audioInputDeviceId, s.audioOutputDeviceId)
-      const others = await voiceHub.join(channelId)
+      const others = directSince ? await voiceHub.joinDirect(channelId) : await voiceHub.join(channelId)
       const user = s.user!
       const selfId = voiceHub.connectionId ?? 'self'
       const joined: VoiceState = {
-        channelId, guildId, policy, status: '',
+        channelId, guildId, directSince, policy, status: '',
         participants: [
           ...others.map(p => ({ ...p, state: 'connecting', speaking: false })),
           { userId: user.id, username: user.username, connectionId: selfId, muted: isMuted, state: '', speaking: false },
@@ -722,6 +1115,89 @@ export function useMaplecord() {
   }, [api, hub, isMuted, leaveVoice, onRollStarted, voiceEngine, voiceHub])
 
   useEffect(() => { joinVoiceRef.current = joinVoice }, [joinVoice])
+
+  // ---- Calls with a friend ---------------------------------------------------------
+  // A call is voice in the direct-message channel the two share. It is relayed unless the caller asked for a P2P
+  // call, both accounts allow P2P, and the person answering was shown that this is what it is.
+
+  /** Take our place in a call's room: the same engine as a voice channel, set up for this call's kind and no other. */
+  const enterCall = useCallback(async (channelId: string, direct: boolean, connect: () => Promise<VoiceParticipantDto[]>) => {
+    const s = settingsRef.current
+    const ice = await api.iceServers(channelId)
+    voiceEngine.maxAudioKbps = (await api.voiceSettings().catch(() => null))?.audioKbps ?? 0
+    const policy = voiceEngine.configure(ice, direct ? 'direct' : 'relay')
+    if (!direct && policy !== 'relay') throw new Error('No voice relay is available right now, so the call cannot connect. It will not fall back to a direct connection.')
+    voiceEngine.setDevices(s.audioInputDeviceId, s.audioOutputDeviceId)
+    const others = await connect()
+    const user = s.user!
+    const joined: VoiceState = {
+      channelId, guildId: '', directSince: direct ? new Date().toISOString() : null, policy, status: '',
+      participants: [
+        ...others.map(p => ({ ...p, state: 'connecting', speaking: false })),
+        { userId: user.id, username: user.username, connectionId: voiceHub.connectionId ?? 'self', muted: isMuted, state: '', speaking: false },
+      ],
+    }
+    voiceRef.current = joined
+    setVoice(joined)
+    if (isMuted) void voiceHub.setMuted(true)
+    try { await voiceEngine.join(others) }
+    catch (e) { setVoice(v => (v ? { ...v, status: 'No microphone: ' + (e instanceof Error ? e.message : e) } : v)) }
+  }, [api, isMuted, voiceEngine, voiceHub])
+
+  const startCall = useCallback(async (userId: string, direct: boolean) => {
+    if (callRef.current) return
+    await run(async () => {
+      const dm = await api.openDm(userId)
+      setDms(ds => (ds.some(d => d.channelId === dm.channelId) ? ds : [dm, ...ds]))
+      dmsRef.current = dmsRef.current.some(d => d.channelId === dm.channelId) ? dmsRef.current : [dm, ...dmsRef.current]
+      if (voiceRef.current) await leaveVoice()
+      // Until this call's own connection details are in, nothing here may connect any way but through a relay.
+      voiceEngine.configure([], 'relay')
+      const placed = await voiceHub.startCall(dm.channelId, direct)
+      setCall({ id: placed.id, channelId: placed.channelId, direct: placed.direct, otherId: placed.calleeId, otherName: placed.calleeName, phase: 'calling' })
+      try { await enterCall(placed.channelId, placed.direct, async () => []) }
+      catch (e) {
+        setCall(null)
+        try { await voiceHub.leave() } catch { /* hub gone */ }
+        throw e
+      }
+    })
+  }, [api, enterCall, leaveVoice, setCall, voiceEngine, voiceHub])
+
+  const answerCall = useCallback(async () => {
+    const c = callRef.current
+    if (!c || c.phase !== 'incoming' || answeringRef.current) return
+    answeringRef.current = true
+    try {
+      await run(async () => {
+        if (voiceRef.current) await leaveVoice()
+        try {
+          await enterCall(c.channelId, c.direct, () => voiceHub.joinCall(c.id, c.direct))
+          if (callRef.current?.id === c.id) setCall({ ...c, phase: 'active' })
+        } catch (e) {
+          if (callRef.current?.id === c.id) setCall(null)
+          void voiceHub.declineCall(c.id).catch(() => { /* already over */ })
+          throw e
+        }
+      })
+    } finally { answeringRef.current = false }
+  }, [enterCall, leaveVoice, setCall, voiceHub])
+
+  const declineCall = useCallback(async () => {
+    const c = callRef.current
+    if (!c || c.phase !== 'incoming') return
+    setCall(null)
+    try { await voiceHub.declineCall(c.id) } catch { /* already over */ }
+  }, [setCall, voiceHub])
+
+  // It rings for as long as there is a call nobody has answered.
+  const callPhase = call?.phase ?? null
+  useEffect(() => {
+    if (callPhase === 'incoming') startRing('incoming', settings.soundEnabled)
+    else if (callPhase === 'calling') startRing('outgoing', settings.soundEnabled)
+    else stopRing()
+    return stopRing
+  }, [callPhase, settings.soundEnabled])
   useEffect(() => { selectChannelRef.current = selectChannel }, [selectChannel])
 
   // ---- Profiles ------------------------------------------------------------------
@@ -741,6 +1217,7 @@ export function useMaplecord() {
   /** Our own profile changed: keep the copy of ourselves that the rest of the app draws from in step. */
   const applyOwnProfile = useCallback((p: UserProfileDto) => {
     const cur = settingsRef.current.user
+    if (cur && cur.id === p.id) setOwnLook({ accentColor: p.accentColor, bannerUrl: p.bannerUrl })
     if (cur && cur.id === p.id) updateSettings({ user: { ...cur, displayName: p.displayName, avatarUrl: p.avatarUrl, nameFont: p.nameFont, nameColor: p.nameColor, nameColor2: p.nameColor2, decoration: p.decoration } })
   }, [updateSettings])
   /** Throws with the server's reason if a field is refused, so the editor can show it next to the form. */
@@ -787,13 +1264,48 @@ export function useMaplecord() {
     }
   }, [settings.users, voiceEngine, voiceHub, voicePeers])
 
-  const acknowledgeVoiceNotice = useCallback(async () => {
-    const n = voiceNotice
-    setVoiceNotice(null)
-    if (!n) return
-    updateSettings({ voiceNoticeAcknowledged: [...settingsRef.current.voiceNoticeAcknowledged, n.guildId] })
-    await joinVoice(n.channelId, true)
-  }, [joinVoice, updateSettings, voiceNotice])
+  /** The person read a P2P channel's warning and chose to join. Remembered for that channel as it is now. */
+  const confirmDirect = useCallback(async () => {
+    const p = directPrompt
+    setDirectPrompt(null)
+    if (!p || p.kind !== 'warn') return
+    const since = findChannel(p.channelId)?.channel.directSince
+    if (!since) return
+    updateSettings({ directAcknowledged: { ...settingsRef.current.directAcknowledged, [p.channelId]: since } })
+    await joinVoice(p.channelId, true)
+  }, [directPrompt, joinVoice, updateSettings])
+
+  /** Turning P2P off is immediate. Turning it on is refused by the server unless this sign-in is minutes old. */
+  const setAllowDirect = useCallback(async (on: boolean) => {
+    const p = await api.setPrivacy(on)
+    allowDirectRef.current = p.allowDirect
+    setAllowDirectState(p.allowDirect)
+  }, [api])
+
+  /**
+   * Sign in again and, if it comes back as the same account, allow P2P. The desktop app and the development sign-in
+   * do it in place. A browser has to leave for the provider and come back; App.tsx finishes the job on return.
+   */
+  const reauthenticateForDirect = useCallback(async (provider: string, devUsername = '') => {
+    const serverUrl = settingsRef.current.serverUrl
+    const mine = settingsRef.current.user?.id ?? ''
+    let token: TokenResponse
+    if (provider === 'dev') token = await api.devLogin(serverUrl, devUsername)
+    else {
+      const desktop = bridge()
+      if (!desktop) {
+        sessionStorage.setItem(PENDING_DIRECT, mine)
+        window.location.href = `${serverUrl.replace(/\/$/, '')}/auth/login/${provider}?redirect_uri=${encodeURIComponent(window.location.origin + window.location.pathname)}`
+        return
+      }
+      token = await api.exchangeCode(serverUrl, await desktop.oauthLogin(serverUrl, provider))
+    }
+    if (token.user.id !== mine) throw new Error('That sign-in is a different account. Sign in as the account you are using now.')
+    updateSettings({ accessToken: token.accessToken, tokenExpires: token.expiresAt, user: token.user })
+    await setAllowDirect(true)
+  }, [api, setAllowDirect, updateSettings])
+
+  const setChannelDirect = useCallback(async (channelId: string, direct: boolean) => { await run(() => api.setChannelDirect(channelId, direct)) }, [api])
 
   const toggleMute = useCallback(() => {
     setIsMuted(m => {
@@ -808,20 +1320,44 @@ export function useMaplecord() {
   const setAudioDevices = useCallback(async (input: string | null, output: string | null) => {
     const changed = input !== settingsRef.current.audioInputDeviceId || output !== settingsRef.current.audioOutputDeviceId
     updateSettings({ audioInputDeviceId: input, audioOutputDeviceId: output })
-    voiceEngine.setDevices(input, output)
+    // In a call the change is made on the spot. A microphone that cannot be swapped in place is picked up by joining
+    // the channel again; a call with a friend is left as it is rather than hung up.
+    const live = await voiceEngine.switchDevices(input, output)
     const current = voiceRef.current
-    if (changed && current) { await leaveVoice(); await joinVoice(current.channelId, true) }
+    if (changed && current && !live && !callRef.current) { await leaveVoice(); await joinVoice(current.channelId, true) }
   }, [joinVoice, leaveVoice, updateSettings, voiceEngine])
 
-  const setProtectIp = useCallback((on: boolean) => updateSettings({ protectIp: on }), [updateSettings])
+  const savePreferences = useCallback(async (patch: Partial<PreferencesDto>) => run(async () => {
+    applyPreferences(await api.setPreferences({ ...preferencesRef.current, ...patch }))
+  }), [api, applyPreferences])
+
+  const setBlocked = useCallback(async (userId: string, on: boolean) => run(async () => {
+    if (on) {
+      const user = await api.block(userId)
+      setBlockedList(list => [...list.filter(u => u.id !== userId), user])
+    } else {
+      await api.unblock(userId)
+      setBlockedList(list => list.filter(u => u.id !== userId))
+    }
+  }), [api])
+
+  const toggleDeafen = useCallback(() => setDeafened(d => !d), [])
+  const outputVolume = settings.outputVolume ?? 1
+  useEffect(() => { voiceEngine.setOutput(outputVolume, deafened) }, [deafened, outputVolume, voiceEngine, voicePeers])
+  useEffect(() => { applyTheme(settings.theme) }, [settings.theme])
+
 
   const signOut = useCallback(async () => {
     await leaveVoice()
     await voiceHub.disconnect()
     await hub.disconnect()
+    // What was picked while signed in is let go of. What the desktop app remembers stays, for this account's next sign-in.
+    transferEngine.dropOffers()
     updateSettings({ accessToken: null, tokenExpires: null, user: null })
     setGuilds([]); setSelectedGuildId(null); setSelectedChannelId(null); setHome(false); setFriends(EMPTY_FRIENDS); setDms([]); setReady(false)
-  }, [hub, leaveVoice, updateSettings, voiceHub])
+  }, [hub, leaveVoice, transferEngine, updateSettings, voiceHub])
+
+  signOutRef.current = signOut
 
   const selectedGuild = home ? null : guilds.find(g => g.guild.id === selectedGuildId) ?? null
   const selectedDm = home ? dms.find(d => d.channelId === selectedChannelId) ?? null : null
@@ -1070,9 +1606,9 @@ export function useMaplecord() {
   }, [activeRoll, activeRps, dms, guilds, home, itemIcon, partyChannel, partyLabel, pendingDrops, ready, selectedDm, selectedGuild, settings.overlayEnabled, voiceChannelId])
 
   return {
-    api, hub, settings, updateSettings, ready, status, error, setError,
+    api, hub, settings, updateSettings, ready, status, error, setError, systemMessages, dismissSystemMessage,
     guilds, selectedGuild, selectedChannel, selectedDm, home, friends, dms, dmUnread, messages, canLoadOlder, activeRoll, typing, commands, stats,
-    connect, selectGuild, selectChannel, openHome, openDm, addFriend, removeFriend, searchUsers, sendMessage, sendImage, notifyTyping, loadOlder,
+    connect, selectGuild, selectChannel, openHome, openDm, addFriend, removeFriend, searchUsers, sendMessage, sendFile, uploading, offerFile, withdrawFile, downloadFile, cancelTransfer, transfers, notifyTyping, loadOlder,
     renameGuild, setGuildIcon, createRole, updateRole, deleteRole, setMemberRoles,
     partyChannel, partyLabel,
     setUserPrefs, setGuildPrefs, markGuildRead, mentionsMe,
@@ -1083,9 +1619,14 @@ export function useMaplecord() {
     startRoll, quickRoll, roll, voteEnd, dismissRoll, coinFlip, invokeCommand,
     activeRps, startRps, rpsPick, rpsThrow, dismissRps,
     createGuild, joinGuild, createInvite, createChannel, leaveGuild, kickMember, banMember, signOut,
-    voice, isMuted, isSpeaking, voiceNotice, joinVoice, leaveVoice, toggleMute, acknowledgeVoiceNotice, dismissVoiceNotice: () => setVoiceNotice(null),
-    setAudioDevices, setProtectIp,
-    me: () => settingsRef.current.user,
+    sharing, localStream: streamEngine.localStream, shareViewers: streamEngine.viewerCounts(), watching: streamEngine.watching(),
+    streamOf: (streamer: string) => streamEngine.streamOf(streamer), viewerCounts, streamRules, loadStreamRules,
+    startShare, stopShare, watchStream, unwatchStream, setStreamLimit: (streamer: string, kbps: number) => streamEngine.requestLimit(streamer, kbps),
+    voice, isMuted, isSpeaking, joinVoice, leaveVoice, toggleMute,
+    call, startCall, answerCall, declineCall,
+    preferences, savePreferences, blocked, setBlocked, dndUsers, deafened, toggleDeafen, ownLook, transferLimits,
+    allowDirect, setAllowDirect, reauthenticateForDirect, directPrompt, confirmDirect, dismissDirectPrompt: () => setDirectPrompt(null), setChannelDirect,
+    setAudioDevices, me: () => settingsRef.current.user,
     MessageKind,
   }
 }
