@@ -21,6 +21,8 @@ It needs a Maplecord server to connect to.
 - Share an app window, a whole screen or your camera with your voice channel. Others click LIVE to watch;
   nothing is sent until they do. The desktop app can send the computer's sound with it (everything it plays except
   Maplecord itself, so the call doesn't echo); tick "Share this computer's sound too" in the picker.
+  The sharer picks a quality (up to what the server allows; P2P channels can be allowed more, e.g. 1080p at 60)
+  and sees what is going out on their own preview.
   A stream you are watching can go full screen or be popped out into its own window. Right-click it to mute it,
   change its volume, or ask to be sent a lower quality on a slow connection.
 - In-game overlay with global hotkeys (desktop only)

@@ -109,6 +109,8 @@ export interface VoiceParticipantDto { userId: string; username: string; connect
 export interface StreamSettingsDto {
   enabled: boolean; maxStreamsPerChannel: number; maxViewersDirect: number; maxViewersRelayed: number
   maxHeight: number; maxFps: number; maxKbps: number; noViewersMinutes: number; inactiveMinutes: number
+  /** The limits in P2P channels and calls, where video does not cross the relay. */
+  directMaxHeight?: number; directMaxFps?: number; directMaxKbps?: number
 }
 export interface VoiceSignalDto { fromUserId: string; fromConnectionId: string; kind: 'offer' | 'answer' | 'ice'; payload: string }
 

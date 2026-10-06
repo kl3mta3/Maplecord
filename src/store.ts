@@ -11,7 +11,7 @@ import { applyTheme } from './theme'
 import { VoiceEngine, type IcePolicy } from './voice'
 import { VoiceHub } from './voiceHub'
 import { TransferEngine, fileSource, rememberedSource, openSink, type TransferView } from './transfer'
-import { StreamEngine, applyHint, canShareSound, soundConstraints, videoConstraints, type StreamKind } from './stream'
+import { StreamEngine, applyHint, canShareSound, defaultQuality, qualityChoices, soundConstraints, videoConstraints, type StreamKind, type StreamQuality } from './stream'
 import { anyPopoutVisible } from './popout'
 import {
   ChannelType, MessageKind, RollChoice, RollKind, UserStatus, type PreferencesDto, type TransferSettingsDto,
@@ -946,32 +946,36 @@ export function useMaplecord() {
   }, [api])
 
   /** Tell the channel we are sharing and hand the capture to the engine. Nothing is sent until someone watches. */
-  const shareStream = useCallback(async (media: MediaStream, kind: StreamKind) => {
+  const shareStream = useCallback(async (media: MediaStream, kind: StreamKind, quality: StreamQuality | null = null) => {
     try { await voiceHub.startStream(kind) }
     catch (e) { media.getTracks().forEach(t => t.stop()); throw e }
-    streamEngine.start(media, kind)
+    streamEngine.start(media, kind, quality)
   }, [streamEngine, voiceHub])
 
   /**
    * Start sharing. In the desktop app `sourceId` is the window or screen picked in our own dialog; in a browser it
    * is null and the browser shows its own picker.
    */
-  const startShare = useCallback(async (source: { type: 'camera' } | { type: 'display'; sourceId: string | null; kind: StreamKind | null }, hint: 'motion' | 'detail' = 'motion', sound = false) => {
+  const startShare = useCallback(async (source: { type: 'camera' } | { type: 'display'; sourceId: string | null; kind: StreamKind | null }, hint: 'motion' | 'detail' = 'motion', sound = false, wanted: StreamQuality | null = null) => {
     if (!voiceRef.current) { setError('Join a voice channel first, then share with the people in it.'); return }
     await run(async () => {
       const rules = await loadStreamRules()
       if (!rules.enabled) throw new Error('Sharing video is turned off on this server right now.')
+      // The quality asked for, held to what this kind of channel allows: P2P channels and calls have limits of their own.
+      const direct = !!voiceRef.current?.directSince
+      const allowed = qualityChoices(rules, direct)
+      const quality = (wanted && allowed.find(q => q.height === wanted.height && q.fps === wanted.fps)) || defaultQuality(rules, direct)
       let media: MediaStream
       let kind: StreamKind
       try {
         if (source.type === 'camera') {
-          media = await navigator.mediaDevices.getUserMedia({ video: { ...videoConstraints(rules), height: { max: rules.maxHeight, ideal: rules.maxHeight } }, audio: false })
+          media = await navigator.mediaDevices.getUserMedia({ video: { ...videoConstraints(quality), height: { max: quality.height, ideal: quality.height } }, audio: false })
           kind = 'camera'
         } else {
           if (source.sourceId) await bridge()?.shareChoose(source.sourceId)
           // Sound is only ever asked for where this app's own sound can be left out of it: otherwise everyone in the
           // call would hear themselves coming back.
-          media = await navigator.mediaDevices.getDisplayMedia({ video: videoConstraints(rules), audio: sound && canShareSound() ? soundConstraints() : false })
+          media = await navigator.mediaDevices.getDisplayMedia({ video: videoConstraints(quality), audio: sound && canShareSound() ? soundConstraints() : false })
           kind = source.kind ?? (media.getVideoTracks()[0]?.getSettings().displaySurface === 'monitor' ? 'screen' : 'window')
         }
       } catch (e) {
@@ -980,7 +984,7 @@ export function useMaplecord() {
         throw new Error(source.type === 'camera' ? 'The camera could not be opened. Is another app using it?' : 'That could not be shared. If it is a window, make sure it is not minimised.')
       }
       applyHint(media, kind === 'camera' ? 'motion' : hint)
-      await shareStream(media, kind)
+      await shareStream(media, kind, quality)
     })
   }, [loadStreamRules, shareStream])
 
@@ -1059,7 +1063,7 @@ export function useMaplecord() {
   useEffect(() => {
     if (!import.meta.env.DEV) return
     const w = window as unknown as { __maplecordDev?: unknown }
-    w.__maplecordDev = { shareStream: async (media: MediaStream, kind: StreamKind) => { await loadStreamRules(); await shareStream(media, kind) } }
+    w.__maplecordDev = { shareStream: async (media: MediaStream, kind: StreamKind, quality?: StreamQuality) => { const rules = await loadStreamRules(); await shareStream(media, kind, quality ?? defaultQuality(rules, !!voiceRef.current?.directSince)) } }
     return () => { delete w.__maplecordDev }
   }, [loadStreamRules, shareStream])
 
@@ -1619,7 +1623,7 @@ export function useMaplecord() {
     startRoll, quickRoll, roll, voteEnd, dismissRoll, coinFlip, invokeCommand,
     activeRps, startRps, rpsPick, rpsThrow, dismissRps,
     createGuild, joinGuild, createInvite, createChannel, leaveGuild, kickMember, banMember, signOut,
-    sharing, localStream: streamEngine.localStream, shareViewers: streamEngine.viewerCounts(), watching: streamEngine.watching(),
+    sharing, shareQuality: streamEngine.quality, localStream: streamEngine.localStream, shareViewers: streamEngine.viewerCounts(), watching: streamEngine.watching(),
     streamOf: (streamer: string) => streamEngine.streamOf(streamer), viewerCounts, streamRules, loadStreamRules,
     startShare, stopShare, watchStream, unwatchStream, setStreamLimit: (streamer: string, kbps: number) => streamEngine.requestLimit(streamer, kbps),
     voice, isMuted, isSpeaking, joinVoice, leaveVoice, toggleMute,

@@ -15,6 +15,37 @@ import { isRelayed } from './transfer'
 
 export type StreamKind = 'screen' | 'window' | 'camera'
 
+/** What a sharer sends: picture height, frames a second, and the most kilobits a second per viewer. */
+export interface StreamQuality { height: number; fps: number; kbps: number }
+
+const PRESETS: StreamQuality[] = [
+  { height: 480, fps: 30, kbps: 1200 },
+  { height: 720, fps: 30, kbps: 2500 },
+  { height: 720, fps: 60, kbps: 4000 },
+  { height: 1080, fps: 30, kbps: 5000 },
+  { height: 1080, fps: 60, kbps: 8000 },
+]
+
+/**
+ * The qualities a sharer may pick from here. An ordinary channel is held to the server's ordinary limits; a P2P
+ * channel or call has limits of its own, usually higher, because nothing there crosses the relay.
+ */
+export function qualityChoices(rules: StreamSettingsDto | null, direct: boolean): StreamQuality[] {
+  const cap: StreamQuality = !rules ? { height: 720, fps: 30, kbps: 2500 }
+    : direct ? { height: rules.directMaxHeight ?? 1080, fps: rules.directMaxFps ?? 60, kbps: rules.directMaxKbps ?? 8000 }
+    : { height: rules.maxHeight, fps: rules.maxFps, kbps: rules.maxKbps }
+  const fit = PRESETS.filter(p => p.height <= cap.height && p.fps <= cap.fps).map(p => ({ ...p, kbps: Math.min(p.kbps, cap.kbps) }))
+  return fit.length > 0 ? fit : [cap]
+}
+
+/** What is used when the sharer did not choose: 720p at 30 if that is allowed, otherwise the best that is. */
+export function defaultQuality(rules: StreamSettingsDto | null, direct: boolean): StreamQuality {
+  const all = qualityChoices(rules, direct)
+  return all.find(q => q.height === 720 && q.fps === 30) ?? all[all.length - 1]
+}
+
+export const describeQuality = (q: StreamQuality) => `${q.height}p · ${q.fps} fps`
+
 export interface StreamDeps {
   signal(target: string, kind: 'offer' | 'answer' | 'ice' | 'stop' | 'limit', payload: string): Promise<void>
   /** The voice call's own servers and relay policy. */
@@ -47,6 +78,7 @@ export class StreamEngine {
   private deps: StreamDeps
   private local: MediaStream | null = null
   private kind: StreamKind | null = null
+  private chosen: StreamQuality | null = null
   private out = new Map<string, Outgoing>()
   private incoming = new Map<string, Incoming>()
 
@@ -56,12 +88,23 @@ export class StreamEngine {
 
   get sharing(): StreamKind | null { return this.kind }
   get localStream(): MediaStream | null { return this.local }
+  /** What we are sending: the chosen limits, and never more than the capture really gives. */
+  get quality(): StreamQuality | null {
+    if (!this.local || !this.chosen) return null
+    const settings = this.local.getVideoTracks()[0]?.getSettings() ?? {}
+    return {
+      height: Math.min(this.chosen.height, settings.height ?? this.chosen.height),
+      fps: Math.round(Math.min(this.chosen.fps, settings.frameRate ?? this.chosen.fps)),
+      kbps: this.chosen.kbps,
+    }
+  }
 
   /** Begin sharing `stream`. Nothing is sent yet; each viewer is connected when they ask to watch. */
-  start(stream: MediaStream, kind: StreamKind) {
+  start(stream: MediaStream, kind: StreamKind, quality: StreamQuality | null = null) {
     this.stopSharing()
     this.local = stream
     this.kind = kind
+    this.chosen = quality
     for (const track of stream.getVideoTracks()) track.addEventListener('ended', () => { if (this.local === stream) this.deps.captureEnded() })
     this.deps.changed()
   }
@@ -73,6 +116,7 @@ export class StreamEngine {
     this.local?.getTracks().forEach(t => t.stop())
     this.local = null
     this.kind = null
+    this.chosen = null
     this.deps.changed()
   }
 
@@ -122,15 +166,17 @@ export class StreamEngine {
   /** Applies the server's caps, and the viewer's own wish if it is lower, to what one viewer is sent. */
   private async limit(sender: RTCRtpSender, track: MediaStreamTrack, o: Outgoing) {
     const rules = this.deps.settings()
-    if (!rules) return
+    // The sharer's choice (already within what the server allows here), or the server's ordinary limits without one.
+    const q: StreamQuality | null = this.chosen ?? (rules ? { height: rules.maxHeight, fps: rules.maxFps, kbps: rules.maxKbps } : null)
+    if (!q) return
     const params = sender.getParameters()
     if (!params.encodings?.length) return
     const height = track.getSettings().height ?? 0
     for (const encoding of params.encodings) {
-      encoding.maxBitrate = (o.capKbps > 0 ? Math.min(rules.maxKbps, o.capKbps) : rules.maxKbps) * 1000
-      encoding.maxFramerate = rules.maxFps
-      // A 1440p capture on a server that allows 720p is halved before it is encoded.
-      encoding.scaleResolutionDownBy = height > rules.maxHeight ? height / rules.maxHeight : 1
+      encoding.maxBitrate = (o.capKbps > 0 ? Math.min(q.kbps, o.capKbps) : q.kbps) * 1000
+      encoding.maxFramerate = q.fps
+      // A 1440p capture shared at 720p is halved before it is encoded.
+      encoding.scaleResolutionDownBy = height > q.height ? height / q.height : 1
     }
     await sender.setParameters(params).catch(() => { /* older engines refuse before negotiation; the capture constraints still hold */ })
   }
@@ -253,8 +299,8 @@ export class StreamEngine {
 }
 
 /** What to capture, shaped by the server's limits so the computer does not capture more than it may send. */
-export function videoConstraints(rules: StreamSettingsDto | null): MediaTrackConstraints {
-  return rules ? { height: { max: rules.maxHeight }, frameRate: { max: rules.maxFps } } : {}
+export function videoConstraints(q: StreamQuality | null): MediaTrackConstraints {
+  return q ? { height: { max: q.height }, frameRate: { max: q.fps, ideal: q.fps } } : {}
 }
 
 /** "motion" keeps games and video smooth when bandwidth is short; "detail" keeps text sharp instead. */

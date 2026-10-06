@@ -47,6 +47,14 @@ type DialogState =
 
 export default function Shell({ store, onSignedOut }: { store: Store; onSignedOut: () => void }) {
   const [dialog, setDialog] = useState<DialogState>(null)
+  /**
+   * On a phone there is room for one thing at a time: the channel list, the conversation, or the people in it.
+   * Wide windows show all three and ignore this.
+   */
+  const [pane, setPane] = useState<'list' | 'chat' | 'people'>('chat')
+  const openChannelId = store.selectedChannel?.id ?? null
+  const atHome = store.home
+  useEffect(() => { setPane('chat') }, [openChannelId, atHome])
   /** The dropdown under the server name. */
   const [serverMenu, setServerMenu] = useState(false)
   useEffect(() => {
@@ -76,6 +84,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
     ? { backgroundImage: `linear-gradient(rgba(11, 11, 16, .45), rgba(11, 11, 16, .8)), url("${banner}")`, backgroundSize: 'cover', backgroundPosition: 'center' }
     : accent ? { background: `linear-gradient(135deg, color-mix(in srgb, ${accent} 60%, var(--bg0)), color-mix(in srgb, ${accent} 18%, var(--bg0)))` } : undefined
   const screenSharing = store.sharing === 'screen' || store.sharing === 'window'
+  const canShareScreen = isElectron() || typeof navigator.mediaDevices?.getDisplayMedia === 'function'
   const toggleCamera = async () => {
     if (store.sharing === 'camera') { await store.stopShare(); return }
     if (store.sharing) await store.stopShare()
@@ -265,7 +274,15 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   }
 
   return (
-    <div className="shell">
+    <div className={'shell pane-' + pane}>
+      {/* Only shown on a phone: the way between the three panes. */}
+      <div className="mobilebar">
+        {pane === 'people'
+          ? <button onClick={() => setPane('chat')}>← Back</button>
+          : <button onClick={() => setPane('list')} title="Servers and channels">☰</button>}
+        <span className="grow title">{store.selectedChannel ? (store.selectedChannel.type === ChannelType.DirectMessage ? '@' : '#') + store.selectedChannel.name : 'Maplecord'}</span>
+        {pane === 'chat' && <button onClick={() => setPane('people')} title={store.home ? 'Friends' : 'Members'}>👥</button>}
+      </div>
       {/* ===== Guild rail ===== */}
       <div className="rail" onDragOver={allowDrop} onDrop={e => { const id = dragged(e); if (id) { e.preventDefault(); moveToFolder(id, null) } }}>
         <button className={'guild home' + (store.home ? ' active' : '')} title="Friends & direct messages" onClick={store.openHome}>
@@ -317,7 +334,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       </div>
 
       {/* ===== Channels (or DMs) + user panel ===== */}
-      <div className="sidebar">
+      <div className="sidebar" onClick={e => { if ((e.target as HTMLElement).closest('.channel')) setPane('chat') }}>
         {store.home ? (
           <>
             <div className={'header serverheader' + (serverMenu ? ' open' : '')} title="Settings"
@@ -455,7 +472,8 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
               <div className="muted vwhere">{voiceGuild ? voiceGuild + ' / ' : ''}{voiceChannelName}{voiceDetail ? ' · ' + voiceDetail : ''}</div>
             </div>
             <button className={'iconbtn' + (store.sharing === 'camera' ? ' on' : '')} onClick={() => void toggleCamera()} title={store.sharing === 'camera' ? 'Turn your camera off' : 'Turn your camera on'}>📷</button>
-            <button className={'iconbtn' + (screenSharing ? ' on' : '')} title={screenSharing ? 'Stop sharing' : 'Share an app or a screen'}
+            <button className={'iconbtn' + (screenSharing ? ' on' : '')} disabled={!canShareScreen && !screenSharing}
+              title={screenSharing ? 'Stop sharing' : canShareScreen ? 'Share an app or a screen' : 'This browser cannot share its screen. Your camera can still be shared.'}
               onClick={() => { if (screenSharing) void store.stopShare(); else { void store.loadStreamRules().catch(() => null); setDialog({ kind: 'share' }) } }}>🖥</button>
             <button className="iconbtn hangup" onClick={store.leaveVoice} title={inCall ? (inCall.phase === 'calling' ? 'Cancel the call' : 'Hang up') : 'Disconnect'}><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M3.5 14.5c5-5.5 12-5.5 17 0" stroke="currentColor" strokeWidth="4.5" strokeLinecap="round" fill="none" /></svg></button>
           </div>

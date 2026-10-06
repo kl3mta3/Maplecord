@@ -3,7 +3,7 @@ import type { Store } from '../store'
 import { bridge, type ShareSource } from '../platform'
 import { Dialog } from './Dialogs'
 import { ContextMenu, type MenuEntry } from './ContextMenu'
-import { canShareSound } from '../stream'
+import { canShareSound, defaultQuality, describeQuality, qualityChoices, type StreamQuality } from '../stream'
 import { openPopout, type Popout } from '../popout'
 
 /**
@@ -15,6 +15,11 @@ export function SharePicker({ store, onClose }: { store: Store; onClose: () => v
   const [sources, setSources] = useState<ShareSource[] | null>(null)
   const [tab, setTab] = useState<'window' | 'screen'>('window')
   const [hint, setHint] = useState<'motion' | 'detail'>('motion')
+  // What this channel allows: an ordinary one keeps to the server's ordinary limits, a P2P one has its own.
+  const direct = !!store.voice?.directSince
+  const choices = qualityChoices(store.streamRules, direct)
+  const [quality, setQuality] = useState<StreamQuality>(() => defaultQuality(store.streamRules, direct))
+  const picked = choices.find(q => q.height === quality.height && q.fps === quality.fps) ?? defaultQuality(store.streamRules, direct)
   const soundPossible = canShareSound()
   const sound = soundPossible && !!store.settings.shareSound
   const rules = store.streamRules
@@ -29,15 +34,16 @@ export function SharePicker({ store, onClose }: { store: Store; onClose: () => v
     return () => { alive = false; clearInterval(timer) }
   }, [desktop])
 
-  const pick = (choice: Parameters<Store['startShare']>[0]) => { onClose(); void store.startShare(choice, hint, sound) }
+  const pick = (choice: Parameters<Store['startShare']>[0]) => { onClose(); void store.startShare(choice, hint, sound, picked) }
   const shown = (sources ?? []).filter(s => s.kind === tab)
 
   return (
     <Dialog title="Share with the voice channel" onClose={onClose} wide>
       {rules && (
         <div className="muted">
-          Up to {rules.maxHeight}p at {rules.maxFps} frames a second. Nothing is sent until someone chooses to watch
-          {rules.maxViewersDirect ? `; up to ${rules.maxViewersDirect} people can watch at once` : ''}.
+          Nothing is sent until someone chooses to watch
+          {rules.maxViewersDirect ? `; up to ${rules.maxViewersDirect} people can watch at once` : ''}. Each viewer gets a copy of their own
+          from your computer, so {picked.height}p at {picked.fps} uses up to {(picked.kbps / 1000).toFixed(1)} Mbps of your upload per viewer.
         </div>
       )}
       {desktop ? (
@@ -64,6 +70,14 @@ export function SharePicker({ store, onClose }: { store: Store; onClose: () => v
         </div>
       )}
       <label className="row" style={{ gap: 8 }}>
+        <span className="muted">Quality</span>
+        <select value={`${picked.height}x${picked.fps}`} disabled={choices.length < 2}
+          onChange={e => { const [h, f] = e.target.value.split('x').map(Number); setQuality(choices.find(q => q.height === h && q.fps === f) ?? picked) }}>
+          {choices.map(q => <option key={`${q.height}x${q.fps}`} value={`${q.height}x${q.fps}`}>{q.height}p at {q.fps} frames a second</option>)}
+        </select>
+        {direct && <span className="muted">P2P channel: higher qualities are allowed here</span>}
+      </label>
+      <label className="row" style={{ gap: 8 }}>
         <span className="muted">When the connection is slow, keep</span>
         <select value={hint} onChange={e => setHint(e.target.value as 'motion' | 'detail')}>
           <option value="motion">motion smooth (games, video)</option>
@@ -88,11 +102,15 @@ const toggleFullScreen = (el: HTMLElement | null) => {
 }
 
 /** A video element bound to a live stream (React cannot set srcObject through a prop). Double-click for full screen. */
-function Video({ stream, elRef, volume = 0, muted = true, sinkId = null }: {
+function Video({ stream, elRef, volume = 0, muted = true, sinkId = null, onBlocked }: {
   stream: MediaStream | null; elRef?: React.RefObject<HTMLVideoElement | null>
   /** The stream's own sound: silent unless the tile says otherwise (your own preview never plays). */
   volume?: number; muted?: boolean; sinkId?: string | null
+  /** The browser would not start it by itself: with sound ('sound', now playing silently) or at all ('play'). */
+  onBlocked?: (what: 'sound' | 'play') => void
 }) {
+  const blocked = useRef(onBlocked)
+  useEffect(() => { blocked.current = onBlocked })
   const own = useRef<HTMLVideoElement>(null)
   const ref = elRef ?? own
   useEffect(() => {
@@ -106,7 +124,14 @@ function Video({ stream, elRef, volume = 0, muted = true, sinkId = null }: {
     const el = ref.current
     if (!el) return
     if (el.srcObject !== stream) el.srcObject = stream
-    if (stream) void el.play().catch(() => { /* starts on its own once data arrives */ })
+    if (!stream) return
+    void el.play().catch(() => {
+      // Phones do not start a video with sound unless it was just tapped, and some (in low power mode) do not start
+      // one at all. Start it silent; if even that is refused, the tile asks for a tap.
+      if (el.muted) { blocked.current?.('play'); return }
+      el.muted = true
+      el.play().then(() => blocked.current?.('sound'), () => blocked.current?.('play'))
+    })
   }, [ref, stream])
   return <video ref={ref} autoPlay playsInline muted={muted} onDoubleClick={e => toggleFullScreen(e.currentTarget)} />
 }
@@ -122,6 +147,9 @@ function WatchedTile({ store, streamer, userId, title, detail, state, error, can
   // Right-click: this stream's sound, and how much of it we ask to be sent.
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const [limitKbps, setLimitKbps] = useState(0)
+  // What the browser refused to start by itself, until the person taps (see Video).
+  const [needsTap, setNeedsTap] = useState<'sound' | 'play' | null>(null)
+  const [size, setSize] = useState<{ height: number } | null>(null)
   const prefs = (userId && store.settings.users?.[userId]) || {}
   const hasSound = !!stream && stream.getAudioTracks().length > 0
   const volume = prefs.streamVolume ?? 1
@@ -173,6 +201,13 @@ function WatchedTile({ store, streamer, userId, title, detail, state, error, can
   useEffect(() => { popRef.current?.setStream(state === 'failed' ? null : stream) }, [stream, state])
   useEffect(() => { popRef.current?.setTitle(title + ' — Maplecord') }, [title])
   useEffect(() => { popRef.current?.setAudio(volume, silent || !hasSound) }, [volume, silent, hasSound, poppedOut])
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const h = videoRef.current?.videoHeight ?? 0
+      setSize(cur => (h > 0 ? (cur?.height === h ? cur : { height: h }) : cur))
+    }, 2000)
+    return () => window.clearInterval(timer)
+  }, [])
   useEffect(() => () => { popRef.current?.close(); popRef.current = null }, [])
 
   return (
@@ -182,10 +217,19 @@ function WatchedTile({ store, streamer, userId, title, detail, state, error, can
         ? <div className="waiting bad">{error ?? 'The stream could not be shown.'}</div>
         : poppedOut
           ? <div className="waiting">Showing in its own window.</div>
-          : <><Video stream={stream} elRef={videoRef} volume={volume} muted={silent || !hasSound} sinkId={store.settings.audioOutputDeviceId} />{state === 'connecting' && <div className="waiting">Connecting…</div>}</>}
+          : <><Video stream={stream} elRef={videoRef} volume={volume} muted={silent || !hasSound || needsTap !== null} sinkId={store.settings.audioOutputDeviceId} onBlocked={setNeedsTap} />
+              {needsTap && state === 'live' && (
+                <button className="taptoplay accent" onClick={() => {
+                  // Done here, in the tap itself: that is what lets a phone start the sound.
+                  const el = videoRef.current
+                  if (el) { el.muted = silent || !hasSound; void el.play().catch(() => { /* still refused; the button stays */ }) }
+                  setNeedsTap(null)
+                }}>{needsTap === 'sound' ? '🔊 Tap for sound' : '▶ Tap to play'}</button>
+              )}
+              {state === 'connecting' && <div className="waiting">Connecting…</div>}</>}
       <div className="bar">
         <span className="live">LIVE</span>
-        <span className="grow" title={note ?? 'Right-click for sound and quality'}>{note ?? `${title}${detail}`}{hasSound && !note && <span title={silent ? 'Muted' : 'This stream has sound'}> {silent ? '🔇' : '🔊'}</span>}</span>
+        <span className="grow" title={note ?? 'Right-click for sound and quality'}>{note ?? `${title}${detail}${size && state === 'live' ? ' · ' + size.height + 'p' : ''}`}{hasSound && !note && <span title={silent ? 'Muted' : 'This stream has sound'}> {silent ? '🔇' : '🔊'}</span>}</span>
         {state !== 'failed' && (poppedOut
           ? <button className="subtle" onClick={putBack} title="Close its window and show it here again">Put back</button>
           : <>
@@ -221,7 +265,7 @@ export function StreamStage({ store, nameOf }: { store: Store; nameOf: (userId: 
           <Video stream={store.localStream} />
           <div className="bar">
             <span className="live">LIVE</span>
-            <span className="grow">You are sharing your {KIND[mine] ?? mine} · {viewers.total === 0 ? 'nobody is watching yet' : `${viewers.total} watching`}</span>
+            <span className="grow">You are sharing your {KIND[mine] ?? mine}{store.shareQuality ? ' · ' + describeQuality(store.shareQuality) : ''} · {viewers.total === 0 ? 'nobody is watching yet' : `${viewers.total} watching`}</span>
             <button className="subtle" onClick={() => void store.stopShare()}>Stop sharing</button>
           </div>
         </div>
