@@ -3,8 +3,6 @@
 Chat, voice and loot rolling for game groups. This is the client: an Electron app for Windows, macOS and Linux that
 also runs in a browser.
 
-It needs a Maplecord server to connect to.
-
 ## Features
 
 ### Chat
