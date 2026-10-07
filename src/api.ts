@@ -77,6 +77,10 @@ export class Api {
   /** What one role or one person is allowed and denied in one channel, beyond what their roles say. */
   setChannelOverride(channelId: string, kind: 'role' | 'user', id: string, allow: number, deny: number) { return this.request<ChannelOverrideDto>('PUT', `/api/channels/${channelId}/overrides/${kind}/${id}`, { allow, deny }) }
   deleteChannelOverride(channelId: string, overrideId: string) { return this.request<void>('DELETE', `/api/channels/${channelId}/overrides/${overrideId}`) }
+  /** Gives a channel the access of the group it is in, in place of its own. */
+  matchGroupAccess(channelId: string) { return this.request<void>('POST', `/api/channels/${channelId}/overrides/match-group`) }
+  /** Puts a channel (or a group of channels) at a place in the order, and optionally into another group. */
+  moveChannel(id: string, parentId: string | null, position: number) { return this.request<ChannelDto>('PATCH', `/api/channels/${id}`, parentId ? { parentId, position } : { position }) }
   invitePreview(code: string) { return this.request<InvitePreviewDto>('GET', `/api/invites/${encodeURIComponent(code)}`) }
   joinInvite(code: string) { return this.request<GuildSummaryDto>('POST', `/api/invites/${encodeURIComponent(code.trim())}/join`) }
   createChannel(guildId: string, name: string, type: number, parentId: string | null, direct = false) {

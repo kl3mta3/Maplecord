@@ -1,20 +1,32 @@
 import { useState } from 'react'
 import type { Api } from '../api'
-import { Permission, type ChannelDto, type ChannelOverrideDto, type MemberDto, type RoleDto } from '../types'
+import { ChannelType, Permission, type ChannelDto, type ChannelOverrideDto, type MemberDto, type RoleDto } from '../types'
 import { Dialog } from './Dialogs'
 
 const VIEW = Permission.ViewChannels
 
+/** What a set of overrides says, in a form that can be compared. An override that allows and denies nothing says nothing. */
+const said = (overrides: readonly ChannelOverrideDto[] | null | undefined) =>
+  (overrides ?? []).filter(o => o.allow || o.deny).map(o => `${o.roleId ?? ''}|${o.userId ?? ''}|${o.allow}|${o.deny}`).sort().join(',')
+
 /**
- * Who can see one channel. A channel everyone can see is open; a private one is hidden from everyone except the
+ * Who can see one channel, or one group of channels. A channel everyone can see is open; a private one is hidden from everyone except the
  * roles and people let in. Either way single roles and people can be let in or shut out. Someone who cannot see a
  * channel is not told it exists. The owner and administrators see every channel.
  *
  * Underneath these are the channel's permission overrides, of which only "View channels" is touched here: whatever
  * else an override allows or denies is kept.
+ *
+ * A group has a setting of its own. The channels in it are kept the same as the group until one is given its own
+ * setting; from then on that channel stands alone, until it is told to match the group again.
  */
-export function ChannelAccessDialog({ api, channel, roles, members, onClose }: {
-  api: Api; channel: ChannelDto; roles: RoleDto[]; members: MemberDto[]; onClose: () => void
+export function ChannelAccessDialog({ api, channel, group, inside, roles, members, onClose }: {
+  api: Api; channel: ChannelDto
+  /** The group this channel is in, if any. */
+  group?: ChannelDto
+  /** When this is a group: the channels in it. */
+  inside?: ChannelDto[]
+  roles: RoleDto[]; members: MemberDto[]; onClose: () => void
 }) {
   const [problem, setProblem] = useState('')
   const [busy, setBusy] = useState(false)
@@ -23,6 +35,15 @@ export function ChannelAccessDialog({ api, channel, roles, members, onClose }: {
   const forRole = (id: string) => overrides.find(o => o.roleId === id)
   const forUser = (id: string) => overrides.find(o => o.userId === id)
   const isPrivate = !!everyone && ((forRole(everyone.id)?.deny ?? 0) & VIEW) !== 0
+  const isGroup = channel.type === ChannelType.Category
+  const follows = !!group && said(overrides) === said(group.overrides)
+  const standAlone = isGroup ? (inside ?? []).filter(c => said(c.overrides) !== said(overrides)) : []
+
+  const matchGroup = async () => {
+    setProblem(''); setBusy(true)
+    try { await api.matchGroupAccess(channel.id) } catch (e) { setProblem(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
 
   /** Sets or clears the "view" bit of one override, leaving the rest of it alone; an override left empty is removed. */
   const set = async (kind: 'role' | 'user', id: string, existing: ChannelOverrideDto | undefined, state: 'allow' | 'deny' | 'none') => {
@@ -52,13 +73,30 @@ export function ChannelAccessDialog({ api, channel, roles, members, onClose }: {
   }
 
   return (
-    <Dialog title={`Who can see ${channel.name}`} onClose={onClose}>
+    <Dialog title={isGroup ? `Who can see the group ${channel.name}` : `Who can see ${channel.name}`} onClose={onClose}>
       <div className="access">
         <label className="choice"><input type="radio" name="access" checked={!isPrivate} disabled={busy || !everyone} onChange={() => everyone && void set('role', everyone.id, forRole(everyone.id), 'none')} />
           <span><b>Everyone in the server</b> <span className="muted">except anyone shut out below</span></span></label>
         <label className="choice"><input type="radio" name="access" checked={isPrivate} disabled={busy || !everyone} onChange={() => everyone && void set('role', everyone.id, forRole(everyone.id), 'deny')} />
           <span><b>Private</b> <span className="muted">only the roles and people let in below</span></span></label>
         <div className="muted">Someone who cannot see a channel is not shown that it exists. The owner and administrators see every channel.</div>
+        {isGroup && (
+          <div className="muted">
+            {standAlone.length === 0
+              ? 'Every channel in this group follows this setting.'
+              : `Channels in this group follow this setting, except ${standAlone.map(c => c.name).join(', ')}: ${standAlone.length === 1 ? 'it has its' : 'they have their'} own.`}
+          </div>
+        )}
+        {group && (
+          <div className="row entry">
+            <span className="grow muted">
+              {follows
+                ? `Same as its group, ${group.name}. Changing the group changes this channel too, until you change something here.`
+                : `This channel has its own setting. Changes to its group, ${group.name}, do not reach it.`}
+            </span>
+            {!follows && <button disabled={busy} onClick={() => void matchGroup()}>Match the group</button>}
+          </div>
+        )}
 
         {listed.length === 0 && <div className="muted">{isPrivate ? 'Nobody has been let in yet.' : 'Nobody is shut out.'}</div>}
         {listed.map(row => (

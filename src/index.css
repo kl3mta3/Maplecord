@@ -639,3 +639,16 @@ button.chip { cursor: pointer; }
 
 /* A short list inside a dialog (the servers that go with a deleted account). */
 .plainlist { margin: 6px 0 0; padding-left: 20px; }
+
+/* Voice settings: the microphone sensitivity slider. */
+.sensitivity { gap: 8px; align-items: center; }
+.sensitivity input[type=range] { min-width: 0; }
+
+/* Settings → Voice & audio: the push-to-talk key. */
+.keycap { background: var(--bg0); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; font-size: 13px; }
+
+/* Where a dragged channel or group would land. */
+.sidebar .channel.dropon, .sidebar .category.dropon { box-shadow: inset 0 2px 0 var(--accent); }
+.sidebar .category { display: flex; align-items: center; gap: 3px; padding-left: 8px; cursor: pointer; user-select: none; }
+.sidebar .category:hover, .sidebar .category:focus-visible { color: var(--text); outline: none; }
+.sidebar .category svg { flex: none; }

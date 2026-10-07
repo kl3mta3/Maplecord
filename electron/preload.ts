@@ -16,6 +16,10 @@ contextBridge.exposeInMainWorld('maplecord', {
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('open-external', url),
   onHotkey: (handler: (key: Action) => void) => subscribe<Action>('hotkey', handler),
 
+  // push to talk while another window is in front (see electron/pushKey.ts)
+  watchPushKey: (key: { kind: 'key' | 'mouse'; code: string; label: string } | null): Promise<boolean> => ipcRenderer.invoke('push-key-watch', key),
+  onPushKey: (handler: (held: boolean) => void) => subscribe<boolean>('push-key', handler),
+
   // a newer version that could not install itself (see electron/updater.ts), once
   takeUpdateNotice: (): Promise<{ version: string; reason: string } | null> => ipcRenderer.invoke('take-update-notice'),
 

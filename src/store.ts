@@ -10,6 +10,7 @@ import { playSound, setQuiet, setSoundPacks, startRing, stopRing, type SoundPack
 import { applyTheme } from './theme'
 import { VoiceEngine, type IcePolicy } from './voice'
 import { inviteCodeFrom, inviteIsForAnotherServer, takeRememberedInvite } from './invites'
+import { DEFAULT_PUSH_KEY, PUSH_RELEASE_MS, isChoosingPushKey, isPushKey, type PushKey } from './pushToTalk'
 import { VoiceHub } from './voiceHub'
 import { TransferEngine, fileSource, rememberedSource, openSink, type TransferView } from './transfer'
 import { StreamEngine, applyHint, canShareSound, defaultQuality, qualityChoices, soundConstraints, videoConstraints, type StreamKind, type StreamQuality } from './stream'
@@ -885,6 +886,36 @@ export function useMaplecord() {
     if (g) await run(async () => { const guild = await api.updateGuildListing(g, patch); patchGuild(g, x => ({ ...x, guild })) })
   }, [api, patchGuild])
 
+  /**
+   * Drag and drop in the channel list. A channel goes into `parentId`'s group (or stays in its own with null), in
+   * front of `beforeId` or at the end; a group of channels is put in front of another group. Everything that shares
+   * its new place is renumbered, and only what actually changed is sent.
+   */
+  const moveChannel = useCallback(async (channelId: string, parentId: string | null, beforeId: string | null) => {
+    const g = guildsRef.current.find(x => x.channels.some(c => c.id === channelId))
+    const moving = g?.channels.find(c => c.id === channelId)
+    if (!g || !moving || beforeId === channelId) return
+    const group = moving.type === ChannelType.Category
+    const target = group ? null : parentId ?? moving.parentId ?? null
+    // A channel cannot be taken out of every group: the server has no way to say so.
+    if (!group && target === null && moving.parentId) return
+    const siblings = g.channels
+      .filter(c => c.id !== channelId && (group ? c.type === ChannelType.Category : c.type !== ChannelType.Category && (c.parentId ?? null) === target))
+      .sort((a, b) => a.position - b.position)
+    const at = beforeId ? siblings.findIndex(c => c.id === beforeId) : -1
+    const ordered = [...siblings]
+    ordered.splice(at < 0 ? ordered.length : at, 0, moving)
+    await run(async () => {
+      for (let i = 0; i < ordered.length; i++) {
+        const c = ordered[i]
+        const regroup = c.id === channelId && !group && (c.parentId ?? null) !== target ? target : null
+        if (c.position === i && !regroup) continue
+        const saved = await api.moveChannel(c.id, regroup, i)
+        patchGuild(g.guild.id, x => ({ ...x, channels: x.channels.map(y => (y.id === saved.id ? { ...y, parentId: saved.parentId, position: saved.position } : y)) }))
+      }
+    })
+  }, [api, patchGuild])
+
   /** Yours, or anyone's where you may manage messages; the server decides. */
   const deleteMessage = useCallback(async (messageId: string) => { await run(() => hub.deleteMessage(messageId)) }, [hub])
 
@@ -1456,6 +1487,43 @@ export function useMaplecord() {
   const voiceGate = settings.voiceGate !== false
   const voiceGateLevel = settings.voiceGateLevel ?? DEFAULT_GATE_LEVEL
   useEffect(() => { voiceEngine.setGate(voiceGate, gateThreshold(voiceGateLevel)) }, [voiceEngine, voiceGate, voiceGateLevel])
+
+  // Push to talk: the microphone follows one key. The page hears it while it is in front; the desktop app is also
+  // told when it is held while something else is (only while in voice: that is the only time the listener runs).
+  const pushMode = settings.voiceMode === 'push'
+  const pushKind = (settings.pushKey ?? DEFAULT_PUSH_KEY).kind
+  const pushCode = (settings.pushKey ?? DEFAULT_PUSH_KEY).code
+  const inVoice = !!voice
+  useEffect(() => {
+    if (!pushMode) { voiceEngine.setPushToTalk(false, false); return }
+    const key: PushKey = { kind: pushKind, code: pushCode, label: '' }
+    let here = false, anywhere = false
+    let letGo: number | undefined
+    const apply = () => {
+      window.clearTimeout(letGo)
+      if (here || anywhere) voiceEngine.setPushToTalk(true, true)
+      // A moment's grace after letting go, so the end of a word is not cut off.
+      else letGo = window.setTimeout(() => voiceEngine.setPushToTalk(true, false), PUSH_RELEASE_MS)
+    }
+    voiceEngine.setPushToTalk(true, false)
+    const down = (e: KeyboardEvent | MouseEvent) => { if (!isChoosingPushKey() && isPushKey(key, e) && !here) { here = true; apply() } }
+    const up = (e: KeyboardEvent | MouseEvent) => { if (isPushKey(key, e) && here) { here = false; apply() } }
+    const away = () => { if (here) { here = false; apply() } }
+    window.addEventListener('keydown', down, true); window.addEventListener('keyup', up, true)
+    window.addEventListener('mousedown', down, true); window.addEventListener('mouseup', up, true)
+    window.addEventListener('blur', away)
+    const desktop = inVoice ? bridge() : undefined
+    const stopHearing = desktop?.onPushKey?.(held => { anywhere = held; apply() })
+    void desktop?.watchPushKey?.(key)
+    return () => {
+      window.removeEventListener('keydown', down, true); window.removeEventListener('keyup', up, true)
+      window.removeEventListener('mousedown', down, true); window.removeEventListener('mouseup', up, true)
+      window.removeEventListener('blur', away)
+      window.clearTimeout(letGo)
+      stopHearing?.()
+      void desktop?.watchPushKey?.(null)
+    }
+  }, [voiceEngine, pushMode, pushKind, pushCode, inVoice])
   useEffect(() => { applyTheme(settings.theme) }, [settings.theme])
 
 
@@ -1730,7 +1798,7 @@ export function useMaplecord() {
     soundPacks, reloadSoundPacks, openSoundsFolder,
     startRoll, quickRoll, roll, voteEnd, dismissRoll, coinFlip, invokeCommand,
     activeRps, startRps, rpsPick, rpsThrow, dismissRps,
-    createGuild, joinGuild, joinPublicGuild, setGuildListing, deleteMessage, createInvite, pendingInvite, acceptInvite, dismissInvite: () => setPendingInvite(null), createChannel, leaveGuild, kickMember, banMember, signOut,
+    createGuild, joinGuild, joinPublicGuild, setGuildListing, deleteMessage, moveChannel, createInvite, pendingInvite, acceptInvite, dismissInvite: () => setPendingInvite(null), createChannel, leaveGuild, kickMember, banMember, signOut,
     sharing, shareQuality: streamEngine.quality, localStream: streamEngine.localStream, shareViewers: streamEngine.viewerCounts(), watching: streamEngine.watching(),
     streamOf: (streamer: string) => streamEngine.streamOf(streamer), viewerCounts, streamRules, loadStreamRules,
     startShare, stopShare, watchStream, unwatchStream, setStreamLimit: (streamer: string, kbps: number) => streamEngine.requestLimit(streamer, kbps),

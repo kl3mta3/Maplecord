@@ -1,4 +1,5 @@
 import { DEFAULT_SERVER_URL } from './platform'
+import type { PushKey } from './pushToTalk'
 import type { UserDto } from './types'
 
 /** Per-install settings in localStorage (Electron's is per app, a browser's is per origin). */
@@ -25,6 +26,10 @@ export interface Settings {
   shareSound?: boolean
   /** How loud everyone in voice is played, 0 to 1. */
   outputVolume?: number
+  /** When the microphone is sent: while talking (the default), or while a key is held. */
+  voiceMode?: 'activity' | 'push'
+  /** The key or mouse button held to talk (see pushToTalk.ts). */
+  pushKey?: PushKey
   /** The "add to your Home Screen" card has been seen on this device. */
   installHintSeen?: boolean
   /** Send the microphone only while talking (on unless set to false), and how loud counts as talking, 1 (a whisper) to 10. */
@@ -38,6 +43,8 @@ export interface Settings {
   guilds: Record<string, GuildPrefs>
   /** Channels you have muted on this device: no unread mark, sound or notification from them. */
   mutedChannels?: Record<string, boolean>
+  /** Groups of channels this person has folded shut, by id. Theirs alone: nobody else's list changes. */
+  collapsedGroups?: Record<string, boolean>
   /** Folders of servers in the rail, in no particular order: a folder sits where its first server would. */
   guildFolders?: GuildFolder[]
   /** Per game plugin, by plugin id. Detection and auto-rolling are both off until the user turns them on. */

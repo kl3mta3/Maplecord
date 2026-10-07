@@ -67,6 +67,13 @@ export interface MaplecordBridge {
   oauthLogin(serverUrl: string, provider: string): Promise<string>
   openExternal(url: string): Promise<void>
   onHotkey(handler: (key: OverlayAction) => void): () => void
+  /**
+   * Push to talk while another window is in front: start watching this key (or stop, with null). Resolves false when
+   * this computer cannot watch it system-wide; it then only works while Maplecord is in front.
+   */
+  watchPushKey(key: { kind: 'key' | 'mouse'; code: string; label: string } | null): Promise<boolean>
+  /** Told each time the watched key goes down (true) or up (false). */
+  onPushKey(handler: (held: boolean) => void): () => void
   /** A newer version of the app that could not install itself at start-up, once; null when there is none to mention. */
   takeUpdateNotice(): Promise<{ version: string; reason: string } | null>
   /** The maplecord:// invite link the app was started or woken by, once; null when there is none waiting. */

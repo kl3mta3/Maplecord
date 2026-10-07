@@ -72,10 +72,26 @@ export class VoiceEngine {
     this.gateOn = on
     this.gateThreshold = threshold
     this.detector?.node.port.postMessage({ threshold })
-    this.setSending(this.talking || !on)
+    if (!this.push) this.setSending(this.talking || !on)
+  }
+
+  private push = false
+
+  /**
+   * Push to talk. While it is on, the microphone is sent exactly while the key is held (and we are not muted),
+   * whatever the detector hears; the "speaking" light follows the key. Turning it off hands the decision back to
+   * the detector.
+   */
+  setPushToTalk(on: boolean, held: boolean) {
+    this.push = on
+    if (!on) { this.setSending(this.talking || !this.gateOn); return }
+    const talking = held && !this.muted && !!this.local
+    if (talking !== this.talking) { this.talking = talking; this.events.speaking(null, talking) }
+    this.setSending(talking)
   }
 
   private setTalking(talking: boolean, keepSending = false) {
+    if (this.push) return // the key decides, not the sound
     if (talking !== this.talking) { this.talking = talking; this.events.speaking(null, talking) }
     this.setSending(talking || !this.gateOn || keepSending)
   }
@@ -274,14 +290,15 @@ export class VoiceEngine {
     if (this.local) { for (const t of this.local.getTracks()) t.stop(); this.local = null }
     this.detector = null
     this.talking = false
-    this.sending = true
+    // With push to talk on, nothing is sent until the key is held, from the first moment of the next call.
+    this.sending = !this.push
     this.events.speaking(null, false)
   }
 
   setMuted(muted: boolean) {
     this.muted = muted
     if (this.local) for (const t of this.local.getAudioTracks()) t.enabled = !muted
-    if (muted) this.setTalking(false)
+    if (muted) { if (this.push) this.setPushToTalk(true, false); else this.setTalking(false) }
   }
 
   private wanted = new Map<string, { volume: number; muted: boolean }>()

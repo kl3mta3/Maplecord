@@ -24,7 +24,9 @@ one.
 ### Voice and video
 
 - Voice channels: mute, deafen, a volume for each person, and switching microphone or speakers without leaving
-- Your microphone is only sent while you are talking, so the room behind you stays out of the call
+- Your microphone is only sent while you are talking, so the room behind you stays out of the call, with a
+  sensitivity you set. Or use push to talk, with a key or mouse button you choose; in the desktop app it works while
+  a game is in front.
 - Call a friend from your conversation with them (📞)
 - Share an app window, a whole screen or your camera, with the computer's sound if you like. Others click LIVE to
   watch. You pick the quality and see what is going out on your own preview.

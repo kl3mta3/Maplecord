@@ -7,6 +7,7 @@ import { shownName } from '../profile'
 import { Dialog } from './Dialogs'
 import { askToInstall, installWay } from '../install'
 import { MyBots } from './Integrations'
+import { VoiceAudioSettings } from './VoiceAudio'
 
 /** The ways a person can appear, in the order they are offered. */
 export const STATUSES: { value: UserStatus; label: string; hint: string; dot: string }[] = [
@@ -15,20 +16,24 @@ export const STATUSES: { value: UserStatus; label: string; hint: string; dot: st
   { value: UserStatus.Invisible, label: 'Invisible', hint: 'You appear offline', dot: 'invisible' },
 ]
 
-type Section = 'account' | 'privacy' | 'look' | 'app' | 'bots'
-const SECTIONS: [Section, string][] = [['account', 'My account'], ['privacy', 'Status & privacy'], ['look', 'Appearance'], ['app', 'App'], ['bots', 'My bots']]
+export type Section = 'account' | 'voice' | 'privacy' | 'look' | 'app' | 'bots'
+const SECTIONS: [Section, string][] = [['account', 'My account'], ['voice', 'Voice & audio'], ['privacy', 'Status & privacy'], ['look', 'Appearance'], ['app', 'App'], ['bots', 'My bots']]
 
 /**
  * Everything that is about the person rather than about a server, behind the cog at the bottom of the sidebar.
  * The larger editors (profile, voice, overlay, plugins) keep their own windows and are opened from here.
  */
-export function UserSettingsDialog({ store, onOpen, onSignOut, onClose }: {
+export function UserSettingsDialog({ store, initial, onOpen, onAllowDirect, onSignOut, onClose }: {
   store: Store
-  onOpen: (what: 'profile' | 'audio' | 'overlay' | 'plugins') => void
+  /** The section to open at. */
+  initial?: Section
+  onOpen: (what: 'profile' | 'overlay' | 'plugins') => void
+  /** Asked to change whether P2P is allowed (see VoiceAudioSettings). */
+  onAllowDirect: (allow: boolean) => void
   onSignOut: () => void
   onClose: () => void
 }) {
-  const [section, setSection] = useState<Section>('account')
+  const [section, setSection] = useState<Section>(initial ?? 'account')
   const [copied, setCopied] = useState(false)
   const me = store.settings.user
   const prefs = store.preferences
@@ -56,7 +61,7 @@ export function UserSettingsDialog({ store, onOpen, onSignOut, onClose }: {
               </div>
               <div className="row">
                 <button onClick={() => onOpen('profile')}>Edit profile</button>
-                <button onClick={() => onOpen('audio')}>Voice settings</button>
+                <button onClick={() => setSection('voice')}>Voice &amp; audio</button>
               </div>
               <div className="muted">You sign in with Google or GitHub; Maplecord has no password of yours to change.</div>
               <h4>Leaving</h4>
@@ -87,7 +92,7 @@ export function UserSettingsDialog({ store, onOpen, onSignOut, onClose }: {
               <h4>P2P connections</h4>
               <div className="row">
                 <span className="grow muted">{store.allowDirect ? 'Allowed on this account.' : 'Not allowed on this account.'}</span>
-                <button onClick={() => onOpen('audio')}>Change…</button>
+                <button onClick={() => setSection('voice')}>Change…</button>
               </div>
 
               <h4>Blocked people</h4>
@@ -125,6 +130,7 @@ export function UserSettingsDialog({ store, onOpen, onSignOut, onClose }: {
           )}
 
           {section === 'bots' && <MyBots api={store.api} />}
+          {section === 'voice' && <VoiceAudioSettings store={store} onAllowDirect={onAllowDirect} />}
 
           {section === 'app' && (
             <>

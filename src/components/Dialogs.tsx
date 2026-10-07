@@ -1,6 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { ChannelType, RollKind, RollRange, type ChannelDto, type RollItemDto } from '../types'
-import { listAudioDevices } from '../voice'
 import type { CatalogHit } from '../store'
 
 /** What P2P means, in a sentence or two, wherever it is mentioned. Shows on hover, on focus, and on click (for touch). */
@@ -116,58 +115,6 @@ export function AllowDirectDialog({ providers, username, onSignIn, onClose }: {
       {providers?.map(p => <button key={p} className={p === 'dev' ? '' : 'provider'} disabled={busy} onClick={() => void go(p)}>{names[p] ?? p}</button>)}
       {problem && <div className="muted">{problem}</div>}
       <div className="buttons"><button onClick={onClose} disabled={busy}>Cancel</button></div>
-    </Dialog>
-  )
-}
-
-export function AudioSettingsDialog({ inputId, outputId, allowDirect, onSave, onAllowDirect, onClose }: {
-  inputId: string | null; outputId: string | null
-  /** Whether the account allows P2P. The box below is its opposite: ticked means "do not allow". */
-  allowDirect: boolean
-  onSave: (input: string | null, output: string | null) => void
-  /** Asked to change it. Turning P2P on does not happen here: it opens the sign-in-again step. */
-  onAllowDirect: (allow: boolean) => void; onClose: () => void
-}) {
-  const [devices, setDevices] = useState<{ inputs: MediaDeviceInfo[]; outputs: MediaDeviceInfo[] }>({ inputs: [], outputs: [] })
-  const [input, setInput] = useState(inputId ?? '')
-  const [output, setOutput] = useState(outputId ?? '')
-  const [note, setNote] = useState('')
-  useEffect(() => {
-    (async () => {
-      try {
-        // Labels are only available after the mic permission has been granted once.
-        try { (await navigator.mediaDevices.getUserMedia({ audio: true })).getTracks().forEach(t => t.stop()) } catch { setNote('Microphone permission was not granted.') }
-        setDevices(await listAudioDevices())
-      } catch (e) { setNote(e instanceof Error ? e.message : String(e)) }
-    })()
-  }, [])
-  return (
-    <Dialog title="Audio settings" onClose={onClose}>
-      <div className="muted">Microphone</div>
-      <select value={input} onChange={e => setInput(e.target.value)}>
-        <option value="">System default</option>
-        {devices.inputs.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || 'Microphone'}</option>)}
-      </select>
-      <div className="muted">Speakers / headset</div>
-      <select value={output} onChange={e => setOutput(e.target.value)}>
-        <option value="">System default</option>
-        {devices.outputs.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || 'Speakers'}</option>)}
-      </select>
-      <div className="row" style={{ marginTop: 6 }}>
-        <label className="row">
-          <input type="checkbox" checked={!allowDirect} onChange={e => onAllowDirect(!e.target.checked)} />
-          <span>Do not allow P2P connections</span>
-        </label>
-        <P2PInfo />
-      </div>
-      <div className="muted">
-        {allowDirect
-          ? 'P2P is allowed: you can join P2P voice channels and connect straight to friends who allow it too.'
-          : 'Unticking this asks you to sign in again.'}
-      </div>
-      {note && <div className="muted">{note}</div>}
-      <div className="muted">Microphone and speaker changes apply the next time you join a voice channel.</div>
-      <div className="buttons"><button onClick={onClose}>Cancel</button><button className="accent" onClick={() => { onSave(input || null, output || null); onClose() }}>Save</button></div>
     </Dialog>
   )
 }

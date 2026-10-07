@@ -9,6 +9,7 @@ import { FileCache, respondWithFile } from './fileCache'
 import { SaveStreams } from './saveStreams'
 import { OfferedFiles } from './offeredFiles'
 import { updateAtStartup, type UpdateNotice } from './updater'
+import { stopPushKey, watchPushKey } from './pushKey'
 import { PLUGIN_ICON_SCHEME, type PluginRuntimeConfig } from '../src/pluginTypes'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -321,6 +322,14 @@ function registerHotkeys() {
   globalShortcut.register('Control+Alt+P', send('pass'))
 }
 
+// Push to talk: the window says which key to watch while it is in voice, and is told when that key goes down and up.
+ipcMain.handle('push-key-watch', (_event, key: unknown) => {
+  const wanted = key && typeof key === 'object' && ((key as { kind?: unknown }).kind === 'key' || (key as { kind?: unknown }).kind === 'mouse') && typeof (key as { code?: unknown }).code === 'string'
+    ? { kind: (key as { kind: 'key' | 'mouse' }).kind, code: (key as { code: string }).code.slice(0, 32), label: '' }
+    : null
+  return watchPushKey(wanted, held => { if (win && !win.isDestroyed()) win.webContents.send('push-key', held) })
+})
+
 /** A newer version that could not be put in place by itself, for the window to mention once. */
 let updateNotice: UpdateNotice | null = null
 ipcMain.handle('take-update-notice', () => { const notice = updateNotice; updateNotice = null; return notice })
@@ -342,5 +351,5 @@ app.whenReady().then(async () => {
   registerHotkeys()
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
 })
-app.on('will-quit', () => { globalShortcut.unregisterAll(); plugins.stopAll(); void saves.abortAll(); offered.closeAll() })
+app.on('will-quit', () => { globalShortcut.unregisterAll(); stopPushKey(); plugins.stopAll(); void saves.abortAll(); offered.closeAll() })
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })

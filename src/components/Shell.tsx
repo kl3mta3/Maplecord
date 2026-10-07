@@ -24,7 +24,7 @@ function parseRange(text: string): [number, number] | null {
   const min = parseInt(m[1], 10), max = parseInt(m[2], 10)
   return RollRange.isValid(min, max) ? [min, max] : null
 }
-import { AllowDirectDialog, AudioSettingsDialog, ConfirmDialog, CreateChannelDialog, DirectChannelDialog, IncomingCallDialog, P2PCallDialog, NicknameDialog, PromptDialog, StartRollDialog } from './Dialogs'
+import { AllowDirectDialog, ConfirmDialog, CreateChannelDialog, DirectChannelDialog, IncomingCallDialog, P2PCallDialog, NicknameDialog, PromptDialog, StartRollDialog } from './Dialogs'
 import { OverlaySettingsDialog, ServerSettingsDialog } from './Settings'
 import Friends from './Home'
 import { serverMediaUrl } from '../itemIcons'
@@ -36,11 +36,12 @@ import type { GuildFolder } from '../settings'
 import { Avatar, ProfileEditor, ProfilePopout, UserName } from './Profile'
 import { assetUrl, initials, shownName, type Appearance } from '../profile'
 import { STATUSES, UserSettingsDialog } from './UserSettings'
-import { ArrowLeftRight, AudioLines, ChevronDown, HeadphoneOff, Headphones, LoaderCircle, Menu, Mic, MicOff, MonitorUp, Paperclip, Phone, PhoneOff, Plus, Settings as SettingsIcon, Signal, Users, Video } from 'lucide-react'
+import { ArrowLeftRight, AudioLines, ChevronDown, ChevronRight, HeadphoneOff, Headphones, LoaderCircle, Menu, Mic, MicOff, MonitorUp, Paperclip, Phone, PhoneOff, Plus, Settings as SettingsIcon, Signal, Users, Video } from 'lucide-react'
 import { AddServerDialog, DiscoverDialog, JoinServerDialog } from './Servers'
 import { ChannelAccessDialog } from './ChannelAccess'
 import { DeleteAccountDialog } from './DeleteAccount'
 import { VoiceMessageBar } from './VoiceMessage'
+import { DEFAULT_PUSH_KEY } from '../pushToTalk'
 import { canRecordVoiceMessage } from '../voiceMessage'
 import { appleTouch } from '../platform'
 import { DropBanner, PluginsDialog } from './Plugins'
@@ -110,6 +111,36 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   ]
   // Servers can be grouped into folders in the rail: drag one onto another. Kept on this device.
   const DRAG = 'text/maplecord-guild'
+  // Channels and their groups are dragged too, by people who may manage channels: onto a group to move a channel
+  // into it, onto a channel to put it in front of that one, and a group onto a group to reorder the groups.
+  const CHANNEL_DRAG = 'text/maplecord-channel'
+  // A group of channels folds shut with a click on its heading. What is going on inside still shows: the channel
+  // being read, channels with something unread, and voice channels with people in them.
+  const collapsedGroups = store.settings.collapsedGroups ?? {}
+  const toggleGroup = (id: string) => {
+    const all = { ...collapsedGroups }
+    if (all[id]) delete all[id]; else all[id] = true
+    store.updateSettings({ collapsedGroups: all })
+  }
+  const [dropOn, setDropOn] = useState<string | null>(null)
+  const channelDragged = (e: React.DragEvent) => (e.dataTransfer.types.includes(CHANNEL_DRAG) ? e.dataTransfer.getData(CHANNEL_DRAG) : '')
+  const channelDrag = (id: string, overGroup: boolean, drop: (dragged: string, draggedIsGroup: boolean) => void) => ({
+    draggable: true,
+    onDragStart: (e: React.DragEvent) => { e.dataTransfer.setData(CHANNEL_DRAG, id); e.dataTransfer.effectAllowed = 'move' },
+    onDragEnd: () => setDropOn(null),
+    onDragOver: (e: React.DragEvent) => { if (e.dataTransfer.types.includes(CHANNEL_DRAG)) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dropOn !== id) setDropOn(id) } },
+    onDragLeave: () => { if (dropOn === id) setDropOn(null) },
+    onDrop: (e: React.DragEvent) => {
+      const dragged = channelDragged(e)
+      setDropOn(null)
+      if (!dragged || dragged === id) return
+      e.preventDefault(); e.stopPropagation()
+      const draggedIsGroup = g?.channels.find(c => c.id === dragged)?.type === ChannelType.Category
+      // A group can only be dropped on a group.
+      if (draggedIsGroup && !overGroup) return
+      drop(dragged, !!draggedIsGroup)
+    },
+  })
   const folders = store.settings.guildFolders ?? []
   const folderOf = (guildId: string) => folders.find(f => f.guildIds.includes(guildId)) ?? null
   // A folder of one is not a folder, and a server we have left is not in any.
@@ -154,8 +185,11 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       ...list.map((d, i) => ({ kind: 'item', label: d.label || `${kind === 'audioinput' ? 'Microphone' : 'Speakers'} ${i + 1}`, checked: chosen === d.deviceId, onClick: () => pick(d.deviceId) } as MenuEntry)),
       ...(kind === 'audioinput' ? [
         { kind: 'sep' } as MenuEntry,
-        { kind: 'item', label: 'Only send my voice while I talk', checked: store.settings.voiceGate !== false, onClick: () => store.updateSettings({ voiceGate: store.settings.voiceGate === false }) } as MenuEntry,
-        ...(store.settings.voiceGate !== false ? [{ kind: 'slider', label: 'How loud counts as talking', min: 1, max: 10, step: 1, value: store.settings.voiceGateLevel ?? DEFAULT_GATE_LEVEL, format: (v: number) => (v <= 2 ? v + ' · a whisper' : v >= 8 ? v + ' · a raised voice' : String(v)), onChange: (v: number) => store.updateSettings({ voiceGateLevel: v }) } as MenuEntry] : []),
+        { kind: 'label', text: 'Send my microphone' } as MenuEntry,
+        { kind: 'item', label: 'While I talk (voice activity)', checked: store.settings.voiceMode !== 'push', onClick: () => store.updateSettings({ voiceMode: 'activity' }) } as MenuEntry,
+        { kind: 'item', label: `While I hold ${(store.settings.pushKey ?? DEFAULT_PUSH_KEY).label} (push to talk)`, checked: store.settings.voiceMode === 'push', onClick: () => store.updateSettings({ voiceMode: 'push' }) } as MenuEntry,
+        ...(store.settings.voiceMode !== 'push' ? [{ kind: 'item', label: 'Only send my voice while I talk', checked: store.settings.voiceGate !== false, onClick: () => store.updateSettings({ voiceGate: store.settings.voiceGate === false }) } as MenuEntry] : []),
+        ...(store.settings.voiceMode !== 'push' && store.settings.voiceGate !== false ? [{ kind: 'slider', label: 'How loud counts as talking', min: 1, max: 10, step: 1, value: store.settings.voiceGateLevel ?? DEFAULT_GATE_LEVEL, format: (v: number) => (v <= 2 ? v + ' · a whisper' : v >= 8 ? v + ' · a raised voice' : String(v)), onChange: (v: number) => store.updateSettings({ voiceGateLevel: v }) } as MenuEntry] : []),
       ] : []),
       ...(kind === 'audiooutput' ? [{ kind: 'slider', label: 'Output volume', min: 0, max: 100, step: 5, value: Math.round((store.settings.outputVolume ?? 1) * 100), format: (v: number) => v + '%', onChange: (v: number) => store.updateSettings({ outputVolume: v / 100 }) } as MenuEntry] : []),
       { kind: 'sep' },
@@ -169,7 +203,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
 
   // ---- Right-click menus ------------------------------------------------------
   // What they change about other people and servers is yours alone and kept on this device; nobody is told.
-  const [menu, setMenu] = useState<({ kind: 'guild'; guildId: string } | { kind: 'user'; userId: string; username: string } | { kind: 'channel'; channelId: string; name: string; direct: boolean; voice: boolean } | { kind: 'status' } | { kind: 'mic' } | { kind: 'speaker' } | { kind: 'stats' } | { kind: 'folder'; folderId: string }) & { x: number; y: number } | null>(null)
+  const [menu, setMenu] = useState<({ kind: 'guild'; guildId: string } | { kind: 'user'; userId: string; username: string } | { kind: 'channel'; channelId: string; name: string; direct: boolean; voice: boolean } | { kind: 'group'; channelId: string; name: string } | { kind: 'status' } | { kind: 'mic' } | { kind: 'speaker' } | { kind: 'stats' } | { kind: 'folder'; folderId: string }) & { x: number; y: number } | null>(null)
   /** Microphones and speakers, looked up each time one of the little menus beside the mute buttons opens. */
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
   const openPanelMenu = (e: React.MouseEvent, kind: 'status' | 'mic' | 'speaker') => {
@@ -417,12 +451,21 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
               )
             })()}
             <div className="channels">
-              {g && channelRows(g.channels).map(c => c.type === ChannelType.Category
-                ? <div key={c.id} className="category">{c.name}</div>
+              {g && channelRows(g.channels).filter(c => !c.parentId || !collapsedGroups[c.parentId] || c.type === ChannelType.Category
+                || c.id === store.selectedChannel?.id || c.id === voice?.channelId || (g.channelUnread[c.id] ?? 0) > 0 || (g.voice?.[c.id]?.length ?? 0) > 0).map(c => c.type === ChannelType.Category
+                ? <div key={c.id} className={'category' + (dropOn === c.id ? ' dropon' : '')}
+                    role="button" tabIndex={0} aria-expanded={!collapsedGroups[c.id]}
+                    onClick={() => toggleGroup(c.id)}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleGroup(c.id) } }}
+                    title={can(Permission.ManageChannels) ? 'Click to fold or unfold. Drag to reorder the groups. Drop a channel here to move it into this group. Right-click to choose who can see it.' : 'Click to fold or unfold'}
+                    onContextMenu={can(Permission.ManageChannels) ? e => { e.preventDefault(); e.stopPropagation(); setMenu({ kind: 'group', channelId: c.id, name: c.name, x: e.clientX, y: e.clientY }) } : undefined}
+                    {...(can(Permission.ManageChannels) ? channelDrag(c.id, true, (dragged, isGroup) => void store.moveChannel(dragged, isGroup ? null : c.id, isGroup ? c.id : null)) : {})}>
+                    {collapsedGroups[c.id] ? <ChevronRight size={12} /> : <ChevronDown size={12} />}<span>{c.name}</span></div>
                 : (
                   <div key={c.id}>
                     <div
-                      className={'channel' + (c.id === store.selectedChannel?.id ? ' active' : '') + ((g.channelUnread[c.id] ?? 0) > 0 ? ' unread' : '') + (c.directSince ? ' p2p' : '') + (store.settings.mutedChannels?.[c.id] ? ' mutedchannel' : '')}
+                      className={'channel' + (c.id === store.selectedChannel?.id ? ' active' : '') + ((g.channelUnread[c.id] ?? 0) > 0 ? ' unread' : '') + (c.directSince ? ' p2p' : '') + (store.settings.mutedChannels?.[c.id] ? ' mutedchannel' : '') + (dropOn === c.id ? ' dropon' : '')}
+                      {...(can(Permission.ManageChannels) ? channelDrag(c.id, false, dragged => void store.moveChannel(dragged, c.parentId ?? null, c.id)) : {})}
                       style={c.id === voice?.channelId ? { color: 'var(--green)' } : undefined}
                       title={c.type !== ChannelType.Voice ? undefined : c.directSince
                         ? 'P2P voice channel: people in it connect straight to each other and can find each other\u2019s IP address. Click to join (you are asked first).'
@@ -571,7 +614,9 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           onConfirm={() => void store.acceptInvite()} onClose={store.dismissInvite} />
       )}
       {dialog?.kind === 'channelAccess' && g && g.channels.find(c => c.id === dialog.channelId) && (
-        <ChannelAccessDialog api={store.api} channel={g.channels.find(c => c.id === dialog.channelId)!} roles={g.roles ?? []} members={g.members} onClose={() => setDialog(null)} />
+        <ChannelAccessDialog api={store.api} channel={g.channels.find(c => c.id === dialog.channelId)!} roles={g.roles ?? []} members={g.members} onClose={() => setDialog(null)}
+          group={g.channels.find(c => c.id === g.channels.find(x => x.id === dialog.channelId)?.parentId)}
+          inside={g.channels.filter(c => c.parentId === dialog.channelId)} />
       )}
       {dialog?.kind === 'addGuild' && <AddServerDialog onCreate={() => setDialog({ kind: 'createGuild' })} onJoin={() => setDialog({ kind: 'joinGuild' })} onDiscover={() => setDialog({ kind: 'discover' })} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'joinGuild' && <JoinServerDialog example={inviteBase} onJoin={store.joinGuild} onBack={() => setDialog({ kind: 'addGuild' })} onClose={() => setDialog(null)} />}
@@ -597,7 +642,10 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           nickname={g?.members.find(m => m.userId === card.userId)?.nickname ?? null} serverName={g?.guild.name}
           roles={g ? (g.members.find(m => m.userId === card.userId)?.roleIds ?? []).map(id => g.roles?.find(r => r.id === id)).filter((r): r is RoleDto => !!r && !r.isEveryone).sort((a, b) => b.position - a.position) : undefined} />
       )}
-      {menu && <ContextMenu x={menu.x} y={menu.y} entries={menu.kind === 'guild' ? guildEntries(menu.guildId) : menu.kind === 'user' ? userEntries(menu.userId, menu.username) : menu.kind === 'stats' ? rollEntries() : menu.kind === 'folder' ? folderEntries(menu.folderId) : menu.kind === 'status' ? statusEntries() : menu.kind === 'mic' ? deviceEntries('audioinput') : menu.kind === 'speaker' ? deviceEntries('audiooutput') : [
+      {menu && <ContextMenu x={menu.x} y={menu.y} entries={menu.kind === 'guild' ? guildEntries(menu.guildId) : menu.kind === 'user' ? userEntries(menu.userId, menu.username) : menu.kind === 'stats' ? rollEntries() : menu.kind === 'folder' ? folderEntries(menu.folderId) : menu.kind === 'status' ? statusEntries() : menu.kind === 'mic' ? deviceEntries('audioinput') : menu.kind === 'speaker' ? deviceEntries('audiooutput') : menu.kind === 'group' ? [
+        { kind: 'label', text: menu.name },
+        { kind: 'item', label: 'Who can see it', icon: '🔒', onClick: () => setDialog({ kind: 'channelAccess', channelId: menu.channelId }) },
+      ] : [
         { kind: 'label', text: menu.name },
         { kind: 'item', label: 'Mute channel', icon: '🔕', checked: !!store.settings.mutedChannels?.[menu.channelId], onClick: () => store.setChannelMuted(menu.channelId, !store.settings.mutedChannels?.[menu.channelId]) },
         ...(menu.voice && can(Permission.ManageChannels) && can(Permission.ManageDirectChannels)
@@ -612,15 +660,6 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       {dialog?.kind === 'kick' && <ConfirmDialog title={`Kick ${dialog.member.username}?`} message="They can rejoin with an invite." onConfirm={() => store.kickMember(dialog.member)} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'ban' && <ConfirmDialog title={`Ban ${dialog.member.username}?`} message="They will not be able to rejoin." onConfirm={() => store.banMember(dialog.member)} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'share' && <SharePicker store={store} onClose={() => setDialog(null)} />}
-      {dialog?.kind === 'audio' && (
-        <AudioSettingsDialog inputId={store.settings.audioInputDeviceId} outputId={store.settings.audioOutputDeviceId} allowDirect={store.allowDirect}
-          onSave={store.setAudioDevices} onClose={() => setDialog(null)}
-          onAllowDirect={allow => {
-            // Saying no is immediate. Saying yes goes through signing in again.
-            if (allow) setDialog({ kind: 'allowDirect' })
-            else void store.setAllowDirect(false).catch(e => store.setError(e instanceof Error ? e.message : String(e)))
-          }} />
-      )}
       {dialog?.kind === 'allowDirect' && <AllowDirectStep store={store} onClose={() => setDialog({ kind: 'audio' })} />}
       {dialog?.kind === 'channelKind' && (
         <ConfirmDialog title={dialog.direct ? `Make ${dialog.name} a P2P channel?` : `Make ${dialog.name} a relayed channel?`}
@@ -646,8 +685,14 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
         <PromptDialog title="Rename folder" label="Folder name" onClose={() => setDialog(null)}
           onSubmit={name => saveFolders(folders.map(f => (f.id === dialog.folderId ? { ...f, name: name.slice(0, 40) } : f)))} />
       )}
-      {dialog?.kind === 'settings' && (
-        <UserSettingsDialog store={store} onOpen={what => setDialog({ kind: what })} onClose={() => setDialog(null)}
+      {/* "Voice settings", wherever it is asked for, is Settings opened at its Voice & audio section. */}
+      {(dialog?.kind === 'settings' || dialog?.kind === 'audio') && (
+        <UserSettingsDialog key={dialog.kind} store={store} initial={dialog.kind === 'audio' ? 'voice' : 'account'} onOpen={what => setDialog({ kind: what })} onClose={() => setDialog(null)}
+          onAllowDirect={allow => {
+            // Saying no is immediate. Saying yes goes through signing in again.
+            if (allow) setDialog({ kind: 'allowDirect' })
+            else void store.setAllowDirect(false).catch(e => store.setError(e instanceof Error ? e.message : String(e)))
+          }}
           onSignOut={async () => { setDialog(null); await store.signOut(); onSignedOut() }} />
       )}
       {dialog?.kind === 'overlay' && (
