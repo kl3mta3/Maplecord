@@ -12,6 +12,7 @@ also runs in a browser.
 - Private channels: only the roles and people you let in can see that they exist
 - Friends and direct messages
 - Files, pictures and videos in chat; pictures and videos show right there
+- Voice messages: record up to 15 minutes and post it, and it plays right in the chat (so do other sound files)
 - Unread counts, per-channel and per-server mute, and folders to group your servers
 - Profiles with display names, avatars, banners, name fonts and animated decorations
 - Status (online, do not disturb, invisible), blocking, and a say over who may send you friend requests
@@ -40,6 +41,20 @@ also runs in a browser.
 - A desktop app, and the same thing in a browser. On a phone it can be added to the home screen.
 - Colour themes
 - Sign in with Google or GitHub. There is no password.
+
+### Quality of life, for everyone
+
+The extras other platforms keep for paying members are simply part of Maplecord. There is no subscription and
+nothing to unlock.
+
+- Bigger files: up to 32 MB in chat on the public server, larger than many other platforms allow for free
+- Files of any size between friends who both allow P2P
+- Sharper streams: up to 1080p at 60 frames a second in P2P channels and calls, with sound
+- Animated profile pictures, and animated decorations around them
+- Profile banners, a colour of your own, a bio and pronouns
+- Name fonts and colours, including two-colour names
+- Colour themes for the whole app
+- Custom sound packs
 
 ## P2P
 

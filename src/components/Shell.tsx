@@ -36,9 +36,12 @@ import type { GuildFolder } from '../settings'
 import { Avatar, ProfileEditor, ProfilePopout, UserName } from './Profile'
 import { assetUrl, initials, shownName, type Appearance } from '../profile'
 import { STATUSES, UserSettingsDialog } from './UserSettings'
-import { ArrowLeftRight, ChevronDown, HeadphoneOff, Headphones, LoaderCircle, Menu, Mic, MicOff, MonitorUp, Paperclip, Phone, PhoneOff, Plus, Settings as SettingsIcon, Signal, Users, Video } from 'lucide-react'
+import { ArrowLeftRight, AudioLines, ChevronDown, HeadphoneOff, Headphones, LoaderCircle, Menu, Mic, MicOff, MonitorUp, Paperclip, Phone, PhoneOff, Plus, Settings as SettingsIcon, Signal, Users, Video } from 'lucide-react'
 import { AddServerDialog, DiscoverDialog, JoinServerDialog } from './Servers'
 import { ChannelAccessDialog } from './ChannelAccess'
+import { VoiceMessageBar } from './VoiceMessage'
+import { canRecordVoiceMessage } from '../voiceMessage'
+import { appleTouch } from '../platform'
 import { DropBanner, PluginsDialog } from './Plugins'
 import { SharePicker, StreamStage } from './Streams'
 
@@ -688,6 +691,16 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
   const p2pPlace = !!channel && (channel.directSince != null
     || (channel.type === ChannelType.DirectMessage && store.dms.some(d => d.channelId === channel.id && store.friends.friends.some(f => f.user.id === d.other.id))))
   const canSendDirect = store.allowDirect && p2pPlace && store.transferLimits?.enabled !== false
+  // A voice message: recorded here, sent like any file. The server's upload limit is looked up when one is started.
+  const [voiceMessage, setVoiceMessage] = useState<{ maxBytes: number } | null>(null)
+  // An iPhone has one microphone to give out: recording while in voice would take it away from the call.
+  const voiceBusy = appleTouch() && !!store.voice
+  const startVoiceMessage = async () => {
+    const rules = await store.api.uploadSettings().catch(() => null)
+    if (rules && !rules.enabled) { store.setError('Uploads are turned off on this server right now.'); return }
+    setVoiceMessage({ maxBytes: rules?.maxBytes ?? 0 })
+  }
+  useEffect(() => { setVoiceMessage(null) }, [channel?.id])
   const party = store.partyChannel
   const noParty = 'Join a voice channel first: rolls go to the people in voice with you'
   const me = store.me()
@@ -822,10 +835,17 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
             ))}
           </div>
         )}
+        {voiceMessage && channel ? (
+          <VoiceMessageBar deviceId={store.settings.audioInputDeviceId} maxBytes={voiceMessage.maxBytes} onSend={file => store.sendFile(file)} onClose={() => setVoiceMessage(null)} />
+        ) : (
         <div className="composer">
           <input ref={fileRef} type="file" hidden onChange={async e => { const f = e.target.files?.[0]; if (f) await store.sendFile(f); e.target.value = '' }} />
           <button title={store.uploading ? `Sending ${store.uploading}…` : 'Send a file'} onClick={() => fileRef.current?.click()} disabled={!channel || !!store.uploading}>{store.uploading ? <LoaderCircle size={17} className="spin" /> : <Paperclip size={17} />}</button>
           <input ref={directRef} type="file" hidden onChange={async e => { const f = e.target.files?.[0]; if (f) await store.offerFile(f); e.target.value = '' }} />
+          {canRecordVoiceMessage() && (
+            <button title={voiceBusy ? 'Leave voice to record a voice message on this device' : 'Record a voice message'} aria-label="Record a voice message"
+              onClick={() => void startVoiceMessage()} disabled={!channel || !!store.uploading || voiceBusy}><AudioLines size={17} /></button>
+          )}
           {canSendDirect && <button title={directSendTitle} aria-label="Send a file straight from your computer" onClick={() => directRef.current?.click()} disabled={!channel}><ArrowLeftRight size={17} /></button>}
           <textarea
             placeholder={channel ? `Message ${channel.type === ChannelType.DirectMessage ? '@' : '#'}${channel.name}  —  type / for commands` : ''}
@@ -835,6 +855,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
           />
           <button className="accent" onClick={submit} disabled={!channel}>Send</button>
         </div>
+        )}
       </div>
     </div>
   )
@@ -969,7 +990,7 @@ function FileOfferView({ store, offer, mine }: { store: Store; offer: FileOfferD
 function AttachmentView({ file }: { file: AttachmentDto }) {
   const [gone, setGone] = useState(false)
   const desktop = isElectron()
-  const kind = file.contentType.startsWith('image/') ? 'image' : file.contentType.startsWith('video/') ? 'video' : 'file'
+  const kind = file.contentType.startsWith('image/') ? 'image' : file.contentType.startsWith('video/') ? 'video' : file.contentType.startsWith('audio/') ? 'audio' : 'file'
   const src = desktop ? `maplecord-plugin://files/${file.id}/${encodeURIComponent(file.fileName)}?u=${encodeURIComponent(file.url)}` : file.url
   const expired = <div className="filechip expired" title="The server keeps files for a limited time."><span className="ico">⌛</span><span className="grow"><b>{file.fileName}</b><span className="muted"> · no longer available</span></span></div>
 
@@ -977,6 +998,12 @@ function AttachmentView({ file }: { file: AttachmentDto }) {
   if (gone || (file.expired && (!desktop || kind === 'file'))) return expired
   if (kind === 'image') return <img className="attachment" src={src} alt={file.fileName} title={file.fileName} onError={() => setGone(true)} />
   if (kind === 'video') return <video className="attachment" src={src} controls preload={desktop ? 'none' : 'metadata'} title={file.fileName} onError={() => setGone(true)} />
+  if (kind === 'audio') return (
+    <div className="soundchip" title={file.fileName}>
+      <span className="muted">{file.fileName.startsWith('voice-message') ? 'Voice message' : file.fileName} · {fileSize(file.size)}</span>
+      <audio src={src} controls preload="metadata" onError={() => setGone(true)} />
+    </div>
+  )
   return (
     <a className="filechip" href={file.url} download={file.fileName} title={`Download ${file.fileName}`}>
       <span className="ico">📄</span>

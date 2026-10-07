@@ -928,6 +928,9 @@ export function useMaplecord() {
     if (remembered) void openInvite(remembered)
     const desktop = bridge()
     if (!desktop) return
+    void desktop.takeUpdateNotice?.().then(notice => {
+      if (notice) setError(`Maplecord ${notice.version} is out, but this copy could not update itself${notice.reason === 'folder' ? ' (its folder cannot be written to)' : ''}. Download it from the Maplecord website.`)
+    })
     const take = () => void desktop.takeInviteLink().then(link => { if (link) void openInvite(link) })
     take()
     return desktop.onInviteLink(take)

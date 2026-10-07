@@ -625,3 +625,14 @@ button.chip { cursor: pointer; }
 .access .choice { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .access .entry { padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg1); align-items: center; }
 .access .bad { color: var(--red); }
+
+/* Voice messages: the bar that records one, and sound played in the chat. */
+.voicebar { align-items: center; }
+.voicebar .status { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0 6px; }
+.voicebar audio { height: 36px; min-width: 0; }
+.voicebar .note { white-space: nowrap; }
+.voicebar > button { display: grid; place-items: center; }
+.recdot { width: 10px; height: 10px; border-radius: 50%; background: var(--red); animation: recpulse 1.2s ease-in-out infinite; flex: none; }
+@keyframes recpulse { 50% { opacity: .35; } }
+.soundchip { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; max-width: 360px; }
+.soundchip audio { width: 100%; height: 40px; }

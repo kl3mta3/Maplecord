@@ -150,6 +150,7 @@ export function UserSettingsDialog({ store, onOpen, onSignOut, onClose }: {
                 <button onClick={() => onOpen('overlay')}>Overlay &amp; sound settings</button>
                 <button onClick={() => onOpen('plugins')}>Game plugins</button>
               </div>
+              <div className="muted">Maplecord {__APP_VERSION__}{desktop ? ' · updates itself when it starts' : ''}</div>
             </>
           )}
         </div>

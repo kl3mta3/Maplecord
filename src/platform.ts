@@ -67,6 +67,8 @@ export interface MaplecordBridge {
   oauthLogin(serverUrl: string, provider: string): Promise<string>
   openExternal(url: string): Promise<void>
   onHotkey(handler: (key: OverlayAction) => void): () => void
+  /** A newer version of the app that could not install itself at start-up, once; null when there is none to mention. */
+  takeUpdateNotice(): Promise<{ version: string; reason: string } | null>
   /** The maplecord:// invite link the app was started or woken by, once; null when there is none waiting. */
   takeInviteLink(): Promise<string | null>
   /** Told when such a link arrives while the app is running; take it with takeInviteLink. */

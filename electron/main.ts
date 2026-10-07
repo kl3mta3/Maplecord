@@ -8,6 +8,7 @@ import { listSoundPacks, resolveSound } from './soundPacks'
 import { FileCache, respondWithFile } from './fileCache'
 import { SaveStreams } from './saveStreams'
 import { OfferedFiles } from './offeredFiles'
+import { updateAtStartup, type UpdateNotice } from './updater'
 import { PLUGIN_ICON_SCHEME, type PluginRuntimeConfig } from '../src/pluginTypes'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -320,12 +321,24 @@ function registerHotkeys() {
   globalShortcut.register('Control+Alt+P', send('pass'))
 }
 
-app.whenReady().then(() => {
+/** A newer version that could not be put in place by itself, for the window to mention once. */
+let updateNotice: UpdateNotice | null = null
+ipcMain.handle('take-update-notice', () => { const notice = updateNotice; updateNotice = null; return notice })
+
+app.whenReady().then(async () => {
   if (!onlyCopy) return
+  // Before anything opens: is there a newer version? (See updater.ts. A development run skips this.)
+  const update = await updateAtStartup({
+    server: __UPDATE_SERVER__, repo: __UPDATE_REPO__,
+    logo: path.join(VITE_DEV_SERVER_URL ? path.join(RENDERER_DIST, '..', 'public') : RENDERER_DIST, 'logo.png'),
+  })
+  if (update.quitting) { app.quit(); return }
+  updateNotice = update.notice
   registerPluginProtocol()
   registerDisplayCapture()
   try { plugins.reload() } catch (e) { console.error('[plugins]', e) }
   createWindow()
+  update.done()
   registerHotkeys()
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
 })
