@@ -7,27 +7,59 @@ It needs a Maplecord server to connect to.
 
 ## Features
 
-- Servers, text and voice channels, roles, friends, DMs
-- Call a friend from your conversation with them (📞). Calls go through the relay. "P2P call" is a separate button
-  that only shows if you allow P2P, asks first, and only rings if your friend allows P2P too.
-- Send files in chat, up to the server's size limit. Pictures and videos show in the chat.
-- Friends who both allow P2P can send each other files of any size, straight from one computer to the other
-  (the ⇄ button).
-- Rolls: roll, need/greed, rock paper scissors, coin flip, dice. The server does the rolling.
-  Rolls go to whoever is in voice with you.
-- Share an app window, a whole screen or your camera with your voice channel. Others click LIVE to watch;
-  nothing is sent until they do. The desktop app can send the computer's sound with it (everything it plays except
-  Maplecord itself, so the call doesn't echo); tick "Share this computer's sound too" in the picker.
-  The sharer picks a quality (up to what the server allows; P2P channels can be allowed more, e.g. 1080p at 60)
-  and sees what is going out on their own preview.
-  A stream you are watching can go full screen or be popped out into its own window. Right-click it to mute it,
-  change its volume, or ask to be sent a lower quality on a slow connection.
+### Chat
+
+- Servers with text and voice channels, roles and permissions, and invites
+- Friends and direct messages
+- Files, pictures and videos in chat; pictures and videos show right there
+- Unread counts, per-channel and per-server mute, and folders to group your servers
+- Profiles with display names, avatars, banners, name fonts and animated decorations
+- Status (online, do not disturb, invisible), blocking, and a say over who may send you friend requests
+- Slash commands, bots and webhooks
+
+### Voice and video
+
+- Voice channels: mute, deafen, a volume for each person, and switching microphone or speakers without leaving
+- Your microphone is only sent while you are talking, so the room behind you stays out of the call
+- Call a friend from your conversation with them (📞)
+- Share an app window, a whole screen or your camera, with the computer's sound if you like. Others click LIVE to
+  watch. You pick the quality and see what is going out on your own preview.
+- A stream you are watching can fill the screen or pop out into its own window. Right-click it (tap it on a phone)
+  for its volume, to mute it, or to ask for a lower quality on a slow connection.
+
+### For game groups
+
+- Rolls: roll, need/greed, rock paper scissors, coin flip, dice. The server does the rolling, and a roll goes to
+  whoever is in voice with you.
 - In-game overlay with global hotkeys (desktop only)
 - Game plugins: item names and icons, optional drop detection from the game's log (desktop only)
-- Profiles with display names, avatars, banners, name fonts and animated decorations
-- Status (online, do not disturb, invisible), blocking, and who may send you friend requests
-- Mute, deafen and device menus at the bottom left; everything else behind the cog, including colour themes
 - Custom sound packs
+
+### Everywhere
+
+- A desktop app, and the same thing in a browser. On a phone it can be added to the home screen.
+- Colour themes
+- Sign in with Google or GitHub. There is no password.
+
+## P2P
+
+Everything above works without your app ever connecting to another person's. P2P is extra: it is kept apart from the
+rest and is off until you turn it on.
+
+In a P2P connection your app connects straight to the other person's. That allows more, and it means **the people
+you connect to that way can find your IP address**.
+
+- **Turning it on.** Untick "Do not allow P2P connections" in Voice settings. You are asked to sign in again, to be
+  sure it is you. Tick it again whenever you like.
+- **P2P voice channels** are their own kind of channel, shown in italics with a P2P tag, and you are warned before
+  you join one. They never mix with ordinary channels: a channel is one or the other, and changing which empties
+  it first. Making one takes its own permission.
+- **P2P calls** are a separate button in a conversation with a friend. It only shows if you allow P2P, it asks
+  first, and it only rings if your friend allows P2P too.
+- **Files of any size** between friends who both allow P2P, straight from one computer to the other (the ⇄ button).
+- **Higher stream quality.** A server can allow more in P2P channels and calls, 1080p at 60 for example.
+
+Whoever runs the server sets the P2P limits (stream quality, file size) and can switch P2P off for everyone.
 
 ## Development
 
@@ -102,11 +134,7 @@ as `.wav`, `.mp3` or `.ogg`. Missing ones fall back to the default.
 - Images, fonts and animations only ever load from the server you're signed in to.
 - The server only keeps uploaded files for a while. The desktop app keeps its own copy of pictures and videos it
   has shown (up to 2 GB, oldest out first) in its data folder, so they still show after that.
-- Voice, shared video and file transfers go through a relay, so the people you talk to can't find your IP address.
-- P2P (straight from your computer to theirs) only happens if you allow it: untick "Do not allow P2P connections"
-  in Audio & privacy, which asks you to sign in again. After that you can join P2P voice channels (shown in
-  italics with a P2P tag, with a warning the first time you join each one) and send files straight to friends
-  who allow it too. In a P2P channel everyone there can find your IP address.
+- P2P only happens if you allow it, and you are warned each time it matters. See [P2P](#p2p).
 - Sign in happens in your browser. The app never sees a password.
 
 ## Layout
