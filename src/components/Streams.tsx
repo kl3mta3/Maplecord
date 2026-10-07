@@ -4,6 +4,7 @@ import { bridge, type ShareSource } from '../platform'
 import { Dialog } from './Dialogs'
 import { ContextMenu, type MenuEntry } from './ContextMenu'
 import { canShareSound, defaultQuality, describeQuality, qualityChoices, type StreamQuality } from '../stream'
+import { elementVolumeIgnored, gainContext, wakeGainContext } from '../volume'
 import { openPopout, type Popout } from '../popout'
 
 /**
@@ -105,6 +106,9 @@ const toggleFullScreen = (el: HTMLElement | null) => {
   video?.webkitEnterFullscreen?.()
 }
 
+/** A finger, not a mouse: there is no right-click and no hovering. */
+const touchScreen = () => window.matchMedia?.('(pointer: coarse)').matches ?? false
+
 /**
  * The shape the picture's box is given. A stream's frames do not always arrive at exactly one size: some senders
  * and decoders flip between two that differ by a few lines (1080 and 1088, say) many times a second. Following every
@@ -145,13 +149,40 @@ function Video({ stream, elRef, volume = 0, muted = true, sinkId = null, onBlock
     return () => { el.removeEventListener('resize', measure); el.removeEventListener('loadedmetadata', measure) }
   }, [ref])
   useEffect(() => { if (shape) shapeListener.current?.(shape) }, [shape])
+  // A phone pauses video while its browser is in the background; start it again when the page is back.
+  useEffect(() => {
+    const onBack = () => { const el = ref.current; if (!document.hidden && el?.srcObject && el.paused) void el.play().catch(() => { /* the tile's tap button covers it */ }) }
+    document.addEventListener('visibilitychange', onBack)
+    return () => document.removeEventListener('visibilitychange', onBack)
+  }, [ref])
+  // An iPhone ignores the element's volume (see volume.ts): there the sound is played through a gain node instead,
+  // and the element only shows the picture.
+  const viaGain = elementVolumeIgnored()
+  const gain = useRef<GainNode | null>(null)
+  const level = useRef(volume)
+  useEffect(() => { level.current = volume })
+  useEffect(() => {
+    if (!viaGain || !stream || muted || stream.getAudioTracks().length === 0) return
+    const ctx = gainContext()
+    if (!ctx) return
+    const source = ctx.createMediaStreamSource(new MediaStream(stream.getAudioTracks()))
+    const node = ctx.createGain()
+    node.gain.value = Math.max(0, Math.min(1, level.current))
+    source.connect(node)
+    node.connect(ctx.destination)
+    gain.current = node
+    // Not allowed to make a sound until the page is tapped: the tile asks for that tap.
+    const check = window.setTimeout(() => { if (ctx.state !== 'running') blocked.current?.('sound') }, 700)
+    return () => { window.clearTimeout(check); source.disconnect(); node.disconnect(); gain.current = null }
+  }, [viaGain, stream, muted])
   useEffect(() => {
     const el = ref.current as (HTMLVideoElement & { setSinkId?: (id: string) => Promise<void> }) | null
     if (!el) return
-    el.muted = muted
+    el.muted = muted || viaGain
     el.volume = Math.max(0, Math.min(1, volume))
+    if (gain.current) gain.current.gain.value = Math.max(0, Math.min(1, volume))
     if (!muted) void el.setSinkId?.(sinkId ?? '').catch(() => { /* plays on the default speakers */ })
-  }, [ref, muted, volume, sinkId, stream])
+  }, [ref, muted, viaGain, volume, sinkId, stream])
   useEffect(() => {
     const el = ref.current
     if (!el) return
@@ -167,7 +198,7 @@ function Video({ stream, elRef, volume = 0, muted = true, sinkId = null, onBlock
   }, [ref, stream])
   return (
     <div className="videobox" style={shape ? { '--a': String(shape) } as React.CSSProperties : undefined} onDoubleClick={e => toggleFullScreen(e.currentTarget)}>
-      <video ref={ref} autoPlay playsInline muted={muted} />
+      <video ref={ref} autoPlay playsInline muted={muted || viaGain} />
     </div>
   )
 }
@@ -211,6 +242,7 @@ function WatchedTile({ store, streamer, userId, title, detail, state, error, can
     { kind: 'item', label: 'Best available', checked: limitKbps === 0, onClick: () => chooseLimit(0) },
     ...[1500, 800, 400].filter(k => k < most).map(k => ({ kind: 'item', label: `Up to ${k >= 1000 ? (k / 1000).toFixed(1) + ' Mbps' : k + ' kbps'}${k === 400 ? ' · slow connections' : ''}`, checked: limitKbps === k, onClick: () => chooseLimit(k) } as MenuEntry)),
     { kind: 'sep' },
+    { kind: 'item', label: 'Full screen', icon: '⛶', onClick: () => { setMenu(null); toggleFullScreen(videoRef.current?.parentElement ?? null) } },
     { kind: 'item', label: 'Stop watching', icon: '✕', onClick: () => { void store.unwatchStream(streamer) } },
   ]
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -248,7 +280,11 @@ function WatchedTile({ store, streamer, userId, title, detail, state, error, can
   useEffect(() => () => { popRef.current?.close(); popRef.current = null }, [])
 
   return (
-    <div className={'tile' + (poppedOut ? ' out' : '')} onContextMenu={e => { if (state === 'failed') return; e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }) }}>
+    <div className={'tile' + (poppedOut ? ' out' : '')} onContextMenu={e => { if (state === 'failed') return; e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }) }}
+      onClick={e => {
+        if (state === 'failed' || menu || !touchScreen()) return
+        if ((e.target as HTMLElement).closest('.videobox')) setMenu({ x: e.clientX, y: e.clientY })
+      }}>
       {menu && <ContextMenu x={menu.x} y={menu.y} entries={menuEntries()} onClose={() => setMenu(null)} />}
       {state === 'failed'
         ? <div className="waiting bad">{error ?? 'The stream could not be shown.'}</div>
@@ -259,14 +295,15 @@ function WatchedTile({ store, streamer, userId, title, detail, state, error, can
                 <button className="taptoplay accent" onClick={() => {
                   // Done here, in the tap itself: that is what lets a phone start the sound.
                   const el = videoRef.current
-                  if (el) { el.muted = silent || !hasSound; void el.play().catch(() => { /* still refused; the button stays */ }) }
+                  wakeGainContext()
+                  if (el) { el.muted = silent || !hasSound || elementVolumeIgnored(); void el.play().catch(() => { /* still refused; the button stays */ }) }
                   setNeedsTap(null)
                 }}>{needsTap === 'sound' ? '🔊 Tap for sound' : '▶ Tap to play'}</button>
               )}
               {state === 'connecting' && <div className="waiting">Connecting…</div>}</>}
       <div className="bar">
         <span className="live">LIVE</span>
-        <span className="grow" title={note ?? 'Right-click for sound and quality'}>{note ?? `${title}${detail}${size && state === 'live' ? ' · ' + size.height + 'p' : ''}`}{hasSound && !note && <span title={silent ? 'Muted' : 'This stream has sound'}> {silent ? '🔇' : '🔊'}</span>}</span>
+        <span className="grow" title={note ?? (touchScreen() ? 'Tap the picture for sound and quality' : 'Right-click for sound and quality')}>{note ?? `${title}${detail}${size && state === 'live' ? ' · ' + size.height + 'p' : ''}`}{hasSound && !note && <span title={silent ? 'Muted' : 'This stream has sound'}> {silent ? '🔇' : '🔊'}</span>}</span>
         {state !== 'failed' && (poppedOut
           ? <button className="subtle" onClick={putBack} title="Close its window and show it here again">Put back</button>
           : <>

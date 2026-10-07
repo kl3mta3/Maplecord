@@ -25,6 +25,11 @@ export interface Settings {
   shareSound?: boolean
   /** How loud everyone in voice is played, 0 to 1. */
   outputVolume?: number
+  /** The "add to your Home Screen" card has been seen on this device. */
+  installHintSeen?: boolean
+  /** Send the microphone only while talking (on unless set to false), and how loud counts as talking, 1 (a whisper) to 10. */
+  voiceGate?: boolean
+  voiceGateLevel?: number
   /** The app's colours on this device (see theme.ts). */
   theme?: { preset: string; accent: string | null }
   /** Per user id: how you hear them in voice and whether you see what they write. Yours alone; they are never told. */
@@ -62,6 +67,10 @@ export interface GuildPrefs {
   muted?: boolean
   notify?: NotifyLevel
 }
+
+/** How loud counts as talking until someone chooses, and what each step means to the voice engine (4 is its own default). */
+export const DEFAULT_GATE_LEVEL = 4
+export const gateThreshold = (level: number) => 0.005 * Math.max(1, Math.min(10, level))
 
 export const DEFAULT_NOTIFY: NotifyLevel = 'mentions'
 

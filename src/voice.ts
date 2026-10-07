@@ -1,9 +1,15 @@
 import type { IceServerDto, VoiceParticipantDto, VoiceSignalDto } from './types'
+import { elementVolumeIgnored } from './volume'
+import { detectorUrl } from './voiceDetector'
 import type { VoiceHub } from './voiceHub'
 
 /**
  * Browser WebRTC voice: one RTCPeerConnection per other participant (full mesh), Opus with DTX
  * (silence costs ~nothing), VAD-style speaking detection on every stream.
+ *
+ * The gate: unless it is turned off, our voice is only sent while we are talking, so what goes out is what the
+ * "speaking" light shows and the room's background does not. It works by pausing what each connection sends, never
+ * by touching the microphone, and every way it can fail leaves the voice being sent.
  *
  * Topology (same as the server's contract): the newcomer offers to everyone already present;
  * existing participants only answer, so there is no offer glare.
@@ -29,7 +35,7 @@ interface Peer {
 
 interface Meter { ctx: AudioContext; analyser: AnalyserNode; buf: Float32Array<ArrayBuffer>; speaking: boolean; lastAbove: number; src: MediaStreamAudioSourceNode; gain?: GainNode }
 
-const SPEAKING_THRESHOLD = 0.02
+export const SPEAKING_THRESHOLD = 0.02
 const SILENCE_HOLD_MS = 350
 
 export class VoiceEngine {
@@ -53,15 +59,84 @@ export class VoiceEngine {
   /** The most our microphone may send to each person, in kilobits per second; 0 = leave it to the browser. Set by the server. */
   maxAudioKbps = 0
 
-  /** Caps what one connection sends. Safe to call more than once: before negotiation there may be nothing to cap yet. */
-  private limitBitrate(pc: RTCPeerConnection) {
-    if (this.maxAudioKbps <= 0) return
-    for (const sender of pc.getSenders()) {
-      if (sender.track?.kind !== 'audio') continue
-      const params = sender.getParameters()
-      if (!params.encodings || params.encodings.length === 0) continue
-      for (const encoding of params.encodings) encoding.maxBitrate = this.maxAudioKbps * 1000
-      sender.setParameters(params).catch(() => { /* not negotiated yet; tried again once connected */ })
+  private gateOn = true
+  private gateThreshold = SPEAKING_THRESHOLD
+  /** Whether we are talking, as far as the detector (or, failing that, the meter) can tell. */
+  private talking = false
+  /** Whether our voice is going out right now. With the gate off it always is. */
+  private sending = true
+  private detector: { node: AudioWorkletNode; heard: number } | null = null
+
+  /** Whether to send our voice only while we are talking, and how loud counts as talking. */
+  setGate(on: boolean, threshold: number) {
+    this.gateOn = on
+    this.gateThreshold = threshold
+    this.detector?.node.port.postMessage({ threshold })
+    this.setSending(this.talking || !on)
+  }
+
+  private setTalking(talking: boolean, keepSending = false) {
+    if (talking !== this.talking) { this.talking = talking; this.events.speaking(null, talking) }
+    this.setSending(talking || !this.gateOn || keepSending)
+  }
+
+  private setSending(sending: boolean) {
+    if (sending === this.sending) return
+    this.sending = sending
+    for (const peer of this.peers.values()) this.tuneSenders(peer.pc)
+  }
+
+  /** Sets what one connection sends: the bitrate cap, and whether our voice goes out at all right now. Safe to call more than once. */
+  private tuneSenders(pc: RTCPeerConnection) {
+    for (const sender of pc.getSenders()) if (sender.track?.kind === 'audio') this.tuneSender(pc, sender)
+  }
+
+  private tuning = new WeakSet<RTCRtpSender>()
+
+  private tuneSender(pc: RTCPeerConnection, sender: RTCRtpSender) {
+    if (pc.connectionState === 'closed' || this.tuning.has(sender)) return
+    const params = sender.getParameters()
+    if (!params.encodings || params.encodings.length === 0) return // not negotiated yet; tried again once connected
+    const sending = this.sending
+    for (const encoding of params.encodings) {
+      encoding.active = sending
+      if (this.maxAudioKbps > 0) encoding.maxBitrate = this.maxAudioKbps * 1000
+    }
+    this.tuning.add(sender)
+    void sender.setParameters(params).then(() => true, () => false).then(done => {
+      this.tuning.delete(sender)
+      // It changed its mind meanwhile, or could not be switched back on: a voice is never left off by accident.
+      if (this.sending !== sending) this.tuneSender(pc, sender)
+      else if (!done && sending) window.setTimeout(() => this.tuneSender(pc, sender), 200)
+    })
+  }
+
+  /**
+   * Starts the detector for this microphone (see voiceDetector.ts). Where it cannot run, the meter's timer stands in
+   * for it, which is good enough while the window is showing.
+   */
+  private async listen(meter: Meter) {
+    this.detector = null
+    try {
+      await meter.ctx.audioWorklet.addModule(detectorUrl())
+      if (this.localMeter !== meter) return
+      const node = new AudioWorkletNode(meter.ctx, 'voice-detector')
+      const detector = { node, heard: Date.now() }
+      node.port.onmessage = e => {
+        if (this.detector !== detector) return
+        detector.heard = Date.now()
+        if (!this.muted) this.setTalking(e.data === true)
+      }
+      node.port.postMessage({ threshold: this.gateThreshold })
+      // A node is only run while it leads somewhere, so this one is joined to the output through a gain of nothing.
+      const nowhere = meter.ctx.createGain()
+      nowhere.gain.value = 0
+      meter.src.connect(node)
+      node.connect(nowhere)
+      nowhere.connect(meter.ctx.destination)
+      this.detector = detector
+    } catch (e) {
+      this.events.log(`Listening for speech on a timer (${e instanceof Error ? e.message : e}).`)
     }
   }
   effectivePolicy: IcePolicy = 'direct'
@@ -102,6 +177,28 @@ export class VoiceEngine {
     this.inputDeviceId = inputDeviceId
     if (!this.joined) return true
     if (!this.local) return false
+    return this.reopenMicrophone()
+  }
+
+  /**
+   * The app is in front again. A phone stops a page's microphone and its sound while the browser is in the
+   * background, and does not always hand them back by itself: start the sound again, and open the microphone again
+   * if it was ended.
+   */
+  async recover(): Promise<void> {
+    if (!this.joined) return
+    for (const peer of this.peers.values()) {
+      void peer.audio.play().catch(() => { /* needs a tap; the next one anywhere does it */ })
+      void peer.meter?.ctx.resume().catch(() => { /* closed */ })
+    }
+    void this.localMeter?.ctx.resume().catch(() => { /* closed */ })
+    const track = this.local?.getAudioTracks()[0]
+    if (this.local && (!track || track.readyState === 'ended')) await this.reopenMicrophone()
+  }
+
+  private async reopenMicrophone(): Promise<boolean> {
+    if (!this.local) return false
+    const inputDeviceId = this.inputDeviceId
     try {
       const fresh = await navigator.mediaDevices.getUserMedia({
         audio: { deviceId: inputDeviceId ? { exact: inputDeviceId } : undefined, echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
@@ -116,9 +213,10 @@ export class VoiceEngine {
       if (this.localMeter) { this.localMeter.src.disconnect(); void this.localMeter.ctx.close() }
       this.local = fresh
       this.localMeter = this.makeMeter(fresh)
+      void this.listen(this.localMeter)
       return true
     } catch (e) {
-      this.events.log(`Could not switch microphone: ${e instanceof Error ? e.message : e}`)
+      this.events.log(`Could not open the microphone: ${e instanceof Error ? e.message : e}`)
       return false
     }
   }
@@ -152,6 +250,7 @@ export class VoiceEngine {
       })
       if (this.muted) for (const t of this.local.getAudioTracks()) t.enabled = false
       this.localMeter = this.makeMeter(this.local)
+      void this.listen(this.localMeter)
       this.events.log(`Microphone started (${this.effectivePolicy === 'relay' ? 'relayed' : 'direct'}).`)
     } catch (e) {
       micError = e
@@ -173,13 +272,16 @@ export class VoiceEngine {
     window.clearInterval(this.meterTimer)
     if (this.localMeter) { this.localMeter.src.disconnect(); void this.localMeter.ctx.close(); this.localMeter = null }
     if (this.local) { for (const t of this.local.getTracks()) t.stop(); this.local = null }
+    this.detector = null
+    this.talking = false
+    this.sending = true
     this.events.speaking(null, false)
   }
 
   setMuted(muted: boolean) {
     this.muted = muted
     if (this.local) for (const t of this.local.getAudioTracks()) t.enabled = !muted
-    if (muted) this.events.speaking(null, false)
+    if (muted) this.setTalking(false)
   }
 
   private wanted = new Map<string, { volume: number; muted: boolean }>()
@@ -195,7 +297,10 @@ export class VoiceEngine {
     const chosen = this.wanted.get(connectionId) ?? { volume: 1, muted: false }
     const want = { volume: chosen.volume * this.master, muted: chosen.muted || this.deafened }
     const meter = peer.meter
-    if (!want.muted && want.volume > 1 && meter) {
+    // An iPhone ignores the element's volume altogether (see volume.ts), so there quieter goes the same way as louder,
+    // as long as the context is allowed to make a sound; if it is not, full volume beats silence.
+    const quieterHere = want.volume < 1 && elementVolumeIgnored() && meter?.ctx.state === 'running'
+    if (!want.muted && (want.volume > 1 || quieterHere) && meter) {
       // An audio element cannot go above 100%, so louder than that is played through a gain node instead. The
       // element stays attached but silent: Chromium only feeds a remote stream to Web Audio while one is playing it.
       if (!meter.gain) {
@@ -264,8 +369,8 @@ export class VoiceEngine {
     const pc = new RTCPeerConnection(this.config)
     if (this.local) for (const track of this.local.getAudioTracks()) pc.addTrack(track, this.local)
     else pc.addTransceiver('audio', { direction: 'recvonly' })
-    this.limitBitrate(pc)
-    pc.addEventListener('connectionstatechange', () => { if (pc.connectionState === 'connected') this.limitBitrate(pc) })
+    this.tuneSenders(pc)
+    pc.addEventListener('connectionstatechange', () => { if (pc.connectionState === 'connected') this.tuneSenders(pc) })
 
     const audio = document.createElement('audio')
     audio.autoplay = true
@@ -314,7 +419,13 @@ export class VoiceEngine {
   private startMetering() {
     window.clearInterval(this.meterTimer)
     this.meterTimer = window.setInterval(() => {
-      if (this.localMeter && !this.muted) this.measure(this.localMeter, null)
+      if (this.localMeter && !this.muted) {
+        this.measure(this.localMeter, null)
+        // The detector decides while it is running. This timer only stands in for it, and not in a hidden window,
+        // where timers are slowed down too far to follow speech: there the voice is simply sent.
+        const detecting = !!this.detector && Date.now() - this.detector.heard < 800
+        if (!detecting) this.setTalking(this.localMeter.speaking, document.hidden)
+      }
       for (const [id, peer] of this.peers) if (peer.meter) this.measure(peer.meter, id)
     }, 80)
   }
@@ -326,12 +437,13 @@ export class VoiceEngine {
     const rms = Math.sqrt(sum / m.buf.length)
     this.events.level(id, Math.min(1, rms * 4))
     const now = Date.now()
-    if (rms >= SPEAKING_THRESHOLD) {
+    // Our own light is set by setTalking, so that it shows exactly when our voice is being sent.
+    if (rms >= (id === null ? this.gateThreshold : SPEAKING_THRESHOLD)) {
       m.lastAbove = now
-      if (!m.speaking) { m.speaking = true; this.events.speaking(id, true) }
+      if (!m.speaking) { m.speaking = true; if (id !== null) this.events.speaking(id, true) }
     } else if (m.speaking && now - m.lastAbove > SILENCE_HOLD_MS) {
       m.speaking = false
-      this.events.speaking(id, false)
+      if (id !== null) this.events.speaking(id, false)
     }
   }
 }

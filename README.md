@@ -10,12 +10,9 @@ It needs a Maplecord server to connect to.
 - Servers, text and voice channels, roles, friends, DMs
 - Call a friend from your conversation with them (📞). Calls go through the relay. "P2P call" is a separate button
   that only shows if you allow P2P, asks first, and only rings if your friend allows P2P too.
-- Send any kind of file. Pictures and videos show in the chat.
-- Send a file of any size straight to people who are online (the ⇄ button). It goes from your computer to theirs,
-  through a relay unless you are friends and both allow P2P, and is never stored on the server. The desktop app
-  writes it to disk as it arrives; in a browser without that ability the limit is 512 MB.
-  The desktop app remembers what you offered (for 30 days): close it, open it again, and the file can be downloaded
-  again as long as it hasn't been moved or changed. In a browser the offer lasts until you close the tab.
+- Send files in chat, up to the server's size limit. Pictures and videos show in the chat.
+- Friends who both allow P2P can send each other files of any size, straight from one computer to the other
+  (the ⇄ button).
 - Rolls: roll, need/greed, rock paper scissors, coin flip, dice. The server does the rolling.
   Rolls go to whoever is in voice with you.
 - Share an app window, a whole screen or your camera with your voice channel. Others click LIVE to watch;
@@ -60,6 +57,12 @@ npm run dist:win
 
 Also `dist:mac` and `dist:linux`. Installers end up in `release/`. Set `VITE_SERVER_URL` to your server before
 building.
+
+The Windows build makes two files: `Maplecord-Setup.exe` (the installer) and `Maplecord-Portable.zip` (unzip and run
+`Maplecord.exe`, nothing is installed). Their names carry no version number on purpose: attached to a GitHub release
+under exactly those names, the newest ones are always at
+`https://github.com/<owner>/<repo>/releases/latest/download/Maplecord-Setup.exe` (and `.../Maplecord-Portable.zip`),
+which is where the server's front page sends people.
 
 ## Web version
 

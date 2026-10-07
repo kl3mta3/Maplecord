@@ -66,11 +66,13 @@
     "icon": "build/icon.png",
     "win": {
       "target": [
-        "nsis"
+        "nsis",
+        "zip"
       ],
-      "artifactName": "Maplecord-Setup-${version}.${ext}"
+      "artifactName": "Maplecord-Portable.${ext}"
     },
     "nsis": {
+      "artifactName": "Maplecord-Setup.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     },

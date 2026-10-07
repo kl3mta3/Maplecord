@@ -120,6 +120,9 @@ export const CLIENT_PROTOCOL = 1
 export const bridge = (): MaplecordBridge | undefined => window.maplecord
 export const isElectron = () => !!window.maplecord
 
+/** An iPhone or iPad, in any browser (they are all Safari underneath). An iPad says it is a Mac; a real Mac has no touch screen. */
+export const appleTouch = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1)
+
 /**
  * The public Maplecord server every install connects to. Set VITE_SERVER_URL at build time for release.
  * Users never see this unless they open "Advanced" on the login screen or the default server is unreachable.

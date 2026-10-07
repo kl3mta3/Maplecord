@@ -30,7 +30,7 @@ import Friends from './Home'
 import { serverMediaUrl } from '../itemIcons'
 import { isElectron } from '../platform'
 import { soundPackNames } from '../sounds'
-import { DEFAULT_NOTIFY, type NotifyLevel } from '../settings'
+import { DEFAULT_GATE_LEVEL, DEFAULT_NOTIFY, type NotifyLevel } from '../settings'
 import { ContextMenu, type MenuEntry } from './ContextMenu'
 import type { GuildFolder } from '../settings'
 import { Avatar, ProfileEditor, ProfilePopout, UserName } from './Profile'
@@ -145,6 +145,11 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       { kind: 'label', text: kind === 'audioinput' ? 'Input device' : 'Output device' },
       { kind: 'item', label: 'System default', checked: !chosen, onClick: () => pick(null) },
       ...list.map((d, i) => ({ kind: 'item', label: d.label || `${kind === 'audioinput' ? 'Microphone' : 'Speakers'} ${i + 1}`, checked: chosen === d.deviceId, onClick: () => pick(d.deviceId) } as MenuEntry)),
+      ...(kind === 'audioinput' ? [
+        { kind: 'sep' } as MenuEntry,
+        { kind: 'item', label: 'Only send my voice while I talk', checked: store.settings.voiceGate !== false, onClick: () => store.updateSettings({ voiceGate: store.settings.voiceGate === false }) } as MenuEntry,
+        ...(store.settings.voiceGate !== false ? [{ kind: 'slider', label: 'How loud counts as talking', min: 1, max: 10, step: 1, value: store.settings.voiceGateLevel ?? DEFAULT_GATE_LEVEL, format: (v: number) => (v <= 2 ? v + ' · a whisper' : v >= 8 ? v + ' · a raised voice' : String(v)), onChange: (v: number) => store.updateSettings({ voiceGateLevel: v }) } as MenuEntry] : []),
+      ] : []),
       ...(kind === 'audiooutput' ? [{ kind: 'slider', label: 'Output volume', min: 0, max: 100, step: 5, value: Math.round((store.settings.outputVolume ?? 1) * 100), format: (v: number) => v + '%', onChange: (v: number) => store.updateSettings({ outputVolume: v / 100 }) } as MenuEntry] : []),
       { kind: 'sep' },
       { kind: 'item', label: 'Voice settings', icon: '⚙', onClick: () => setDialog({ kind: 'audio' }) },

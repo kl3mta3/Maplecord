@@ -569,3 +569,10 @@ button.danger:hover { background: var(--red); color: #fff; }
 .stage .tile .videobox:fullscreen video { width: min(100vw, calc(100vh * var(--a, 1.7778))); }
 .stage .tile .videobox + .waiting { position: absolute; inset: 0 0 34px 0; }
 @media (max-width: 700px) { .stage .tile .videobox video { width: min(100%, calc(40dvh * var(--a, 1.7778))); } }
+
+/* The "add to your Home Screen" card (InstallHint). */
+.installhint { position: fixed; left: 10px; right: 10px; bottom: calc(10px + env(safe-area-inset-bottom, 0px)); z-index: 60; max-width: 520px; margin: 0 auto;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px; border-radius: 14px; background: var(--bg2); border: 1px solid var(--accent); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6); }
+.installhint img { width: 44px; height: 44px; border-radius: 10px; }
+.installhint .grow { flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.installhint .sharemark { display: inline-block; padding: 0 5px; border: 1px solid var(--border); border-radius: 5px; color: var(--accent2); }

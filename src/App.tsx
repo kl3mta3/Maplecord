@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Login from './components/Login'
 import Overlay from './components/Overlay'
 import Shell from './components/Shell'
+import InstallHint from './components/InstallHint'
 import { PENDING_DIRECT, useMaplecord } from './store'
 import { hasValidToken } from './settings'
 import { ApiError } from './api'
@@ -83,9 +84,10 @@ function MainApp() {
       <div className="muted" style={{ textAlign: 'center' }}>Please update to the latest version, then open it again.</div>
     </div></div>
   )
-  if (!signedIn) return <Login store={store} onSignedIn={() => setSignedIn(true)} />
+  if (!signedIn) return <><Login store={store} onSignedIn={() => setSignedIn(true)} /><InstallHint store={store} /></>
   return (
     <>
+      <InstallHint store={store} />
       {store.systemMessages.length > 0 && (
         <div className="sysmsgs" role="status">
           {store.systemMessages.map(m => (

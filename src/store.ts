@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Api, ApiError } from './api'
 import { ChatHub } from './hub'
 import { bridge, type OverlayAction } from './platform'
-import { DEFAULT_NOTIFY, defaultPluginSettings, loadSettings, saveSettings, type GuildPrefs, type PluginSettings, type Settings, type UserPrefs } from './settings'
+import { DEFAULT_GATE_LEVEL, DEFAULT_NOTIFY, defaultPluginSettings, gateThreshold, loadSettings, saveSettings, type GuildPrefs, type PluginSettings, type Settings, type UserPrefs } from './settings'
 import { pluginIconUrl, type PluginDrop, type PluginInfo, type PluginItem } from './pluginTypes'
 import { serverIconUrl, shareIcon, withTimeout } from './itemIcons'
 import { appearanceOfMember, appearanceOfUser, shrinkPicture, type Appearance } from './profile'
@@ -458,11 +458,7 @@ export function useMaplecord() {
       PresenceStatus: (userId, dnd) => markDnd(userId, dnd),
       MemberPresence: (guildId, userId, online) => {
         if (!online) markDnd(userId, false)
-        const g = guildsRef.current.find(x => x.guild.id === guildId)
-        const m = g?.members.find(x => x.userId === userId)
-        if (!g || !m) return
-        if (m.online !== online && userId !== me() && guildId === selected.current.guild && !guildPrefs(guildId).muted && !isIgnored(userId))
-          playSound(online ? 'join' : 'leave', settingsRef.current.soundProfile, settingsRef.current.soundEnabled)
+        // No sound for this: the knock and the door are for people coming into and leaving the voice channel you are in.
         patchGuild(guildId, gs => ({ ...gs, members: gs.members.map(x => (x.userId === userId ? { ...x, online } : x)) }))
       },
       MemberJoined: (guildId, member) => patchGuild(guildId, g => ({ ...g, members: [...g.members.filter(x => x.userId !== member.userId), member] })),
@@ -1033,6 +1029,14 @@ export function useMaplecord() {
     return () => window.clearInterval(timer)
   }, [sharing, streamRules])
 
+  // Back in front after being in the background (a phone's browser minimised, mostly): see VoiceEngine.recover.
+  useEffect(() => {
+    const onBack = () => { if (!document.hidden) void voiceEngine.recover() }
+    document.addEventListener('visibilitychange', onBack)
+    window.addEventListener('pageshow', onBack)
+    return () => { document.removeEventListener('visibilitychange', onBack); window.removeEventListener('pageshow', onBack) }
+  }, [voiceEngine])
+
   // Video is not sent to someone who is not looking: when this window has been hidden for a little while we stop
   // watching, and pick the same streams up again when it comes back.
   const pausedRef = useRef<string[]>([])
@@ -1359,6 +1363,9 @@ export function useMaplecord() {
   const toggleDeafen = useCallback(() => setDeafened(d => !d), [])
   const outputVolume = settings.outputVolume ?? 1
   useEffect(() => { voiceEngine.setOutput(outputVolume, deafened) }, [deafened, outputVolume, voiceEngine, voicePeers])
+  const voiceGate = settings.voiceGate !== false
+  const voiceGateLevel = settings.voiceGateLevel ?? DEFAULT_GATE_LEVEL
+  useEffect(() => { voiceEngine.setGate(voiceGate, gateThreshold(voiceGateLevel)) }, [voiceEngine, voiceGate, voiceGateLevel])
   useEffect(() => { applyTheme(settings.theme) }, [settings.theme])
 
 

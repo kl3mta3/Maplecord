@@ -5,6 +5,7 @@ import { DEFAULT_THEME, THEMES } from '../theme'
 import { isElectron } from '../platform'
 import { shownName } from '../profile'
 import { Dialog } from './Dialogs'
+import { askToInstall, installWay } from '../install'
 
 /** The ways a person can appear, in the order they are offered. */
 export const STATUSES: { value: UserStatus; label: string; hint: string; dot: string }[] = [
@@ -122,6 +123,12 @@ export function UserSettingsDialog({ store, onOpen, onSignOut, onClose }: {
 
           {section === 'app' && (
             <>
+              {installWay() && (
+                <>
+                  <h4>On this device</h4>
+                  <div className="row"><button onClick={() => { onClose(); askToInstall() }}>Add to Home Screen…</button></div>
+                </>
+              )}
               <h4>Sounds</h4>
               <label className="switch">
                 <input type="checkbox" checked={store.settings.soundEnabled} onChange={e => store.updateSettings({ soundEnabled: e.target.checked })} />
