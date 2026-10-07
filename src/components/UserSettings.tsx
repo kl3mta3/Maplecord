@@ -6,6 +6,7 @@ import { isElectron } from '../platform'
 import { shownName } from '../profile'
 import { Dialog } from './Dialogs'
 import { askToInstall, installWay } from '../install'
+import { MyBots } from './Integrations'
 
 /** The ways a person can appear, in the order they are offered. */
 export const STATUSES: { value: UserStatus; label: string; hint: string; dot: string }[] = [
@@ -14,8 +15,8 @@ export const STATUSES: { value: UserStatus; label: string; hint: string; dot: st
   { value: UserStatus.Invisible, label: 'Invisible', hint: 'You appear offline', dot: 'invisible' },
 ]
 
-type Section = 'account' | 'privacy' | 'look' | 'app'
-const SECTIONS: [Section, string][] = [['account', 'My account'], ['privacy', 'Status & privacy'], ['look', 'Appearance'], ['app', 'App']]
+type Section = 'account' | 'privacy' | 'look' | 'app' | 'bots'
+const SECTIONS: [Section, string][] = [['account', 'My account'], ['privacy', 'Status & privacy'], ['look', 'Appearance'], ['app', 'App'], ['bots', 'My bots']]
 
 /**
  * Everything that is about the person rather than about a server, behind the cog at the bottom of the sidebar.
@@ -120,6 +121,8 @@ export function UserSettingsDialog({ store, onOpen, onSignOut, onClose }: {
               </div>
             </>
           )}
+
+          {section === 'bots' && <MyBots api={store.api} />}
 
           {section === 'app' && (
             <>

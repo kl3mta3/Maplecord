@@ -50,6 +50,10 @@ export interface GuildDto { id: string; name: string; iconUrl: string | null; ow
 export interface ChannelOverrideDto { id: string; channelId: string; roleId: string | null; userId: string | null; allow: number; deny: number }
 /** directSince is set on a P2P voice channel: people in it connect straight to each other and can see each other's IP address. */
 export interface ChannelDto { id: string; guildId: string | null; parentId: string | null; name: string; type: ChannelType; position: number; overrides?: ChannelOverrideDto[] | null; directSince?: string | null }
+/** An address other tools can post messages to. `token` and `url` only come back when it is made or renewed. */
+export interface WebhookDto { id: string; channelId: string; guildId: string; name: string; avatarUrl: string | null; createdById: string; createdAt: string; token?: string | null; url?: string | null }
+/** A bot. `token` and `interactionsSecret` only come back when it is made or its token is renewed. */
+export interface ApplicationDto { id: string; name: string; description: string | null; ownerId: string; botUserId: string; botUsername: string; interactionsUrl: string | null; createdAt: string; token?: string | null; interactionsSecret?: string | null }
 /** Whether this account allows P2P connections. Kept on the server; off unless the person turns it on. */
 export interface PrivacyDto { allowDirect: boolean }
 /** How a person chooses to appear. Invisible looks exactly like being offline to everyone else. */

@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { isElectron } from '../platform'
-import { Permission, hasPermission, type GuildDto, type MemberDto, type RoleDto } from '../types'
+import { Permission, hasPermission, type ChannelDto, type GuildDto, type MemberDto, type RoleDto } from '../types'
+import type { Api } from '../api'
 import { Dialog } from './Dialogs'
+import { ServerBotsTab, WebhooksTab } from './Integrations'
 
 // ---- Overlay / roll settings ---------------------------------------------------
 
@@ -65,7 +67,8 @@ export const PERMISSION_LABELS: { bit: number; name: string; hint: string }[] = 
 
 const ROLE_SWATCHES = ['#9000ff', '#00ddff', '#ff008c', '#2cfc00', '#f19511', '#ff3b3b', '#ffd700', '#1abc9c', '#e91e63', '#3498db', '#95a5a6', '#ffffff']
 
-export function ServerSettingsDialog({ guild, roles, members, myPermissions, meId, onRename, onIcon, onCreateRole, onUpdateRole, onDeleteRole, onSetMemberRoles, onClose }: {
+export function ServerSettingsDialog({ api, channels, guild, roles, members, myPermissions, meId, onRename, onIcon, onCreateRole, onUpdateRole, onDeleteRole, onSetMemberRoles, onClose }: {
+  api: Api; channels: ChannelDto[]
   guild: GuildDto; roles: RoleDto[]; members: MemberDto[]; myPermissions: number; meId: string
   onRename: (name: string) => Promise<void>
   onIcon: (file: File | null) => Promise<void>
@@ -77,7 +80,8 @@ export function ServerSettingsDialog({ guild, roles, members, myPermissions, meI
 }) {
   const canGuild = hasPermission(myPermissions, Permission.ManageGuild)
   const canRoles = hasPermission(myPermissions, Permission.ManageRoles)
-  const [tab, setTab] = useState<'overview' | 'roles' | 'members'>(canGuild ? 'overview' : 'roles')
+  const canHooks = hasPermission(myPermissions, Permission.ManageWebhooks)
+  const [tab, setTab] = useState<'overview' | 'roles' | 'members' | 'webhooks' | 'bots'>(canGuild ? 'overview' : canRoles ? 'roles' : 'webhooks')
   const [name, setName] = useState(guild.name)
   const fileRef = useRef<HTMLInputElement>(null)
   const sorted = [...roles].sort((a, b) => b.position - a.position)
@@ -95,7 +99,13 @@ export function ServerSettingsDialog({ guild, roles, members, myPermissions, meI
         {canGuild && <button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}>Overview</button>}
         {canRoles && <button className={tab === 'roles' ? 'active' : ''} onClick={() => setTab('roles')}>Roles</button>}
         {canRoles && <button className={tab === 'members' ? 'active' : ''} onClick={() => setTab('members')}>Members</button>}
+        {canHooks && <button className={tab === 'webhooks' ? 'active' : ''} onClick={() => setTab('webhooks')}>Webhooks</button>}
+        {canGuild && <button className={tab === 'bots' ? 'active' : ''} onClick={() => setTab('bots')}>Bots</button>}
       </div>
+
+      {tab === 'webhooks' && <WebhooksTab api={api} guildId={guild.id} channels={channels} />}
+      {tab === 'bots' && <ServerBotsTab api={api} guildId={guild.id} canManage={canGuild}
+        onRoles={canRoles ? botUserId => { setMemberId(botUserId); setTab('members') } : undefined} />}
 
       {tab === 'overview' && (
         <>
@@ -162,9 +172,11 @@ export function ServerSettingsDialog({ guild, roles, members, myPermissions, meI
       {tab === 'members' && (
         <div className="roles">
           <div className="rolelist">
-            {[...members].filter(m => !m.isBot).sort((a, b) => a.username.localeCompare(b.username)).map(m => (
+            {/* People first, then bots: a bot is a member, and what it may do is set with roles like anyone else. */}
+            {[...members].sort((a, b) => Number(!!a.isBot) - Number(!!b.isBot) || a.username.localeCompare(b.username)).map(m => (
               <div key={m.userId} className={'r' + (m.userId === memberId ? ' sel' : '')} onClick={() => setMemberId(m.userId)}>
                 <span className="grow" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.nickname || m.username}{m.userId === guild.ownerId ? ' 👑' : ''}</span>
+                {m.isBot && <span className="bottag">BOT</span>}
               </div>
             ))}
           </div>

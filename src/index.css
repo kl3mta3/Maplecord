@@ -576,3 +576,13 @@ button.danger:hover { background: var(--red); color: #fff; }
 .installhint img { width: 44px; height: 44px; border-radius: 10px; }
 .installhint .grow { flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .installhint .sharemark { display: inline-block; padding: 0 5px; border: 1px solid var(--border); border-radius: 5px; color: var(--accent2); }
+
+/* Webhooks and bots (Integrations.tsx): a list of entries, each a row of controls with what belongs to it underneath. */
+.integrations { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.integrations .entry { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg1); }
+.integrations .row { flex-wrap: wrap; }
+.integrations .idrow code, .integrations .muted code { background: var(--bg0); padding: 3px 6px; border-radius: 4px; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.integrations .bad { color: var(--red); }
+.integrations .row > input.grow { flex: 1 1 160px; }
+.tabs { flex-wrap: wrap; }
+.bottag { font-size: 9px; font-weight: 700; letter-spacing: .04em; padding: 1px 4px; border-radius: 4px; background: var(--accent); color: #fff; }

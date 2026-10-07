@@ -1,5 +1,5 @@
 import type {
-  AttachmentDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto,
+  ApplicationDto, AttachmentDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto,
 } from './types'
 
 export class ApiError extends Error {
@@ -75,6 +75,24 @@ export class Api {
   }
   /** Make a voice channel P2P or relayed again. Either way everyone in its call is dropped from it. */
   setChannelDirect(id: string, direct: boolean) { return this.request<ChannelDto>('PATCH', `/api/channels/${id}`, { direct }) }
+  webhooks(guildId: string) { return this.request<WebhookDto[]>('GET', `/api/guilds/${guildId}/webhooks`) }
+  createWebhook(channelId: string, name: string) { return this.request<WebhookDto>('POST', `/api/channels/${channelId}/webhooks`, { name }) }
+  updateWebhook(id: string, patch: { name?: string; channelId?: string }) { return this.request<WebhookDto>('PATCH', `/api/webhooks/${id}`, patch) }
+  /** Gives it a new address; the old one stops working. */
+  regenerateWebhook(id: string) { return this.request<WebhookDto>('POST', `/api/webhooks/${id}/regenerate`) }
+  deleteWebhook(id: string) { return this.request<void>('DELETE', `/api/webhooks/${id}`) }
+
+  /** The bots this person has made. */
+  applications() { return this.request<ApplicationDto[]>('GET', '/api/applications') }
+  createApplication(name: string) { return this.request<ApplicationDto>('POST', '/api/applications', { name }) }
+  updateApplication(id: string, patch: { name?: string; description?: string; interactionsUrl?: string }) { return this.request<ApplicationDto>('PATCH', `/api/applications/${id}`, patch) }
+  /** Gives it a new token; the old one stops working. */
+  regenerateApplication(id: string) { return this.request<ApplicationDto>('POST', `/api/applications/${id}/regenerate`) }
+  deleteApplication(id: string) { return this.request<void>('DELETE', `/api/applications/${id}`) }
+  guildApplications(guildId: string) { return this.request<ApplicationDto[]>('GET', `/api/guilds/${guildId}/applications`) }
+  addGuildApplication(guildId: string, appId: string) { return this.request<ApplicationDto>('POST', `/api/guilds/${guildId}/applications/${encodeURIComponent(appId)}`) }
+  removeGuildApplication(guildId: string, appId: string) { return this.request<void>('DELETE', `/api/guilds/${guildId}/applications/${appId}`) }
+
   privacy() { return this.request<PrivacyDto>('GET', '/api/me/privacy') }
   preferences() { return this.request<PreferencesDto>('GET', '/api/me/preferences') }
   setPreferences(p: PreferencesDto) { return this.request<PreferencesDto>('PUT', '/api/me/preferences', p) }

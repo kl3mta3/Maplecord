@@ -211,7 +211,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       notify('mentions', 'Only @mentions'),
       notify('none', 'Nothing'),
       { kind: 'sep' },
-      ...(allowed(Permission.ManageGuild) || allowed(Permission.ManageRoles) ? [{ kind: 'item', label: 'Server settings', icon: '⚙', onClick: open('server') } as MenuEntry] : []),
+      ...(allowed(Permission.ManageGuild) || allowed(Permission.ManageRoles) || allowed(Permission.ManageWebhooks) ? [{ kind: 'item', label: 'Server settings', icon: '⚙', onClick: open('server') } as MenuEntry] : []),
       { kind: 'item', label: x.guild.ownerId === me?.id ? 'Delete server' : 'Leave server', icon: '⎋', danger: true, onClick: open('leaveGuild') },
     ]
   }
@@ -387,7 +387,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
             {serverMenu && g && (() => {
               const pick = (action: () => void) => () => { setServerMenu(false); action() }
               const owner = g.guild.ownerId === me?.id
-              const settings = can(Permission.ManageGuild) || can(Permission.ManageRoles)
+              const settings = can(Permission.ManageGuild) || can(Permission.ManageRoles) || can(Permission.ManageWebhooks)
               return (
                 <>
                   <div className="menubackdrop" onClick={() => setServerMenu(false)} onContextMenu={e => { e.preventDefault(); setServerMenu(false) }} />
@@ -635,7 +635,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           onOpenSounds={store.openSoundsFolder} onReloadSounds={store.reloadSoundPacks} onClose={() => setDialog(null)} />
       )}
       {dialog?.kind === 'server' && g && (
-        <ServerSettingsDialog guild={g.guild} roles={g.roles ?? []} members={g.members} myPermissions={myPerms} meId={me?.id ?? ''}
+        <ServerSettingsDialog api={store.api} channels={g.channels} guild={g.guild} roles={g.roles ?? []} members={g.members} myPermissions={myPerms} meId={me?.id ?? ''}
           onRename={store.renameGuild} onIcon={store.setGuildIcon} onCreateRole={store.createRole} onUpdateRole={store.updateRole} onDeleteRole={store.deleteRole} onSetMemberRoles={store.setMemberRoles}
           onClose={() => setDialog(null)} />
       )}
