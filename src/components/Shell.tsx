@@ -42,7 +42,7 @@ import { SharePicker, StreamStage } from './Streams'
 type DialogState =
   | { kind: 'createGuild' } | { kind: 'joinGuild' } | { kind: 'createChannel'; category?: boolean } | { kind: 'startRoll'; rollKind: RollKind }
   | { kind: 'leaveGuild' } | { kind: 'kick'; member: MemberDto } | { kind: 'ban'; member: MemberDto }
-  | { kind: 'audio' } | { kind: 'allowDirect' } | { kind: 'channelKind'; channelId: string; name: string; direct: boolean } | { kind: 'p2pCall'; userId: string; name: string } | { kind: 'share' } | { kind: 'settings' } | { kind: 'renameFolder'; folderId: string } | { kind: 'overlay' } | { kind: 'server' } | { kind: 'plugins' } | { kind: 'profile' }
+  | { kind: 'audio' } | { kind: 'allowDirect' } | { kind: 'channelKind'; channelId: string; name: string; direct: boolean } | { kind: 'p2pCall'; userId: string; name: string } | { kind: 'share' } | { kind: 'settings' } | { kind: 'renameChannel'; channelId: string; name: string } | { kind: 'deleteChannel'; channelId: string; name: string } | { kind: 'renameFolder'; folderId: string } | { kind: 'overlay' } | { kind: 'server' } | { kind: 'plugins' } | { kind: 'profile' }
   | { kind: 'nickname'; guildId: string; userId: string } | null
 
 export default function Shell({ store, onSignedOut }: { store: Store; onSignedOut: () => void }) {
@@ -154,7 +154,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
 
   // ---- Right-click menus ------------------------------------------------------
   // What they change about other people and servers is yours alone and kept on this device; nobody is told.
-  const [menu, setMenu] = useState<({ kind: 'guild'; guildId: string } | { kind: 'user'; userId: string; username: string } | { kind: 'channel'; channelId: string; name: string; direct: boolean } | { kind: 'status' } | { kind: 'mic' } | { kind: 'speaker' } | { kind: 'stats' } | { kind: 'folder'; folderId: string }) & { x: number; y: number } | null>(null)
+  const [menu, setMenu] = useState<({ kind: 'guild'; guildId: string } | { kind: 'user'; userId: string; username: string } | { kind: 'channel'; channelId: string; name: string; direct: boolean; voice: boolean } | { kind: 'status' } | { kind: 'mic' } | { kind: 'speaker' } | { kind: 'stats' } | { kind: 'folder'; folderId: string }) & { x: number; y: number } | null>(null)
   /** Microphones and speakers, looked up each time one of the little menus beside the mute buttons opens. */
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
   const openPanelMenu = (e: React.MouseEvent, kind: 'status' | 'mic' | 'speaker') => {
@@ -277,11 +277,10 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
     <div className={'shell pane-' + pane}>
       {/* Only shown on a phone: the way between the three panes. */}
       <div className="mobilebar">
-        {pane === 'people'
-          ? <button onClick={() => setPane('chat')}>← Back</button>
-          : <button onClick={() => setPane('list')} title="Servers and channels">☰</button>}
-        <span className="grow title">{store.selectedChannel ? (store.selectedChannel.type === ChannelType.DirectMessage ? '@' : '#') + store.selectedChannel.name : 'Maplecord'}</span>
-        {pane === 'chat' && <button onClick={() => setPane('people')} title={store.home ? 'Friends' : 'Members'}>👥</button>}
+        {/* Each button opens its panel, and pressed again puts the conversation back. */}
+        <button className={pane === 'list' ? 'accent' : ''} onClick={() => setPane(pane === 'list' ? 'chat' : 'list')} title={pane === 'list' ? 'Back to the conversation' : 'Servers and channels'}>☰</button>
+        <span className="grow title" onClick={() => setPane('chat')}>{store.selectedChannel ? (store.selectedChannel.type === ChannelType.DirectMessage ? '@' : '#') + store.selectedChannel.name : 'Maplecord'}</span>
+        <button className={pane === 'people' ? 'accent' : ''} onClick={() => setPane(pane === 'people' ? 'chat' : 'people')} title={pane === 'people' ? 'Back to the conversation' : store.home ? 'Friends' : 'Members'}>👥</button>
       </div>
       {/* ===== Guild rail ===== */}
       <div className="rail" onDragOver={allowDrop} onDrop={e => { const id = dragged(e); if (id) { e.preventDefault(); moveToFolder(id, null) } }}>
@@ -410,19 +409,20 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
                 : (
                   <div key={c.id}>
                     <div
-                      className={'channel' + (c.id === store.selectedChannel?.id ? ' active' : '') + ((g.channelUnread[c.id] ?? 0) > 0 ? ' unread' : '') + (c.directSince ? ' p2p' : '')}
+                      className={'channel' + (c.id === store.selectedChannel?.id ? ' active' : '') + ((g.channelUnread[c.id] ?? 0) > 0 ? ' unread' : '') + (c.directSince ? ' p2p' : '') + (store.settings.mutedChannels?.[c.id] ? ' mutedchannel' : '')}
                       style={c.id === voice?.channelId ? { color: 'var(--green)' } : undefined}
                       title={c.type !== ChannelType.Voice ? undefined : c.directSince
                         ? 'P2P voice channel: people in it connect straight to each other and can find each other\u2019s IP address. Click to join (you are asked first).'
                         : 'Click to join voice and open its chat'}
                       onClick={() => c.type === ChannelType.Text ? store.selectChannel(c.id) : openVoice(c.id)}
-                      onContextMenu={c.type === ChannelType.Voice && can(Permission.ManageChannels) && can(Permission.ManageDirectChannels) ? e => {
+                      onContextMenu={e => {
                         e.preventDefault()
-                        setMenu({ kind: 'channel', channelId: c.id, name: c.name, direct: !!c.directSince, x: e.clientX, y: e.clientY })
-                      } : undefined}>
+                        setMenu({ kind: 'channel', channelId: c.id, name: c.name, direct: !!c.directSince, voice: c.type === ChannelType.Voice, x: e.clientX, y: e.clientY })
+                      }}>
                       <span className="muted">{c.type === ChannelType.Text ? '#' : '🔊'}</span>
                       <span className="grow" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
                       {c.directSince && <span className="p2ptag">P2P</span>}
+                      {store.settings.mutedChannels?.[c.id] && <span className="muted" title="Muted">🔕</span>}
                       {(g.channelUnread[c.id] ?? 0) > 0 && <span className="badge">{g.channelUnread[c.id]}</span>}
                     </div>
                     {c.type === ChannelType.Voice && (() => {
@@ -575,7 +575,14 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       )}
       {menu && <ContextMenu x={menu.x} y={menu.y} entries={menu.kind === 'guild' ? guildEntries(menu.guildId) : menu.kind === 'user' ? userEntries(menu.userId, menu.username) : menu.kind === 'stats' ? rollEntries() : menu.kind === 'folder' ? folderEntries(menu.folderId) : menu.kind === 'status' ? statusEntries() : menu.kind === 'mic' ? deviceEntries('audioinput') : menu.kind === 'speaker' ? deviceEntries('audiooutput') : [
         { kind: 'label', text: menu.name },
-        { kind: 'item', label: menu.direct ? 'Make it a relayed channel' : 'Make it a P2P channel', icon: '⇄', onClick: () => setDialog({ kind: 'channelKind', channelId: menu.channelId, name: menu.name, direct: !menu.direct }) },
+        { kind: 'item', label: 'Mute channel', icon: '🔕', checked: !!store.settings.mutedChannels?.[menu.channelId], onClick: () => store.setChannelMuted(menu.channelId, !store.settings.mutedChannels?.[menu.channelId]) },
+        ...(menu.voice && can(Permission.ManageChannels) && can(Permission.ManageDirectChannels)
+          ? [{ kind: 'item', label: menu.direct ? 'Make it a relayed channel' : 'Make it a P2P channel', icon: '⇄', onClick: () => setDialog({ kind: 'channelKind', channelId: menu.channelId, name: menu.name, direct: !menu.direct }) } as MenuEntry] : []),
+        ...(can(Permission.ManageChannels) ? [
+          { kind: 'sep' } as MenuEntry,
+          { kind: 'item', label: 'Rename channel', icon: '✎', onClick: () => setDialog({ kind: 'renameChannel', channelId: menu.channelId, name: menu.name }) } as MenuEntry,
+          { kind: 'item', label: 'Delete channel', icon: '🗑', danger: true, onClick: () => setDialog({ kind: 'deleteChannel', channelId: menu.channelId, name: menu.name }) } as MenuEntry,
+        ] : []),
       ]} onClose={() => setMenu(null)} />}
       {dialog?.kind === 'kick' && <ConfirmDialog title={`Kick ${dialog.member.username}?`} message="They can rejoin with an invite." onConfirm={() => store.kickMember(dialog.member)} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'ban' && <ConfirmDialog title={`Ban ${dialog.member.username}?`} message="They will not be able to rejoin." onConfirm={() => store.banMember(dialog.member)} onClose={() => setDialog(null)} />}
@@ -601,6 +608,14 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       {store.call?.phase === 'incoming' && (
         <IncomingCallDialog name={store.call.otherName} direct={store.call.direct} allowed={!store.call.direct || store.allowDirect}
           onAnswer={() => void store.answerCall()} onDecline={() => void store.declineCall()} onSettings={() => setDialog({ kind: 'audio' })} />
+      )}
+      {dialog?.kind === 'renameChannel' && (
+        <PromptDialog title={`Rename ${dialog.name}`} label="Channel name" initial={dialog.name} onClose={() => setDialog(null)}
+          onSubmit={name => { if (name !== dialog.name) void store.renameChannel(dialog.channelId, name) }} />
+      )}
+      {dialog?.kind === 'deleteChannel' && (
+        <ConfirmDialog title={`Delete ${dialog.name}?`} message="The channel and everything written in it are removed for everyone. This cannot be undone."
+          onConfirm={() => { void store.deleteChannel(dialog.channelId); store.setChannelMuted(dialog.channelId, false) }} onClose={() => setDialog(null)} />
       )}
       {dialog?.kind === 'renameFolder' && (
         <PromptDialog title="Rename folder" label="Folder name" onClose={() => setDialog(null)}

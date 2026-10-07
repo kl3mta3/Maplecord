@@ -98,12 +98,31 @@ export function SharePicker({ store, onClose }: { store: Store; onClose: () => v
 
 const toggleFullScreen = (el: HTMLElement | null) => {
   if (!el) return
-  void (document.fullscreenElement ? document.exitFullscreen() : el.requestFullscreen()).catch(() => { /* refused: nothing to do */ })
+  if (document.fullscreenElement) { void document.exitFullscreen().catch(() => { /* already left */ }); return }
+  if (typeof el.requestFullscreen === 'function') { void el.requestFullscreen().catch(() => { /* refused: nothing to do */ }); return }
+  // An iPhone only lets a video itself fill the screen, in its own player.
+  const video = (el instanceof HTMLVideoElement ? el : el.querySelector('video')) as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null
+  video?.webkitEnterFullscreen?.()
+}
+
+/**
+ * The shape the picture's box is given. A stream's frames do not always arrive at exactly one size: some senders
+ * and decoders flip between two that differ by a few lines (1080 and 1088, say) many times a second. Following every
+ * frame made the whole tile jump. So the shape only changes when the picture really changes shape (by more than 3%),
+ * and between near-identical sizes the widest is kept, which is the one without the extra lines.
+ */
+const steadyShape = (current: number | null, width: number, height: number): number | null => {
+  if (!width || !height) return current
+  const shape = width / height
+  if (current === null || Math.abs(shape - current) / current > 0.03) return shape
+  return shape > current ? shape : current
 }
 
 /** A video element bound to a live stream (React cannot set srcObject through a prop). Double-click for full screen. */
-function Video({ stream, elRef, volume = 0, muted = true, sinkId = null, onBlocked }: {
+function Video({ stream, elRef, volume = 0, muted = true, sinkId = null, onBlocked, onShape }: {
   stream: MediaStream | null; elRef?: React.RefObject<HTMLVideoElement | null>
+  /** Told the picture's steady shape (width over height) whenever it really changes. */
+  onShape?: (shape: number) => void
   /** The stream's own sound: silent unless the tile says otherwise (your own preview never plays). */
   volume?: number; muted?: boolean; sinkId?: string | null
   /** The browser would not start it by itself: with sound ('sound', now playing silently) or at all ('play'). */
@@ -113,6 +132,19 @@ function Video({ stream, elRef, volume = 0, muted = true, sinkId = null, onBlock
   useEffect(() => { blocked.current = onBlocked })
   const own = useRef<HTMLVideoElement>(null)
   const ref = elRef ?? own
+  const [shape, setShape] = useState<number | null>(null)
+  const shapeListener = useRef(onShape)
+  useEffect(() => { shapeListener.current = onShape })
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const measure = () => setShape(cur => steadyShape(cur, el.videoWidth, el.videoHeight))
+    el.addEventListener('resize', measure)
+    el.addEventListener('loadedmetadata', measure)
+    measure()
+    return () => { el.removeEventListener('resize', measure); el.removeEventListener('loadedmetadata', measure) }
+  }, [ref])
+  useEffect(() => { if (shape) shapeListener.current?.(shape) }, [shape])
   useEffect(() => {
     const el = ref.current as (HTMLVideoElement & { setSinkId?: (id: string) => Promise<void> }) | null
     if (!el) return
@@ -133,7 +165,11 @@ function Video({ stream, elRef, volume = 0, muted = true, sinkId = null, onBlock
       el.play().then(() => blocked.current?.('sound'), () => blocked.current?.('play'))
     })
   }, [ref, stream])
-  return <video ref={ref} autoPlay playsInline muted={muted} onDoubleClick={e => toggleFullScreen(e.currentTarget)} />
+  return (
+    <div className="videobox" style={shape ? { '--a': String(shape) } as React.CSSProperties : undefined} onDoubleClick={e => toggleFullScreen(e.currentTarget)}>
+      <video ref={ref} autoPlay playsInline muted={muted} />
+    </div>
+  )
 }
 
 /**
@@ -149,6 +185,7 @@ function WatchedTile({ store, streamer, userId, title, detail, state, error, can
   const [limitKbps, setLimitKbps] = useState(0)
   // What the browser refused to start by itself, until the person taps (see Video).
   const [needsTap, setNeedsTap] = useState<'sound' | 'play' | null>(null)
+  const shapeRef = useRef<number | null>(null)
   const [size, setSize] = useState<{ height: number } | null>(null)
   const prefs = (userId && store.settings.users?.[userId]) || {}
   const hasSound = !!stream && stream.getAudioTracks().length > 0
@@ -188,7 +225,7 @@ function WatchedTile({ store, streamer, userId, title, detail, state, error, can
     // Seen again whenever either window is shown or hidden, so watching is only paused when nothing is on screen.
     const recheck = () => document.dispatchEvent(new Event('visibilitychange'))
     const pop = openPopout(streamer, title + ' — Maplecord', () => { popRef.current = null; setPoppedOut(false); recheck() }, recheck)
-    if (pop) { popRef.current = pop; pop.setStream(stream); setPoppedOut(true); return }
+    if (pop) { popRef.current = pop; if (shapeRef.current) pop.setShape(shapeRef.current); pop.setStream(stream); setPoppedOut(true); return }
     // A pop-up blocker said no. A floating picture-in-picture window is the next best thing.
     try { await videoRef.current?.requestPictureInPicture() }
     catch {
@@ -217,7 +254,7 @@ function WatchedTile({ store, streamer, userId, title, detail, state, error, can
         ? <div className="waiting bad">{error ?? 'The stream could not be shown.'}</div>
         : poppedOut
           ? <div className="waiting">Showing in its own window.</div>
-          : <><Video stream={stream} elRef={videoRef} volume={volume} muted={silent || !hasSound || needsTap !== null} sinkId={store.settings.audioOutputDeviceId} onBlocked={setNeedsTap} />
+          : <><Video stream={stream} elRef={videoRef} volume={volume} muted={silent || !hasSound || needsTap !== null} sinkId={store.settings.audioOutputDeviceId} onBlocked={setNeedsTap} onShape={a => { shapeRef.current = a; popRef.current?.setShape(a) }} />
               {needsTap && state === 'live' && (
                 <button className="taptoplay accent" onClick={() => {
                   // Done here, in the tap itself: that is what lets a phone start the sound.
@@ -234,7 +271,7 @@ function WatchedTile({ store, streamer, userId, title, detail, state, error, can
           ? <button className="subtle" onClick={putBack} title="Close its window and show it here again">Put back</button>
           : <>
               <button className="subtle" onClick={() => void popOut()} title="Show this stream in a window of its own">⧉ Pop out</button>
-              <button className="subtle" onClick={() => toggleFullScreen(videoRef.current)} title="Fill the screen (or double-click the video). Esc to leave.">⛶ Full screen</button>
+              <button className="subtle" onClick={() => toggleFullScreen(videoRef.current?.parentElement ?? null)} title="Fill the screen (or double-click the video). Esc to leave.">⛶ Full screen</button>
             </>)}
         {state === 'failed' && canRetry && <button className="subtle" onClick={() => void store.watchStream(streamer)}>Try again</button>}
         <button className="subtle" onClick={() => void store.unwatchStream(streamer)}>{state === 'failed' ? 'Close' : 'Stop watching'}</button>

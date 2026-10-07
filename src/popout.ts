@@ -19,6 +19,8 @@ export function anyPopoutVisible(): boolean {
 export interface Popout {
   window: Window
   setStream(stream: MediaStream | null): void
+  /** The picture's steady shape (width over height); see steadyShape in Streams.tsx. */
+  setShape(shape: number): void
   /** How loud the stream's sound is played in this window, 0 to 1, or not at all. */
   setAudio(volume: number, muted: boolean): void
   setTitle(title: string): void
@@ -27,7 +29,10 @@ export interface Popout {
 
 const STYLE = `
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font-family: 'Segoe UI', system-ui, sans-serif; }
-  video { width: 100vw; height: 100vh; object-fit: contain; display: block; background: #000; }
+  body { display: flex; align-items: center; justify-content: center; }
+  /* A box of the picture's own shape, as large as the window allows. Frames that arrive a few lines taller fill the
+     same box and lose those lines at the bottom, instead of making the whole picture shrink and grow. */
+  video { width: min(100vw, calc(100vh * var(--a, 1.7778))); aspect-ratio: var(--a, 1.7778); object-fit: cover; object-position: left top; display: block; background: #000; }
   .bar { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 8px; align-items: center; padding: 8px 10px;
          background: linear-gradient(transparent, rgba(0, 0, 0, 0.8)); color: #e8e8f0; font-size: 13px; opacity: 0; transition: opacity 0.15s; }
   body:hover .bar, .bar:focus-within { opacity: 1; }
@@ -85,6 +90,7 @@ export function openPopout(key: string, title: string, onClosed: () => void, onV
       waiting.style.display = stream ? 'none' : 'grid'
       if (stream) void video.play().catch(() => { /* starts by itself when data arrives */ })
     },
+    setShape(shape) { doc.documentElement.style.setProperty('--a', String(shape)) },
     setAudio(volume, muted) { video.muted = muted; video.volume = Math.max(0, Math.min(1, volume)) },
     setTitle(text) { doc.title = text; label.textContent = text },
     close() {

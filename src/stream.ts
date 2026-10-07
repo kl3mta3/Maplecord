@@ -176,7 +176,7 @@ export class StreamEngine {
       encoding.maxBitrate = (o.capKbps > 0 ? Math.min(q.kbps, o.capKbps) : q.kbps) * 1000
       encoding.maxFramerate = q.fps
       // A 1440p capture shared at 720p is halved before it is encoded.
-      encoding.scaleResolutionDownBy = height > q.height ? height / q.height : 1
+      encoding.scaleResolutionDownBy = height > q.height * 1.02 ? height / q.height : 1
     }
     await sender.setParameters(params).catch(() => { /* older engines refuse before negotiation; the capture constraints still hold */ })
   }

@@ -31,6 +31,8 @@ export interface Settings {
   users: Record<string, UserPrefs>
   /** Per server id. */
   guilds: Record<string, GuildPrefs>
+  /** Channels you have muted on this device: no unread mark, sound or notification from them. */
+  mutedChannels?: Record<string, boolean>
   /** Folders of servers in the rail, in no particular order: a folder sits where its first server would. */
   guildFolders?: GuildFolder[]
   /** Per game plugin, by plugin id. Detection and auto-rolling are both off until the user turns them on. */

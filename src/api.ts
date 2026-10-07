@@ -84,6 +84,7 @@ export class Api {
   /** Turning P2P on is refused (code "reauth") unless this sign-in is only a few minutes old. */
   setPrivacy(allowDirect: boolean) { return this.request<PrivacyDto>('PUT', '/api/me/privacy', { allowDirect }) }
   deleteChannel(id: string) { return this.request<void>('DELETE', `/api/channels/${id}`) }
+  renameChannel(id: string, name: string) { return this.request<ChannelDto>('PATCH', `/api/channels/${id}`, { name }) }
   kick(guildId: string, userId: string) { return this.request<void>('DELETE', `/api/guilds/${guildId}/members/${userId}`) }
   ban(guildId: string, userId: string) { return this.request<void>('POST', `/api/guilds/${guildId}/bans/${userId}`, { reason: null }) }
 

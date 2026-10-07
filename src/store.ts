@@ -392,7 +392,9 @@ export function useMaplecord() {
           if (m.authorId !== me()) { setTyping(null); window.clearTimeout(typingTimer.current) }
         } else if (!m.ephemeral && !isIgnored(m.authorId)) {
           const found = findChannel(m.channelId)
-          if (found?.guild) {
+          if (found?.guild && settingsRef.current.mutedChannels?.[m.channelId]) {
+            // A muted channel leaves no mark at all: that is the point of muting it.
+          } else if (found?.guild) {
             const muted = !!guildPrefs(found.guild.guild.id).muted
             patchGuild(found.guild.guild.id, g => ({
               ...g,
@@ -412,7 +414,7 @@ export function useMaplecord() {
           else if (where?.guild) {
             const prefs = guildPrefs(where.guild.guild.id)
             const level = prefs.notify ?? DEFAULT_NOTIFY
-            if (!prefs.muted && (level === 'all' || (level === 'mentions' && mentionsMe(m.content))))
+            if (!prefs.muted && !settingsRef.current.mutedChannels?.[m.channelId] && (level === 'all' || (level === 'mentions' && mentionsMe(m.content))))
               notifyDesktop(m.authorName + ' in #' + where.channel.name, m.content || 'sent a picture', m.channelId)
           }
         }
@@ -1309,6 +1311,15 @@ export function useMaplecord() {
     await setAllowDirect(true)
   }, [api, setAllowDirect, updateSettings])
 
+  const renameChannel = useCallback(async (channelId: string, name: string) => { await run(() => api.renameChannel(channelId, name)) }, [api])
+  const deleteChannel = useCallback(async (channelId: string) => { await run(() => api.deleteChannel(channelId)) }, [api])
+  /** Yours alone, on this device. Muting also clears whatever that channel had already counted. */
+  const setChannelMuted = useCallback((channelId: string, muted: boolean) => {
+    const all = { ...(settingsRef.current.mutedChannels ?? {}) }
+    if (muted) all[channelId] = true; else delete all[channelId]
+    updateSettings({ mutedChannels: all })
+    if (muted) setGuilds(gs => gs.map(g => (g.channelUnread[channelId] ? { ...g, unread: Math.max(0, g.unread - g.channelUnread[channelId]), channelUnread: { ...g.channelUnread, [channelId]: 0 } } : g)))
+  }, [updateSettings])
   const setChannelDirect = useCallback(async (channelId: string, direct: boolean) => { await run(() => api.setChannelDirect(channelId, direct)) }, [api])
 
   const toggleMute = useCallback(() => {
@@ -1627,7 +1638,7 @@ export function useMaplecord() {
     streamOf: (streamer: string) => streamEngine.streamOf(streamer), viewerCounts, streamRules, loadStreamRules,
     startShare, stopShare, watchStream, unwatchStream, setStreamLimit: (streamer: string, kbps: number) => streamEngine.requestLimit(streamer, kbps),
     voice, isMuted, isSpeaking, joinVoice, leaveVoice, toggleMute,
-    call, startCall, answerCall, declineCall,
+    call, startCall, answerCall, declineCall, renameChannel, deleteChannel, setChannelMuted,
     preferences, savePreferences, blocked, setBlocked, dndUsers, deafened, toggleDeafen, ownLook, transferLimits,
     allowDirect, setAllowDirect, reauthenticateForDirect, directPrompt, confirmDirect, dismissDirectPrompt: () => setDirectPrompt(null), setChannelDirect,
     setAudioDevices, me: () => settingsRef.current.user,

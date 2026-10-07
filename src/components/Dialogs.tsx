@@ -185,8 +185,8 @@ export function Dialog({ title, children, onClose, wide }: { title: string; chil
   )
 }
 
-export function PromptDialog({ title, label, onSubmit, onClose }: { title: string; label: string; onSubmit: (value: string) => void; onClose: () => void }) {
-  const [value, setValue] = useState('')
+export function PromptDialog({ title, label, onSubmit, onClose, initial = '' }: { title: string; label: string; onSubmit: (value: string) => void; onClose: () => void; initial?: string }) {
+  const [value, setValue] = useState(initial)
   const submit = () => { if (value.trim()) { onSubmit(value.trim()); onClose() } }
   return (
     <Dialog title={title} onClose={onClose}>
