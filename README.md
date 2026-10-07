@@ -44,9 +44,10 @@ also runs in a browser.
 Everything above works without your app ever connecting to another person's. P2P is extra: it is kept apart from the
 rest and is off until you turn it on.
 
-In a P2P connection your app connects straight to the other person's. That allows more, and it means **the people
-you connect to that way can find your IP address**.
+In a P2P connection your app connects straight to the others. That allows more, but it means **the people
+you connect to that way can, with the know how, find your IP address**.
 
+- **Privacy** a P2P connection is made for users by the server but the connection is direct and private. Nothing passes through the server or relay.
 - **Turning it on.** Untick "Do not allow P2P connections" in Voice settings. You are asked to sign in again, to be
   sure it is you. Tick it again whenever you like.
 - **P2P voice channels** are their own kind of channel, shown in italics with a P2P tag, and you are warned before
