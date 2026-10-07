@@ -43,7 +43,7 @@ export function SharePicker({ store, onClose }: { store: Store; onClose: () => v
       {rules && (
         <div className="muted">
           {rules.streamServer && !direct
-            ? <>Nothing is sent until someone chooses to watch, and anyone in the channel can. Your computer sends one copy however many are
+            ? <>Nothing is sent until someone chooses to watch{rules.maxViewersStreamServer ? `; up to ${rules.maxViewersStreamServer} people can watch at once` : ', and anyone in the channel can'}. Your computer sends one copy however many are
                 watching: {picked.height}p at {picked.fps} uses up to {(picked.kbps / 1000).toFixed(1)} Mbps of your upload.</>
             : <>Nothing is sent until someone chooses to watch
                 {rules.maxViewersDirect ? `; up to ${rules.maxViewersDirect} people can watch at once` : ''}. Each viewer gets a copy of their own

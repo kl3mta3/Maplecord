@@ -125,6 +125,8 @@ export interface StreamSettingsDto {
   directMaxHeight?: number; directMaxFps?: number; directMaxKbps?: number
   /** The voice channel we asked about has a stream server: we send one copy and everyone in the channel may watch. */
   streamServer?: boolean
+  /** With a stream server: the most people who may watch one stream there. 0 = everyone in the channel. */
+  maxViewersStreamServer?: number
 }
 export interface VoiceSignalDto { fromUserId: string; fromConnectionId: string; kind: 'offer' | 'answer' | 'ice'; payload: string }
 
