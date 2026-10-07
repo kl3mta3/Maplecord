@@ -652,3 +652,13 @@ button.chip { cursor: pointer; }
 .sidebar .category { display: flex; align-items: center; gap: 3px; padding-left: 8px; cursor: pointer; user-select: none; }
 .sidebar .category:hover, .sidebar .category:focus-visible { color: var(--text); outline: none; }
 .sidebar .category svg { flex: none; }
+
+/* A row whose side menu is open, and that menu. */
+.menu .item.opened { background: var(--accent); color: #fff; }
+.menu.sidemenu { z-index: 22; min-width: 170px; max-height: 70vh; overflow-y: auto; }
+.menu .item:disabled { opacity: .45; cursor: default; }
+.menu .item:disabled:hover { background: transparent; color: inherit; }
+
+/* An invite link inside a message. */
+.invitelink { display: inline; padding: 0; border: none; background: none; color: #b98cff; font: inherit; text-decoration: underline; cursor: pointer; word-break: break-all; }
+.invitelink:hover { color: #fff; filter: none; }

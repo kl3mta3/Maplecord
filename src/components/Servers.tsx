@@ -142,7 +142,7 @@ export function ListingSettings({ isPublic, description, topics, onSave }: {
     <div className="listing">
       <div className="muted">Who can join</div>
       <label className="choice"><input type="radio" name="listing" checked={!open} onChange={() => setOpen(false)} /><span><b>Private</b> <span className="muted">Only people with an invite</span></span></label>
-      <label className="choice"><input type="radio" name="listing" checked={open} onChange={() => setOpen(true)} /><span><b>Public</b> <span className="muted">Listed for everyone to find and join</span></span></label>
+      <label className="choice"><input type="radio" name="listing" checked={open} onChange={() => setOpen(true)} /><span><b>Public</b> <span className="muted">Listed for everyone to find and join. A public server cannot have P2P channels.</span></span></label>
       <div className="muted">Description (shown in the list of public servers)</div>
       <textarea rows={2} maxLength={300} value={about} onChange={e => setAbout(e.target.value)} aria-label="Server description" />
       <div className="muted">Topics, separated by commas (up to 5), for example: maplestory, raids, casual</div>

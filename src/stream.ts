@@ -35,6 +35,8 @@ const PRESETS: StreamQuality[] = [
   { height: 720, fps: 60, kbps: 4000 },
   { height: 1080, fps: 30, kbps: 5000 },
   { height: 1080, fps: 60, kbps: 8000 },
+  { height: 1440, fps: 30, kbps: 9000 },
+  { height: 1440, fps: 60, kbps: 15000 },
 ]
 
 /**
@@ -45,7 +47,10 @@ export function qualityChoices(rules: StreamSettingsDto | null, direct: boolean)
   const cap: StreamQuality = !rules ? { height: 720, fps: 30, kbps: 2500 }
     : direct ? { height: rules.directMaxHeight ?? 1080, fps: rules.directMaxFps ?? 60, kbps: rules.directMaxKbps ?? 8000 }
     : { height: rules.maxHeight, fps: rules.maxFps, kbps: rules.maxKbps }
-  const fit = PRESETS.filter(p => p.height <= cap.height && p.fps <= cap.fps).map(p => ({ ...p, kbps: Math.min(p.kbps, cap.kbps) }))
+  // Each quality has a usual bitrate and is never given more than the limit. The best one allowed is the exception:
+  // it is given the limit itself, so the bitrate the server's owner sets is what its top quality really sends.
+  const fit = PRESETS.filter(p => p.height <= cap.height && p.fps <= cap.fps)
+    .map(p => ({ ...p, kbps: p.height === cap.height && p.fps === cap.fps ? cap.kbps : Math.min(p.kbps, cap.kbps) }))
   return fit.length > 0 ? fit : [cap]
 }
 
@@ -54,6 +59,20 @@ export function defaultQuality(rules: StreamSettingsDto | null, direct: boolean)
   const all = qualityChoices(rules, direct)
   return all.find(q => q.height === 720 && q.fps === 30) ?? all[all.length - 1]
 }
+
+/**
+ * What a shared video sends each viewer. Ordinarily that is the picked quality's own bitrate. In a P2P channel or
+ * call a person may have chosen a rate of their own (their connection carries it, no relay does): that is used
+ * instead, held to what the server allows for P2P.
+ */
+export function p2pVideoRate(usual: number, direct: boolean, own: number | undefined, rules: StreamSettingsDto | null): number {
+  if (!direct || !own || own <= 0) return usual
+  return Math.max(300, Math.min(own, rules?.directMaxKbps ?? 8000))
+}
+
+/** The choices offered for a person's own P2P rates, in kilobits per second. */
+export const P2P_VOICE_RATES = [32, 64, 96, 128, 192, 256]
+export const P2P_VIDEO_RATES = [1500, 2500, 5000, 8000, 12000, 15000, 20000, 30000, 50000]
 
 export const describeQuality = (q: StreamQuality) => `${q.height}p · ${q.fps} fps`
 
@@ -266,8 +285,14 @@ export class StreamEngine {
   private async limit(sender: RTCRtpSender, track: MediaStreamTrack, o: Outgoing) {
     const rules = this.deps.settings()
     // The sharer's choice (already within what the server allows here), or the server's ordinary limits without one.
-    const q: StreamQuality | null = this.chosen ?? (rules ? { height: rules.maxHeight, fps: rules.maxFps, kbps: rules.maxKbps } : null)
-    if (!q) return
+    const picked: StreamQuality | null = this.chosen ?? (rules ? { height: rules.maxHeight, fps: rules.maxFps, kbps: rules.maxKbps } : null)
+    if (!picked) return
+    // In a P2P channel the picked quality may be far above what the relay is meant to carry. A viewer whose
+    // connection fell back to the relay (or is not yet known not to have) gets the ordinary relayed limits instead.
+    const held = o.relayed !== false && !!rules
+    const q: StreamQuality = held
+      ? { height: Math.min(picked.height, rules!.maxHeight), fps: Math.min(picked.fps, rules!.maxFps), kbps: Math.min(picked.kbps, rules!.maxKbps) }
+      : picked
     const params = sender.getParameters()
     if (!params.encodings?.length) return
     const height = track.getSettings().height ?? 0
@@ -290,7 +315,12 @@ export class StreamEngine {
         ? 'This stream cannot take more viewers on this server right now.'
         : 'This stream already has as many relayed viewers as this server allows.').catch(() => {})
       setTimeout(() => o.pc.close(), 300)
+      this.deps.changed()
+      return
     }
+    // Now that we know how this viewer is reached, what they are sent is set again: the full picked quality for a
+    // direct viewer, the relayed limits for one on the relay.
+    for (const sender of o.pc.getSenders()) if (sender.track?.kind === 'video') await this.limit(sender, sender.track, o)
     this.deps.changed()
   }
 

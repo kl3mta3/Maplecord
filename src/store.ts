@@ -13,7 +13,7 @@ import { inviteCodeFrom, inviteIsForAnotherServer, takeRememberedInvite } from '
 import { DEFAULT_PUSH_KEY, PUSH_RELEASE_MS, isChoosingPushKey, isPushKey, type PushKey } from './pushToTalk'
 import { VoiceHub } from './voiceHub'
 import { TransferEngine, fileSource, rememberedSource, openSink, type TransferView } from './transfer'
-import { StreamEngine, applyHint, canShareSound, defaultQuality, qualityChoices, soundConstraints, videoConstraints, type StreamKind, type StreamQuality } from './stream'
+import { StreamEngine, applyHint, canShareSound, defaultQuality, p2pVideoRate, qualityChoices, soundConstraints, videoConstraints, type StreamKind, type StreamQuality } from './stream'
 import { anyPopoutVisible } from './popout'
 import {
   ChannelType, MessageKind, RollChoice, RollKind, UserStatus, type PreferencesDto, type TransferSettingsDto,
@@ -929,6 +929,22 @@ export function useMaplecord() {
   /** Takes someone out of the voice channel they are in on a server; the server decides whether we may. */
   const disconnectMember = useCallback(async (channelId: string, userId: string) => { await run(() => voiceHub.disconnectMember(channelId, userId)) }, [voiceHub])
 
+  /** Makes an invite to one of our servers and sends it to someone as a direct message. */
+  const inviteToServer = useCallback(async (guildId: string, userId: string) => {
+    await run(async () => {
+      const name = guildsRef.current.find(x => x.guild.id === guildId)?.guild.name ?? 'a server'
+      const invite = await api.createInvite(guildId)
+      // A link to click where the server gives them out; the bare code otherwise.
+      const meta = await api.meta(settingsRef.current.serverUrl)
+      const link = meta?.inviteBase ? meta.inviteBase + invite.code : `invite code ${invite.code}`
+      const dm = await api.openDm(userId)
+      setDms(ds => (ds.some(d => d.channelId === dm.channelId) ? ds : [dm, ...ds]))
+      dmsRef.current = dmsRef.current.some(d => d.channelId === dm.channelId) ? dmsRef.current : [dm, ...dmsRef.current]
+      await hub.sendMessage(dm.channelId, `Join me on ${name}: ${link}`, null)
+      setError(`Invite to ${name} sent.`)
+    })
+  }, [api, hub])
+
   const createInvite = useCallback(async (guildId?: string) => {
     const g = guildId ?? selected.current.guild
     if (!g) return
@@ -1087,7 +1103,8 @@ export function useMaplecord() {
       // The quality asked for, held to what this kind of channel allows: P2P channels and calls have limits of their own.
       const direct = !!voiceRef.current?.directSince
       const allowed = qualityChoices(rules, direct)
-      const quality = (wanted && allowed.find(q => q.height === wanted.height && q.fps === wanted.fps)) || defaultQuality(rules, direct)
+      const picked = (wanted && allowed.find(q => q.height === wanted.height && q.fps === wanted.fps)) || defaultQuality(rules, direct)
+      const quality = { ...picked, kbps: p2pVideoRate(picked.kbps, direct, settingsRef.current.p2pVideoKbps, rules) }
       let media: MediaStream
       let kind: StreamKind
       try {
@@ -1220,9 +1237,15 @@ export function useMaplecord() {
     await run(async () => {
       // For a relayed channel the server hands out a relay or refuses: there is nothing here to fall back to.
       const ice = await api.iceServers(channelId)
-      voiceEngine.maxAudioKbps = (await api.voiceSettings().catch(() => null))?.audioKbps ?? 0
-      const policy = voiceEngine.configure(ice, directSince ? 'direct' : 'relay')
+      // In a P2P channel a person's own choice of voice quality comes first: it is their connection, not a relay's.
+      const serverKbps = (await api.voiceSettings().catch(() => null))?.audioKbps ?? 0
+      voiceEngine.relayedAudioKbps = serverKbps
+      voiceEngine.maxAudioKbps = (directSince && s.p2pAudioKbps) || serverKbps
+      // A P2P channel is joined directly unless this person chose to go through the relay there.
+      const viaRelay = !!directSince && !!s.p2pViaRelay
+      const policy = voiceEngine.configure(ice, directSince && !viaRelay ? 'direct' : 'relay')
       if (!directSince && policy !== 'relay') throw new Error('No voice relay is available right now, so this channel cannot connect.')
+      if (viaRelay && policy !== 'relay') throw new Error('The relay is not available to you in P2P channels on this server. To join directly, turn off "Join P2P voice channels through the relay" under Settings, Voice & audio.')
       if (voiceRef.current) await leaveVoice()
       voiceEngine.setDevices(s.audioInputDeviceId, s.audioOutputDeviceId)
       // An ordinary channel may answer with a pass: its voice then goes through the stream server, not app to app.
@@ -1268,7 +1291,9 @@ export function useMaplecord() {
   const enterCall = useCallback(async (channelId: string, direct: boolean, connect: () => Promise<VoiceParticipantDto[]>) => {
     const s = settingsRef.current
     const ice = await api.iceServers(channelId)
-    voiceEngine.maxAudioKbps = (await api.voiceSettings().catch(() => null))?.audioKbps ?? 0
+    const serverKbps = (await api.voiceSettings().catch(() => null))?.audioKbps ?? 0
+    voiceEngine.relayedAudioKbps = serverKbps
+    voiceEngine.maxAudioKbps = (direct && s.p2pAudioKbps) || serverKbps
     const policy = voiceEngine.configure(ice, direct ? 'direct' : 'relay')
     if (!direct && policy !== 'relay') throw new Error('No voice relay is available right now, so the call cannot connect. It will not fall back to a direct connection.')
     voiceEngine.setDevices(s.audioInputDeviceId, s.audioOutputDeviceId)
@@ -1832,7 +1857,7 @@ export function useMaplecord() {
     soundPacks, reloadSoundPacks, openSoundsFolder,
     startRoll, quickRoll, roll, voteEnd, dismissRoll, coinFlip, invokeCommand,
     activeRps, startRps, rpsPick, rpsThrow, dismissRps,
-    createGuild, joinGuild, joinPublicGuild, setGuildListing, deleteMessage, disconnectMember, moveChannel, createInvite, pendingInvite, acceptInvite, dismissInvite: () => setPendingInvite(null), createChannel, leaveGuild, kickMember, banMember, signOut,
+    createGuild, joinGuild, joinPublicGuild, setGuildListing, deleteMessage, disconnectMember, moveChannel, inviteToServer, openInvite, createInvite, pendingInvite, acceptInvite, dismissInvite: () => setPendingInvite(null), createChannel, leaveGuild, kickMember, banMember, signOut,
     sharing, shareQuality: streamEngine.quality, localStream: streamEngine.localStream, shareViewers: streamEngine.viaServer ? { total: viewerCounts[voiceHub.connectionId ?? ''] ?? 0, relayed: 0 } : streamEngine.viewerCounts(), watching: streamEngine.watching(),
     streamOf: (streamer: string) => streamEngine.streamOf(streamer), viewerCounts, streamRules, loadStreamRules,
     startShare, stopShare, watchStream, unwatchStream, setStreamLimit: (streamer: string, kbps: number) => streamEngine.requestLimit(streamer, kbps),

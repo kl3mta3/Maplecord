@@ -5,6 +5,7 @@ import { listAudioDevices } from '../voice'
 import { isElectron } from '../platform'
 import { DEFAULT_PUSH_KEY, pushKeyFrom, setChoosingPushKey, type PushKey } from '../pushToTalk'
 import { P2PInfo } from './Dialogs'
+import { P2P_VIDEO_RATES, P2P_VOICE_RATES } from '../stream'
 
 /**
  * Settings → Voice & audio: which microphone and speakers, how loud everyone is, when the microphone is sent (while
@@ -127,6 +128,37 @@ export function VoiceAudioSettings({ store, onAllowDirect }: {
           ? 'P2P is allowed: you can join P2P voice channels and connect straight to friends who allow it too.'
           : 'Unticking this asks you to sign in again.'}
       </div>
+      {store.allowDirect && (
+        <>
+          <label className="row">
+            <input type="checkbox" checked={!!s.p2pViaRelay} onChange={e => store.updateSettings({ p2pViaRelay: e.target.checked })} />
+            <span>Join P2P voice channels through the relay</span>
+          </label>
+          <div className="muted">
+            Nobody in the channel learns your address, and what you send and receive there is held to the ordinary relayed limits.
+            Only where the server allows it. It applies from the next P2P channel you join.
+          </div>
+          <label className="row">
+            <span className="muted grow">Voice quality in P2P</span>
+            <select value={s.p2pAudioKbps ?? 0} aria-label="Voice quality in P2P" onChange={e => store.updateSettings({ p2pAudioKbps: Number(e.target.value) })}>
+              <option value={0}>The server's setting</option>
+              {P2P_VOICE_RATES.map(k => <option key={k} value={k}>{k} kbps</option>)}
+            </select>
+          </label>
+          <label className="row">
+            <span className="muted grow">Video I share in P2P, per viewer</span>
+            <select value={s.p2pVideoKbps ?? 0} aria-label="Video rate in P2P" onChange={e => store.updateSettings({ p2pVideoKbps: Number(e.target.value) })}>
+              <option value={0}>The usual for the quality I pick</option>
+              {P2P_VIDEO_RATES.filter(k => !store.streamRules || k <= (store.streamRules.directMaxKbps ?? 8000)).map(k => <option key={k} value={k}>{k >= 1000 ? (k / 1000) + ' Mbps' : k + ' kbps'}</option>)}
+            </select>
+          </label>
+          <div className="muted">
+            Only in P2P voice channels and P2P calls, where it is your own connection that carries it. Each person you talk to, and each
+            person watching, is sent a copy of their own, so a higher rate uses that much more of your upload for every one of them.
+            They apply from the next call you join and the next thing you share.
+          </div>
+        </>
+      )}
     </>
   )
 }

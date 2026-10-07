@@ -3,7 +3,7 @@ import type { Store } from '../store'
 import { bridge, type ShareSource } from '../platform'
 import { Dialog } from './Dialogs'
 import { ContextMenu, type MenuEntry } from './ContextMenu'
-import { canShareSound, defaultQuality, describeQuality, qualityChoices, type StreamQuality } from '../stream'
+import { canShareSound, defaultQuality, describeQuality, p2pVideoRate, qualityChoices, type StreamQuality } from '../stream'
 import { elementVolumeIgnored, gainContext, wakeGainContext } from '../volume'
 import { openPopout, type Popout } from '../popout'
 
@@ -24,6 +24,7 @@ export function SharePicker({ store, onClose }: { store: Store; onClose: () => v
   const soundPossible = canShareSound()
   const sound = soundPossible && !!store.settings.shareSound
   const rules = store.streamRules
+  const sendKbps = p2pVideoRate(picked.kbps, direct, store.settings.p2pVideoKbps, rules)
 
   // Thumbnails are a moment in time; refresh them while the picker is open so a window opened just now shows up.
   useEffect(() => {
@@ -47,7 +48,8 @@ export function SharePicker({ store, onClose }: { store: Store; onClose: () => v
                 watching: {picked.height}p at {picked.fps} uses up to {(picked.kbps / 1000).toFixed(1)} Mbps of your upload.</>
             : <>Nothing is sent until someone chooses to watch
                 {rules.maxViewersDirect ? `; up to ${rules.maxViewersDirect} people can watch at once` : ''}. Each viewer gets a copy of their own
-                from your computer, so {picked.height}p at {picked.fps} uses up to {(picked.kbps / 1000).toFixed(1)} Mbps of your upload per viewer.</>}
+                from your computer, so {picked.height}p at {picked.fps} uses up to {(sendKbps / 1000).toFixed(1)} Mbps of your upload per viewer
+                {sendKbps !== picked.kbps ? ' (the P2P rate in your settings)' : ''}.</>}
         </div>
       )}
       {desktop ? (

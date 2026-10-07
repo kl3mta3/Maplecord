@@ -293,6 +293,14 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
         : theyAsked ? { kind: 'item', label: 'Accept friend request', icon: '➕', onClick: () => { void store.addFriend(userId) } }
         : iAsked ? { kind: 'item', label: 'Cancel friend request', onClick: () => { void store.removeFriend(userId) } }
         : { kind: 'item', label: 'Add friend', icon: '➕', onClick: () => { void store.addFriend(userId) } })
+      // Servers of ours they are not in, where we may make invites.
+      const invitable = store.guilds.filter(x => hasPermission(x.myPermissions ?? 0, Permission.CreateInvites) && !x.members.some(m => m.userId === userId))
+      if (invitable.length > 0) {
+        entries.push({
+          kind: 'submenu', label: 'Invite to server',
+          entries: invitable.map(x => ({ kind: 'item' as const, label: x.guild.name, onClick: () => { void store.inviteToServer(x.guild.id, userId) } })),
+        })
+      }
       entries.push({ kind: 'sep' })
       entries.push({ kind: 'item', label: 'Mute their voice', checked: !!prefs.muted, onClick: () => store.setUserPrefs(userId, { muted: !prefs.muted }) })
       entries.push({ kind: 'slider', label: 'Voice volume', min: 0, max: 200, step: 5, value: Math.round((prefs.volume ?? 1) * 100), format: v => v + '%', onChange: v => store.setUserPrefs(userId, { volume: v / 100 }) })
@@ -304,6 +312,24 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
     if (member && g && userId !== g.guild.ownerId && can(Permission.ManageGuild)) {
       entries.push({ kind: 'sep' })
       entries.push({ kind: 'item', label: 'Change nickname', onClick: () => setDialog({ kind: 'nickname', guildId: g.guild.id, userId }) })
+    }
+    // Roles, for people who may manage them: tick to give one, untick to take it away. Only roles below one's own
+    // highest can be changed; the server holds to the same rule.
+    if (member && g && can(Permission.ManageRoles)) {
+      const all = (g.roles ?? []).filter(r => !r.isEveryone).sort((a, b) => b.position - a.position)
+      const mine = g.members.find(m => m.userId === me?.id)?.roleIds ?? []
+      const top = g.guild.ownerId === me?.id ? Infinity : Math.max(0, ...all.filter(r => mine.includes(r.id)).map(r => r.position))
+      const held = member.roleIds ?? []
+      if (all.length > 0) {
+        if (entries[entries.length - 1]?.kind !== 'item' || !/nickname/.test((entries[entries.length - 1] as { label?: string }).label ?? '')) entries.push({ kind: 'sep' })
+        entries.push({
+          kind: 'submenu', label: 'Roles',
+          entries: all.map(r => ({
+            kind: 'item' as const, label: r.name, checked: held.includes(r.id), disabled: r.position >= top,
+            onClick: () => { void store.setMemberRoles(userId, held.includes(r.id) ? held.filter(x => x !== r.id) : [...held, r.id]) },
+          })),
+        })
+      }
     }
     // The voice channel they are in on this server, for someone who may take people out of voice.
     const inVoice = g && can(Permission.DisconnectMembers) ? Object.entries(g.voice ?? {}).find(([, people]) => people.some(p => p.userId === userId))?.[0] : undefined
@@ -528,7 +554,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           <div className={'voicebox' + (voice.directSince ? ' p2p' : '')}>
             <span className="signal">{inCall ? <Phone size={16} /> : <Signal size={16} />}</span>
             <div className="grow vtext" title={(voiceGuild ? voiceGuild + ' / ' : '') + voiceChannelName + (voiceDetail ? ' · ' + voiceDetail : '')}>
-              <div className="vstate">{voice.directSince ? 'P2P · using your IP' : inCall ? (inCall.phase === 'calling' ? 'Calling…' : 'In a call') : 'Voice connected'}</div>
+              <div className="vstate">{voice.directSince ? (voice.policy === 'relay' ? 'P2P · through the relay' : 'P2P · using your IP') : inCall ? (inCall.phase === 'calling' ? 'Calling…' : 'In a call') : 'Voice connected'}</div>
               <div className="muted vwhere">{voiceGuild ? voiceGuild + ' / ' : ''}{voiceChannelName}{voiceDetail ? ' · ' + voiceDetail : ''}</div>
             </div>
             <button className={'iconbtn' + (store.sharing === 'camera' ? ' on' : '')} onClick={() => void toggleCamera()} title={store.sharing === 'camera' ? 'Turn your camera off' : 'Turn your camera on'}><Video size={17} /></button>
@@ -625,7 +651,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       {dialog?.kind === 'addGuild' && <AddServerDialog onCreate={() => setDialog({ kind: 'createGuild' })} onJoin={() => setDialog({ kind: 'joinGuild' })} onDiscover={() => setDialog({ kind: 'discover' })} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'joinGuild' && <JoinServerDialog example={inviteBase} onJoin={store.joinGuild} onBack={() => setDialog({ kind: 'addGuild' })} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'discover' && <DiscoverDialog api={store.api} onJoin={store.joinPublicGuild} onOpen={store.selectGuild} onBack={() => setDialog({ kind: 'addGuild' })} onClose={() => setDialog(null)} />}
-      {dialog?.kind === 'createChannel' && g && <CreateChannelDialog initialType={dialog.category ? ChannelType.Category : ChannelType.Text} categories={g.channels.filter(c => c.type === ChannelType.Category)} canDirect={can(Permission.ManageDirectChannels)} onSubmit={store.createChannel} onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'createChannel' && g && <CreateChannelDialog initialType={dialog.category ? ChannelType.Category : ChannelType.Text} categories={g.channels.filter(c => c.type === ChannelType.Category)} canDirect={can(Permission.ManageDirectChannels) && !g.guild.isPublic} onSubmit={store.createChannel} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'startRoll' && <StartRollDialog kind={dialog.rollKind} onSubmit={store.startRoll} onClose={() => setDialog(null)} searchItems={store.plugins.some(x => x.items.length > 0) ? store.searchItems : undefined} />}
       {dialog?.kind === 'plugins' && <PluginsDialog store={store} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'leaveGuild' && g && (
@@ -653,7 +679,8 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       ] : [
         { kind: 'label', text: menu.name },
         { kind: 'item', label: 'Mute channel', icon: '🔕', checked: !!store.settings.mutedChannels?.[menu.channelId], onClick: () => store.setChannelMuted(menu.channelId, !store.settings.mutedChannels?.[menu.channelId]) },
-        ...(menu.voice && can(Permission.ManageChannels) && can(Permission.ManageDirectChannels)
+        // A public server has no P2P channels; one that somehow has can still be turned back into a relayed one.
+        ...(menu.voice && can(Permission.ManageChannels) && can(Permission.ManageDirectChannels) && (menu.direct || !g?.guild.isPublic)
           ? [{ kind: 'item', label: menu.direct ? 'Make it a relayed channel' : 'Make it a P2P channel', icon: '⇄', onClick: () => setDialog({ kind: 'channelKind', channelId: menu.channelId, name: menu.name, direct: !menu.direct }) } as MenuEntry] : []),
         ...(can(Permission.ManageChannels) ? [
           { kind: 'sep' } as MenuEntry,
@@ -852,7 +879,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
         {store.canLoadOlder && <div style={{ textAlign: 'center' }}><button className="subtle" onClick={store.loadOlder}>Load older messages</button></div>}
         {store.messages.map(m => isIgnored(m.authorId) && !m.webhookId && !revealed.has(m.id)
           ? <div key={m.id} className="message ignored"><span /><span className="muted">Message from {m.authorName}, who you ignore · <button className="subtle" onClick={() => setRevealed(new Set([...revealed, m.id]))}>show</button></span></div>
-          : <Message key={m.id} m={m} color={colorOf(m.authorId)} icon={store.itemIcon(m.roll?.item)} serverUrl={store.settings.serverUrl}
+          : <Message key={m.id} m={m} color={colorOf(m.authorId)} icon={store.itemIcon(m.roll?.item)} serverUrl={store.settings.serverUrl} onInvite={link => void store.openInvite(link)}
               fileOffer={m.fileOffer ? <FileOfferView store={store} offer={m.fileOffer} mine={m.authorId === (me?.id ?? '')} /> : undefined}
               author={m.webhookId ? null : store.appearanceOf(m.authorId)} name={m.webhookId ? m.authorName : nameIn(m.authorId, m.authorName)}
               mention={m.authorId !== me?.id && store.mentionsMe(m.content)}
@@ -917,7 +944,26 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
   )
 }
 
-function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu, onUserCard, onMenu, fileOffer }: {
+/** An invite link somewhere in a message: this server's invite page, or the app's own kind of link. */
+const INVITE_LINK = /(https?:\/\/[^\s<>"']+\/invite\/[A-Za-z0-9]{4,32}(?:\?[^\s<>"']*)?|maplecord:\/\/invite\/[^\s<>"']+)/g
+
+/**
+ * A message's text, with any invite link in it made into something to press: it opens the same "join this server?"
+ * prompt as an invite opened from outside the app. Nothing else in a message is a link, and nothing is fetched.
+ */
+function withInviteLinks(text: string, open?: (link: string) => void): React.ReactNode {
+  if (!open || !text.includes('invite/')) return text
+  const parts = text.split(INVITE_LINK)
+  if (parts.length === 1) return text
+  // split() with one capturing group puts the links at the odd places.
+  return parts.map((part, i) => (i % 2 === 1
+    ? <button key={i} className="invitelink" title="Open this invite" onClick={() => open(part)}>{part}</button>
+    : part))
+}
+
+function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu, onUserCard, onMenu, onInvite, fileOffer }: {
+  /** Pressed an invite link in the text. */
+  onInvite?: (link: string) => void
   m: MessageDto; color?: string; icon?: string | null; serverUrl: string; mention?: boolean
   /** Right-click anywhere on the message that is not the author. */
   onMenu?: (e: React.MouseEvent) => void
@@ -962,7 +1008,7 @@ function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu,
             <div className="row">🎲 rolled <b style={{ fontSize: 18 }}>{m.content}</b> <span className="muted">({m.dice?.min ?? 1}–{m.dice?.max ?? 100})</span></div>
           ) : m.kind === MessageKind.CoinFlip ? (
             <div className="row"><img src={import.meta.env.BASE_URL + (m.content === 'Tails' ? 'coin_tails.png' : 'coin_heads.png')} width={40} height={40} alt="" /> flipped a coin — <b>{m.content}</b></div>
-          ) : <div className="body">{m.content}</div>}
+          ) : <div className="body">{withInviteLinks(m.content, onInvite)}</div>}
         {m.attachments.map(a => <AttachmentView key={a.id} file={a} />)}
         {m.embeds?.map((e, i) => (
           <div key={i} className="card" style={{ borderLeftColor: e.color != null ? '#' + e.color.toString(16).padStart(6, '0') : undefined }}>

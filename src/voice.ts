@@ -1,6 +1,7 @@
 import type { LocalAudioTrack, RemoteParticipant, RemoteTrackPublication, Room } from 'livekit-client'
 import type { IceServerDto, SfuPassDto, VoiceParticipantDto, VoiceSignalDto } from './types'
 import { elementVolumeIgnored } from './volume'
+import { isRelayed } from './transfer'
 import { detectorUrl } from './voiceDetector'
 import type { VoiceHub } from './voiceHub'
 
@@ -52,6 +53,8 @@ interface Peer {
   pc: RTCPeerConnection | null
   audio: HTMLAudioElement
   meter?: Meter
+  /** Whether our connection to them goes through the relay; null until it is connected and we can tell. */
+  relayed?: boolean | null
 }
 
 interface Meter { ctx: AudioContext; analyser: AnalyserNode; buf: Float32Array<ArrayBuffer>; speaking: boolean; lastAbove: number; src: MediaStreamAudioSourceNode; gain?: GainNode }
@@ -79,6 +82,12 @@ export class VoiceEngine {
 
   /** The most our microphone may send to each person, in kilobits per second; 0 = leave it to the browser. Set by the server. */
   maxAudioKbps = 0
+
+  /**
+   * The server's own voice setting, in kilobits per second (0 = automatic). In a P2P channel a person may have
+   * chosen a higher rate of their own; anyone they reach through the relay is sent no more than this instead.
+   */
+  relayedAudioKbps = 0
 
   private gateOn = true
   private gateThreshold = SPEAKING_THRESHOLD
@@ -126,7 +135,10 @@ export class VoiceEngine {
 
   /** Sets what one connection sends: the bitrate cap, and whether our voice goes out at all right now. Safe to call more than once. */
   private tuneSenders(pc: RTCPeerConnection) {
-    for (const sender of pc.getSenders()) if (sender.track?.kind === 'audio') this.tuneSender(sender, () => pc.connectionState === 'closed')
+    // What this one connection may carry: our own rate when it is direct, the server's when it is on the relay.
+    const peer = [...this.peers.values()].find(p => p.pc === pc)
+    const kbps = () => (peer && peer.relayed !== false ? Math.min(this.maxAudioKbps || Infinity, this.relayedAudioKbps > 0 ? this.relayedAudioKbps : 32) : this.maxAudioKbps)
+    for (const sender of pc.getSenders()) if (sender.track?.kind === 'audio') this.tuneSender(sender, () => pc.connectionState === 'closed', kbps)
   }
 
   /** The same for the one thing we send to a stream server. Asked for afresh each time: reconnecting gives it a new one. */
@@ -138,21 +150,22 @@ export class VoiceEngine {
 
   private tuning = new WeakSet<RTCRtpSender>()
 
-  private tuneSender(sender: RTCRtpSender, closed: () => boolean) {
+  private tuneSender(sender: RTCRtpSender, closed: () => boolean, kbps: () => number = () => this.maxAudioKbps) {
     if (closed() || this.tuning.has(sender)) return
     const params = sender.getParameters()
     if (!params.encodings || params.encodings.length === 0) return // not negotiated yet; tried again once connected
     const sending = this.sending
     for (const encoding of params.encodings) {
       encoding.active = sending
-      if (this.maxAudioKbps > 0) encoding.maxBitrate = this.maxAudioKbps * 1000
+      const most = kbps()
+      if (most > 0 && Number.isFinite(most)) encoding.maxBitrate = most * 1000
     }
     this.tuning.add(sender)
     void sender.setParameters(params).then(() => true, () => false).then(done => {
       this.tuning.delete(sender)
       // It changed its mind meanwhile, or could not be switched back on: a voice is never left off by accident.
-      if (this.sending !== sending) this.tuneSender(sender, closed)
-      else if (!done && sending) window.setTimeout(() => this.tuneSender(sender, closed), 200)
+      if (this.sending !== sending) this.tuneSender(sender, closed, kbps)
+      else if (!done && sending) window.setTimeout(() => this.tuneSender(sender, closed, kbps), 200)
     })
   }
 
@@ -550,7 +563,12 @@ export class VoiceEngine {
     if (this.local) for (const track of this.local.getAudioTracks()) pc.addTrack(track, this.local)
     else pc.addTransceiver('audio', { direction: 'recvonly' })
     this.tuneSenders(pc)
-    pc.addEventListener('connectionstatechange', () => { if (pc.connectionState === 'connected') this.tuneSenders(pc) })
+    pc.addEventListener('connectionstatechange', () => {
+      if (pc.connectionState !== 'connected') return
+      this.tuneSenders(pc)
+      // Once connected we can tell whether this person is reached through the relay, and set the rate to match.
+      void isRelayed(pc).catch(() => true).then(relayed => { const peer = this.peers.get(remote); if (peer?.pc === pc) { peer.relayed = relayed; this.tuneSenders(pc) } })
+    })
 
     const audio = this.makeAudio()
 

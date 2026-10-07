@@ -64,6 +64,7 @@ export const PERMISSION_LABELS: { bit: number; name: string; hint: string }[] = 
   { bit: Permission.DisconnectMembers, name: 'Disconnect members', hint: 'Take someone out of a voice channel (right-click them). They can join again' },
   { bit: Permission.ManageDirectChannels, name: 'Create P2P channels', hint: 'Make a voice channel P2P or relayed (also needs Manage channels)' },
   { bit: Permission.JoinDirectVoice, name: 'Join P2P channels', hint: 'Join a P2P voice channel (also needs Join voice, and P2P allowed on their own account)' },
+  { bit: Permission.UseRelayInDirect, name: 'Use the relay in P2P channels', hint: 'Connect through the relay there when a direct connection cannot be made, or to keep their address from the others. Relayed limits apply. Without it, P2P channels are direct only' },
   { bit: Permission.StreamDirect, name: 'Stream in P2P channels', hint: 'Share screen or camera in a P2P channel (also needs Stream)' },
   { bit: Permission.Administrator, name: 'Administrator', hint: 'Every permission, bypasses channel overrides' },
 ]

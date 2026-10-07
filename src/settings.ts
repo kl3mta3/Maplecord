@@ -28,6 +28,15 @@ export interface Settings {
   outputVolume?: number
   /** When the microphone is sent: while talking (the default), or while a key is held. */
   voiceMode?: 'activity' | 'push'
+  /**
+   * In P2P channels and P2P calls, where nothing crosses a relay: the most this person's microphone sends, and the
+   * most their shared video sends each viewer, in kilobits per second. 0 or unset leaves it to the server's setting
+   * (voice) or to the quality they pick when sharing (video).
+   */
+  /** Join P2P voice channels through the relay rather than directly: nobody there learns this person's address, and the relayed limits apply to them. */
+  p2pViaRelay?: boolean
+  p2pAudioKbps?: number
+  p2pVideoKbps?: number
   /** The key or mouse button held to talk (see pushToTalk.ts). */
   pushKey?: PushKey
   /** The "add to your Home Screen" card has been seen on this device. */
