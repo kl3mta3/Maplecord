@@ -8,7 +8,7 @@ import { serverIconUrl, shareIcon, withTimeout } from './itemIcons'
 import { appearanceOfMember, appearanceOfUser, shrinkPicture, type Appearance } from './profile'
 import { playSound, setQuiet, setSoundPacks, startRing, stopRing, type SoundPack } from './sounds'
 import { applyTheme } from './theme'
-import { VoiceEngine, type IcePolicy } from './voice'
+import { VoiceConnectError, VoiceEngine, type IcePolicy } from './voice'
 import { inviteCodeFrom, inviteIsForAnotherServer, takeRememberedInvite } from './invites'
 import { DEFAULT_PUSH_KEY, PUSH_RELEASE_MS, isChoosingPushKey, isPushKey, type PushKey } from './pushToTalk'
 import { VoiceHub } from './voiceHub'
@@ -20,6 +20,7 @@ import {
   type ChannelDto, type CommandDto, type GuildSummaryDto, type MemberDto, type MessageDto, type RollItemDto, type RollResultDto, type RollSessionDto,
   type VoiceParticipantDto, type RpsSessionDto, type RpsResultDto, RpsChoice, type FriendsDto, type DmChannelDto, type RoleDto,
   type DecorationDto, type UpdateProfileRequest, type UserDto, type UserProfileDto, type SystemMessageDto, type FileOfferDto, type TokenResponse, type StreamSettingsDto,
+  type SfuPassDto,
 } from './types'
 
 /** A DM rendered as a channel so chat, rolls and the overlay treat it like any other. */
@@ -149,6 +150,8 @@ export function useMaplecord() {
     wantRelay: () => !allowDirectRef.current,
     changed: setTransfers,
   }))
+  /** What to do when the voice engine loses its channel for good; set once leaving voice is defined, further down. */
+  const voiceLostRef = useRef<(reason: string) => void>(() => {})
   const [voiceEngine] = useState(() => new VoiceEngine(voiceHub, {
     peerState: (id, state) => setVoice(v => (v ? { ...v, participants: v.participants.map(p => (p.connectionId === id ? { ...p, state } : p)) } : v)),
     speaking: (id, speaking) => {
@@ -158,6 +161,7 @@ export function useMaplecord() {
     },
     level: () => { /* used by the audio settings meter */ },
     log: m => console.debug('[voice]', m),
+    lost: reason => voiceLostRef.current(reason),
   }))
 
   // ---- Shared video (see stream.ts). The engine holds the live MediaStreams; `streamTick` re-renders when it changes.
@@ -174,6 +178,8 @@ export function useMaplecord() {
     changed: () => setStreamTick(t => t + 1),
     // The shared window was closed, or the browser's own "stop sharing" bar was used.
     captureEnded: () => { void stopShareRef.current() },
+    sharePass: kind => voiceHub.shareStream(kind),
+    shareLost: reason => { void stopShareRef.current(); setError(reason) },
   }))
 
   const [guilds, setGuilds] = useState<GuildState[]>([])
@@ -553,6 +559,8 @@ export function useMaplecord() {
     await voiceHub.connect({
       // An account is in voice from one place at a time: it has just joined from another app or device.
       VoiceMoved: () => { if (dropVoice()) setError('Voice moved to another app or device you joined from.') },
+      // Someone who may disconnect members took us out of the channel. Nothing stops us joining again.
+      VoiceRemoved: () => { if (dropVoice()) setError('You were disconnected from the voice channel by someone who manages this server.') },
       // These only arrive for the voice channel we are in, and never for ourselves: knock when someone joins, door when they leave.
       ParticipantJoined: (c, p) => {
         const cur = voiceRef.current
@@ -918,6 +926,8 @@ export function useMaplecord() {
 
   /** Yours, or anyone's where you may manage messages; the server decides. */
   const deleteMessage = useCallback(async (messageId: string) => { await run(() => hub.deleteMessage(messageId)) }, [hub])
+  /** Takes someone out of the voice channel they are in on a server; the server decides whether we may. */
+  const disconnectMember = useCallback(async (channelId: string, userId: string) => { await run(() => voiceHub.disconnectMember(channelId, userId)) }, [voiceHub])
 
   const createInvite = useCallback(async (guildId?: string) => {
     const g = guildId ?? selected.current.guild
@@ -1035,11 +1045,13 @@ export function useMaplecord() {
     setActiveRoll(cur => (cur && cur.session.channelId === left ? null : cur))
     setActiveRps(cur => (cur && cur.session.channelId === left ? null : cur))
   }, [setCall, voiceEngine, voiceHub])
+  // The stream server carrying the channel's voice could not be reached again: out of the call, and say why.
+  voiceLostRef.current = reason => { void leaveVoice(); setError(reason) }
 
   // ---- Sharing a screen, an app window or a camera with the voice channel -----------------------------------------
 
   const loadStreamRules = useCallback(async () => {
-    const rules = await api.streamSettings()
+    const rules = await api.streamSettings(voiceRef.current?.channelId)
     streamRulesRef.current = rules
     setStreamRules(rules)
     return rules
@@ -1047,9 +1059,20 @@ export function useMaplecord() {
 
   /** Tell the channel we are sharing and hand the capture to the engine. Nothing is sent until someone watches. */
   const shareStream = useCallback(async (media: MediaStream, kind: StreamKind, quality: StreamQuality | null = null) => {
-    try { await voiceHub.startStream(kind) }
+    // Where this channel has a stream server the reply is a pass to send the video there; otherwise viewers are
+    // connected to one by one as they ask.
+    let pass: SfuPassDto | null
+    try { pass = await voiceHub.shareStream(kind) }
     catch (e) { media.getTracks().forEach(t => t.stop()); throw e }
-    streamEngine.start(media, kind, quality)
+    // A new stream starts with nobody watching, whatever the last one ended on.
+    const own = voiceHub.connectionId
+    if (own) setViewerCounts(counts => ({ ...counts, [own]: 0 }))
+    try { await streamEngine.start(media, kind, quality, pass) }
+    catch {
+      media.getTracks().forEach(t => t.stop())
+      try { await voiceHub.stopStream(null) } catch { /* not in voice any more */ }
+      throw new Error('Could not reach the stream server, so nothing is being shared. Try again in a moment.')
+    }
   }, [streamEngine, voiceHub])
 
   /**
@@ -1098,8 +1121,11 @@ export function useMaplecord() {
     await run(async () => {
       if (!streamRulesRef.current) await loadStreamRules().catch(() => null)
       streamEngine.watch(streamer)
-      try { await voiceHub.watchStream(streamer) }
+      let pass: SfuPassDto | null
+      try { pass = await voiceHub.watchStreamVia(streamer) }
       catch (e) { streamEngine.unwatch(streamer); throw e }
+      // A stream that goes through the channel's stream server is collected from there.
+      if (pass) void streamEngine.watchVia(streamer, pass)
     })
   }, [loadStreamRules, streamEngine, voiceHub])
 
@@ -1199,7 +1225,9 @@ export function useMaplecord() {
       if (!directSince && policy !== 'relay') throw new Error('No voice relay is available right now, so this channel cannot connect.')
       if (voiceRef.current) await leaveVoice()
       voiceEngine.setDevices(s.audioInputDeviceId, s.audioOutputDeviceId)
-      const others = directSince ? await voiceHub.joinDirect(channelId) : await voiceHub.join(channelId)
+      // An ordinary channel may answer with a pass: its voice then goes through the stream server, not app to app.
+      const answer = directSince ? { others: await voiceHub.joinDirect(channelId), pass: null } : await voiceHub.joinVia(channelId)
+      const others = answer.others
       const user = s.user!
       const selfId = voiceHub.connectionId ?? 'self'
       const joined: VoiceState = {
@@ -1221,8 +1249,12 @@ export function useMaplecord() {
         } catch { /* not worth an error banner */ }
       })()
       if (isMuted) void voiceHub.setMuted(true)
-      try { await voiceEngine.join(others) }
-      catch (e) { setVoice(v => (v ? { ...v, status: 'No microphone: ' + (e instanceof Error ? e.message : e) } : v)) }
+      try { await voiceEngine.join(others, answer.pass) }
+      catch (e) {
+        // No way in at all is different from no microphone: we are not in the call, and the server is told so.
+        if (e instanceof VoiceConnectError) { await leaveVoice(); throw e }
+        setVoice(v => (v ? { ...v, status: 'No microphone: ' + (e instanceof Error ? e.message : e) } : v))
+      }
     })
   }, [api, hub, isMuted, leaveVoice, onRollStarted, voiceEngine, voiceHub])
 
@@ -1438,6 +1470,8 @@ export function useMaplecord() {
 
   const renameChannel = useCallback(async (channelId: string, name: string) => { await run(() => api.renameChannel(channelId, name)) }, [api])
   const deleteChannel = useCallback(async (channelId: string) => { await run(() => api.deleteChannel(channelId)) }, [api])
+  /** A group of channels, with every channel in it. */
+  const deleteGroup = useCallback(async (channelId: string) => { await run(() => api.deleteGroup(channelId)) }, [api])
   /** Yours alone, on this device. Muting also clears whatever that channel had already counted. */
   const setChannelMuted = useCallback((channelId: string, muted: boolean) => {
     const all = { ...(settingsRef.current.mutedChannels ?? {}) }
@@ -1798,12 +1832,12 @@ export function useMaplecord() {
     soundPacks, reloadSoundPacks, openSoundsFolder,
     startRoll, quickRoll, roll, voteEnd, dismissRoll, coinFlip, invokeCommand,
     activeRps, startRps, rpsPick, rpsThrow, dismissRps,
-    createGuild, joinGuild, joinPublicGuild, setGuildListing, deleteMessage, moveChannel, createInvite, pendingInvite, acceptInvite, dismissInvite: () => setPendingInvite(null), createChannel, leaveGuild, kickMember, banMember, signOut,
-    sharing, shareQuality: streamEngine.quality, localStream: streamEngine.localStream, shareViewers: streamEngine.viewerCounts(), watching: streamEngine.watching(),
+    createGuild, joinGuild, joinPublicGuild, setGuildListing, deleteMessage, disconnectMember, moveChannel, createInvite, pendingInvite, acceptInvite, dismissInvite: () => setPendingInvite(null), createChannel, leaveGuild, kickMember, banMember, signOut,
+    sharing, shareQuality: streamEngine.quality, localStream: streamEngine.localStream, shareViewers: streamEngine.viaServer ? { total: viewerCounts[voiceHub.connectionId ?? ''] ?? 0, relayed: 0 } : streamEngine.viewerCounts(), watching: streamEngine.watching(),
     streamOf: (streamer: string) => streamEngine.streamOf(streamer), viewerCounts, streamRules, loadStreamRules,
     startShare, stopShare, watchStream, unwatchStream, setStreamLimit: (streamer: string, kbps: number) => streamEngine.requestLimit(streamer, kbps),
     voice, isMuted, isSpeaking, joinVoice, leaveVoice, toggleMute,
-    call, startCall, answerCall, declineCall, renameChannel, deleteChannel, setChannelMuted,
+    call, startCall, answerCall, declineCall, renameChannel, deleteChannel, deleteGroup, setChannelMuted,
     preferences, savePreferences, blocked, setBlocked, dndUsers, deafened, toggleDeafen, ownLook, transferLimits,
     farewell, deleteStep, openDeleteAccount: (step: 'explain' | 'confirm' = 'explain') => setDeleteStep(step), closeDeleteAccount: () => setDeleteStep(null), reauthenticateForDelete, deleteAccount,
     allowDirect, setAllowDirect, reauthenticateForDirect, directPrompt, confirmDirect, dismissDirectPrompt: () => setDirectPrompt(null), setChannelDirect,

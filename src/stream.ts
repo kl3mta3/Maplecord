@@ -1,4 +1,5 @@
-import type { StreamSettingsDto } from './types'
+import type { Room, RemoteParticipant, RemoteTrackPublication } from 'livekit-client'
+import type { SfuPassDto, StreamSettingsDto } from './types'
 import { isRelayed } from './transfer'
 
 /**
@@ -11,7 +12,17 @@ import { isRelayed } from './transfer'
  *
  * Every viewer costs the sharer another encode and another upload, which is why the server sets small viewer
  * limits and caps on resolution, frame rate and bitrate. They are applied here, on what is sent.
+ *
+ * Where the voice channel has a stream server, none of that connecting happens here. The sharer's app sends the
+ * video to the stream server once, with a pass this server hands it, and each viewer's app collects it from there
+ * with a pass of its own. Nobody's app talks to anybody else's, and a second viewer costs the sharer nothing.
  */
+
+/** The stream server library is only fetched (from this app's own files) the first time a stream goes through one. */
+const streamServer = () => import('livekit-client')
+
+/** Tried this many times in a row before a stream that keeps losing the stream server is given up on. */
+const RESEND_TRIES = 3
 
 export type StreamKind = 'screen' | 'window' | 'camera'
 
@@ -54,6 +65,10 @@ export interface StreamDeps {
   changed(): void
   /** The capture ended by itself: the shared window was closed, or the browser's own "stop sharing" was pressed. */
   captureEnded(): void
+  /** A fresh pass to send what we are already sharing, after the stream server was lost. Null if it no longer goes through one. */
+  sharePass(kind: StreamKind): Promise<SfuPassDto | null>
+  /** Sending through the stream server failed for good; the share is over. */
+  shareLost(reason: string): void
 }
 
 export interface Watching { streamer: string; state: 'connecting' | 'live' | 'failed'; relayed: boolean | null; error: string | null }
@@ -70,7 +85,13 @@ export const canShareSound = () => !!(navigator.mediaDevices?.getSupportedConstr
 /** The computer's sound for a shared app or screen: as it is (no voice processing), minus what this app plays. */
 export const soundConstraints = (): MediaTrackConstraints =>
   ({ restrictOwnAudio: true, echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2 } as MediaTrackConstraints)
-interface Incoming { pc: RTCPeerConnection | null; stream: MediaStream | null; view: Watching; pendingIce: RTCIceCandidateInit[]; timer: ReturnType<typeof setTimeout> | null }
+interface Incoming {
+  pc: RTCPeerConnection | null; stream: MediaStream | null; view: Watching; pendingIce: RTCIceCandidateInit[]; timer: ReturnType<typeof setTimeout> | null
+  /** Collected from the stream server rather than sent to us by the sharer's app. */
+  viaServer?: boolean
+  /** Asked for the smaller picture (a slow connection). */
+  small?: boolean
+}
 
 const CONNECT_TIMEOUT = 25_000
 
@@ -81,6 +102,11 @@ export class StreamEngine {
   private chosen: StreamQuality | null = null
   private out = new Map<string, Outgoing>()
   private incoming = new Map<string, Incoming>()
+  /** Our connection to the stream server for what we are sharing, when it goes through one. */
+  private sendRoom: Room | null = null
+  /** Our connection to the stream server for what we are watching. One serves every stream in the channel. */
+  private watchRoom: Room | null = null
+  private watchRoomReady: Promise<Room> | null = null
 
   constructor(deps: StreamDeps) { this.deps = deps }
 
@@ -99,18 +125,91 @@ export class StreamEngine {
     }
   }
 
-  /** Begin sharing `stream`. Nothing is sent yet; each viewer is connected when they ask to watch. */
-  start(stream: MediaStream, kind: StreamKind, quality: StreamQuality | null = null) {
+  /** Whether what we share is going through a stream server rather than straight to each viewer. */
+  get viaServer(): boolean { return this.sendRoom !== null }
+
+  /**
+   * Begin sharing `stream`. With a `pass` it is sent to the channel's stream server, which only takes it while
+   * someone is watching. Without one nothing is sent yet, and each viewer is connected when they ask to watch.
+   */
+  async start(stream: MediaStream, kind: StreamKind, quality: StreamQuality | null = null, pass: SfuPassDto | null = null) {
     this.stopSharing()
     this.local = stream
     this.kind = kind
     this.chosen = quality
     for (const track of stream.getVideoTracks()) track.addEventListener('ended', () => { if (this.local === stream) this.deps.captureEnded() })
     this.deps.changed()
+    if (pass) {
+      try { await this.send(stream, kind, pass) }
+      catch (e) { if (this.local === stream) this.stopSharing(); throw e }
+    }
+  }
+
+  /** Connects to the stream server and hands it the picture, and the sound if there is any. */
+  private async send(stream: MediaStream, kind: StreamKind, pass: SfuPassDto) {
+    const { Room, RoomEvent, Track, VideoPreset } = await streamServer()
+    // The capture is ours: the library must neither stop it nor try to open it again by itself.
+    const room = new Room({ adaptiveStream: false, dynacast: true, stopLocalTrackOnUnpublish: false })
+    this.sendRoom = room
+    const mine = () => this.sendRoom === room && this.local === stream
+    room.on(RoomEvent.Disconnected, () => { if (mine()) { this.sendRoom = null; void this.resend(stream, kind, 1) } })
+    // No address-finding servers of anyone's: the stream server has a public address and we simply connect to it.
+    await room.connect(pass.url, pass.token, { autoSubscribe: false, rtcConfig: { iceServers: [] } })
+    if (!mine()) { void room.disconnect(); return }
+
+    const rules = this.deps.settings()
+    const q: StreamQuality = this.chosen ?? (rules ? { height: rules.maxHeight, fps: rules.maxFps, kbps: rules.maxKbps } : { height: 720, fps: 30, kbps: 2500 })
+    for (const track of stream.getTracks()) {
+      if (track.kind === 'audio') {
+        // The computer's sound as it is: no voice processing, no silence detection, both channels.
+        await room.localParticipant.publishTrack(track, { source: Track.Source.ScreenShareAudio, dtx: false, red: false, audioPreset: { maxBitrate: 128_000 }, forceStereo: true })
+        continue
+      }
+      const size = track.getSettings()
+      const width = size.width ?? Math.round(q.height * 16 / 9), height = size.height ?? q.height
+      // A second, smaller picture for viewers on slow connections. It is only encoded while one of them asks for it.
+      const small = q.height >= 720 ? [new VideoPreset(Math.round(width / 2), Math.round(height / 2), Math.max(250_000, Math.round(q.kbps * 250)), Math.min(q.fps, 30))] : []
+      const encoding = { maxBitrate: q.kbps * 1000, maxFramerate: q.fps }
+      const published = await room.localParticipant.publishTrack(track, {
+        source: kind === 'camera' ? Track.Source.Camera : Track.Source.ScreenShare,
+        videoCodec: 'vp8', simulcast: small.length > 0,
+        videoEncoding: encoding, screenShareEncoding: encoding, videoSimulcastLayers: small, screenShareSimulcastLayers: small,
+      })
+      // A capture larger than what was chosen (a 1440p screen shared at 720p) is scaled down before it is encoded.
+      const sender = published.track?.sender
+      if (sender && height > q.height * 1.02) {
+        const params = sender.getParameters()
+        for (const e of params.encodings ?? []) e.scaleResolutionDownBy = (e.scaleResolutionDownBy ?? 1) * (height / q.height)
+        await sender.setParameters(params).catch(() => { /* the capture constraints still hold */ })
+      }
+    }
+    this.deps.changed()
+  }
+
+  /** The stream server dropped us while we were sharing: ask for a new pass and send again, a few times at most. */
+  private async resend(stream: MediaStream, kind: StreamKind, attempt: number) {
+    await new Promise(r => setTimeout(r, 1500 * attempt))
+    if (this.local !== stream || this.sendRoom) return
+    try {
+      const pass = await this.deps.sharePass(kind)
+      if (this.local !== stream || this.sendRoom) return
+      if (!pass) throw new Error('The stream server is not available.')
+      await this.send(stream, kind, pass)
+    } catch {
+      if (this.local !== stream) return
+      const room = this.sendRoom as Room | null
+      this.sendRoom = null
+      void room?.disconnect()
+      if (attempt < RESEND_TRIES) void this.resend(stream, kind, attempt + 1)
+      else this.deps.shareLost('Your stream ended because the connection to the stream server was lost.')
+    }
   }
 
   /** Stop sharing: every viewer's connection closes and the capture is released. */
   stopSharing() {
+    const room = this.sendRoom
+    this.sendRoom = null
+    void room?.disconnect()
     for (const [viewer, o] of this.out) { void this.deps.signal(viewer, 'stop', '').catch(() => {}); o.pc.close() }
     this.out.clear()
     this.local?.getTracks().forEach(t => t.stop())
@@ -206,6 +305,78 @@ export class StreamEngine {
     this.deps.changed()
   }
 
+  /**
+   * The stream we just asked to watch is on the channel's stream server: collect it from there. Called after
+   * `watch`, with the pass the server answered with.
+   */
+  async watchVia(streamer: string, pass: SfuPassDto) {
+    const entry = this.incoming.get(streamer)
+    if (!entry) return
+    entry.viaServer = true
+    try {
+      const room = await this.viewerRoom(pass)
+      if (this.incoming.get(streamer) !== entry) return
+      const sharer = room.getParticipantByIdentity(streamer) as RemoteParticipant | undefined
+      // What they have put up so far; anything they put up later arrives as an event (see viewerRoom).
+      for (const publication of sharer?.trackPublications.values() ?? []) this.take(entry, publication as RemoteTrackPublication)
+    } catch (e) {
+      if (this.incoming.get(streamer) === entry) this.fail(streamer, e instanceof Error && e.message ? 'Could not connect to the stream.' : 'Could not connect to the stream.')
+    }
+  }
+
+  private take(entry: Incoming, publication: RemoteTrackPublication) {
+    publication.setSubscribed(true)
+    if (entry.small && publication.kind === 'video') void streamServer().then(({ VideoQuality }) => publication.setVideoQuality(VideoQuality.LOW))
+  }
+
+  /** Our one connection to the stream server for watching, made the first time it is needed. */
+  private viewerRoom(pass: SfuPassDto): Promise<Room> {
+    if (this.watchRoomReady) return this.watchRoomReady
+    const ready = (async () => {
+      const { Room, RoomEvent } = await streamServer()
+      const room = new Room({ adaptiveStream: false, dynacast: false })
+      this.watchRoom = room
+      /** What we hold of one sharer's stream, as something a video element can play. */
+      const gather = (sharer: RemoteParticipant) => {
+        const entry = this.incoming.get(sharer.identity)
+        if (!entry?.viaServer) return
+        const tracks = [...sharer.trackPublications.values()].map(p => p.track?.mediaStreamTrack).filter((t): t is MediaStreamTrack => !!t)
+        entry.stream = tracks.length > 0 ? new MediaStream(tracks) : null
+        if (tracks.some(t => t.kind === 'video')) {
+          if (entry.timer) { clearTimeout(entry.timer); entry.timer = null }
+          entry.view = { ...entry.view, state: 'live', error: null }
+        }
+        this.deps.changed()
+      }
+      room.on(RoomEvent.TrackPublished, (publication, sharer) => {
+        const entry = this.incoming.get(sharer.identity)
+        if (entry?.viaServer) this.take(entry, publication)
+      })
+      room.on(RoomEvent.TrackSubscribed, (_track, _publication, sharer) => gather(sharer))
+      room.on(RoomEvent.TrackUnsubscribed, (_track, _publication, sharer) => gather(sharer))
+      room.on(RoomEvent.Disconnected, () => {
+        if (this.watchRoom !== room) return
+        this.watchRoom = null
+        this.watchRoomReady = null
+        for (const [streamer, entry] of this.incoming) if (entry.viaServer && entry.view.state !== 'failed') this.fail(streamer, 'The connection to the stream was lost.')
+      })
+      await room.connect(pass.url, pass.token, { autoSubscribe: false, rtcConfig: { iceServers: [] } })
+      return room
+    })()
+    this.watchRoomReady = ready
+    ready.catch(() => { if (this.watchRoomReady === ready) { this.watchRoomReady = null; this.watchRoom = null } })
+    return ready
+  }
+
+  /** Nothing is being watched through the stream server any more: let go of it. */
+  private releaseViewerRoom() {
+    if ([...this.incoming.values()].some(i => i.viaServer && i.view.state !== 'failed')) return
+    const room = this.watchRoom
+    this.watchRoom = null
+    this.watchRoomReady = null
+    void room?.disconnect()
+  }
+
   unwatch(streamer: string) {
     if (!this.incoming.has(streamer)) return
     this.drop(streamer)
@@ -214,7 +385,19 @@ export class StreamEngine {
 
   /** Ask the person whose stream we are watching to send us no more than this (0 = no limit of ours). */
   requestLimit(streamer: string, kbps: number) {
-    if (this.incoming.has(streamer)) void this.deps.signal(streamer, 'limit', String(Math.max(0, Math.round(kbps)))).catch(() => { /* the stream is ending */ })
+    const entry = this.incoming.get(streamer)
+    if (!entry) return
+    if (entry.viaServer) {
+      // Through a stream server there are two pictures to choose from: any limit of ours means the smaller one.
+      entry.small = kbps > 0
+      const sharer = this.watchRoom?.getParticipantByIdentity(streamer) as RemoteParticipant | undefined
+      void streamServer().then(({ VideoQuality }) => {
+        for (const publication of sharer?.trackPublications.values() ?? [])
+          if (publication.kind === 'video') (publication as RemoteTrackPublication).setVideoQuality(entry.small ? VideoQuality.LOW : VideoQuality.HIGH)
+      })
+      return
+    }
+    void this.deps.signal(streamer, 'limit', String(Math.max(0, Math.round(kbps)))).catch(() => { /* the stream is ending */ })
   }
 
   watching(): Watching[] { return [...this.incoming.values()].map(i => ({ ...i.view })) }
@@ -226,6 +409,11 @@ export class StreamEngine {
     if (entry.timer) clearTimeout(entry.timer)
     entry.pc?.close()
     this.incoming.delete(streamer)
+    if (entry.viaServer) {
+      const sharer = this.watchRoom?.getParticipantByIdentity(streamer) as RemoteParticipant | undefined
+      for (const publication of sharer?.trackPublications.values() ?? []) (publication as RemoteTrackPublication).setSubscribed(false)
+      this.releaseViewerRoom()
+    }
   }
 
   private fail(streamer: string, error: string) {
@@ -236,6 +424,7 @@ export class StreamEngine {
     entry.pc = null
     entry.stream = null
     entry.view = { ...entry.view, state: 'failed', error }
+    if (entry.viaServer) this.releaseViewerRoom()
     this.deps.changed()
   }
 

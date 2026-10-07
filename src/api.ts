@@ -120,6 +120,8 @@ export class Api {
   /** Turning P2P on is refused (code "reauth") unless this sign-in is only a few minutes old. */
   setPrivacy(allowDirect: boolean) { return this.request<PrivacyDto>('PUT', '/api/me/privacy', { allowDirect }) }
   deleteChannel(id: string) { return this.request<void>('DELETE', `/api/channels/${id}`) }
+  /** Deletes a group of channels and every channel in it. Only called after the person has been asked, twice. */
+  deleteGroup(id: string) { return this.request<void>('DELETE', `/api/channels/${id}?withChannels=true`) }
   renameChannel(id: string, name: string) { return this.request<ChannelDto>('PATCH', `/api/channels/${id}`, { name }) }
   kick(guildId: string, userId: string) { return this.request<void>('DELETE', `/api/guilds/${guildId}/members/${userId}`) }
   ban(guildId: string, userId: string) { return this.request<void>('POST', `/api/guilds/${guildId}/bans/${userId}`, { reason: null }) }
@@ -193,7 +195,8 @@ export class Api {
   // ---- bots / voice ----
   commands(guildId: string) { return this.request<CommandDto[]>('GET', `/api/guilds/${guildId}/commands`) }
   /** STUN servers plus the relay for this voice channel (everyone in a channel is given the same one). */
-  streamSettings() { return this.request<StreamSettingsDto>('GET', '/api/voice/streams/settings') }
+  /** The rules for sharing video; with the voice channel we are in, also whether it has a stream server. */
+  streamSettings(channelId?: string | null) { return this.request<StreamSettingsDto>('GET', '/api/voice/streams/settings' + (channelId ? `?channelId=${channelId}` : '')) }
   /** How the server wants voice sent (see the admin panel's voice quality). Older servers do not have this. */
   voiceSettings() { return this.request<{ audioKbps: number }>('GET', '/api/voice/settings') }
   iceServers(channelId: string) { return this.request<IceServerDto[]>('GET', `/api/voice/ice?channelId=${channelId}`) }

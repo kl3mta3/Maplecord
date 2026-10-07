@@ -1,4 +1,5 @@
-import type { IceServerDto, VoiceParticipantDto, VoiceSignalDto } from './types'
+import type { LocalAudioTrack, RemoteParticipant, RemoteTrackPublication, Room } from 'livekit-client'
+import type { IceServerDto, SfuPassDto, VoiceParticipantDto, VoiceSignalDto } from './types'
 import { elementVolumeIgnored } from './volume'
 import { detectorUrl } from './voiceDetector'
 import type { VoiceHub } from './voiceHub'
@@ -17,7 +18,24 @@ import type { VoiceHub } from './voiceHub'
  * Privacy: when the server advertises a TURN relay and `relay` is requested, ICE is restricted to
  * relay candidates, so peers only ever see the relay's address, never yours. Without a relay the
  * connection is direct and the UI shows the one-time notice first.
+ *
+ * Through a stream server: where the voice channel has one, joining comes with a pass to it, and none of the
+ * connecting above happens. This app makes one connection, to the stream server; it sends our voice there once and
+ * collects everyone else's from it. Nobody's app talks to anybody else's. Everything after that is the same as in
+ * the mesh: the gate, push to talk, each person's volume, the meters.
  */
+
+/** The stream server library is only fetched (from this app's own files) the first time it is needed. */
+const streamServer = () => import('livekit-client')
+
+/** How someone's voice is named in a stream server room: "a:" and their voice connection. */
+const voiceOf = (identity: string) => (identity.startsWith('a:') ? identity.slice(2) : null)
+
+/** Tried this many times in a row before a voice channel that keeps losing the stream server is given up on. */
+const RECONNECT_TRIES = 4
+
+/** Joining could not reach the stream server at all: there is no call to be in. */
+export class VoiceConnectError extends Error {}
 export type IcePolicy = 'relay' | 'direct'
 
 export interface VoiceEngineEvents {
@@ -25,10 +43,13 @@ export interface VoiceEngineEvents {
   speaking: (connectionId: string | null, speaking: boolean) => void
   level: (connectionId: string | null, level: number) => void
   log: (message: string) => void
+  /** The stream server carrying this channel's voice was lost and could not be reached again: we are out of the call. */
+  lost: (reason: string) => void
 }
 
 interface Peer {
-  pc: RTCPeerConnection
+  /** Our connection to this person, in the mesh. Null when their voice comes from the stream server. */
+  pc: RTCPeerConnection | null
   audio: HTMLAudioElement
   meter?: Meter
 }
@@ -99,18 +120,26 @@ export class VoiceEngine {
   private setSending(sending: boolean) {
     if (sending === this.sending) return
     this.sending = sending
-    for (const peer of this.peers.values()) this.tuneSenders(peer.pc)
+    for (const peer of this.peers.values()) if (peer.pc) this.tuneSenders(peer.pc)
+    this.tuneRoom()
   }
 
   /** Sets what one connection sends: the bitrate cap, and whether our voice goes out at all right now. Safe to call more than once. */
   private tuneSenders(pc: RTCPeerConnection) {
-    for (const sender of pc.getSenders()) if (sender.track?.kind === 'audio') this.tuneSender(pc, sender)
+    for (const sender of pc.getSenders()) if (sender.track?.kind === 'audio') this.tuneSender(sender, () => pc.connectionState === 'closed')
+  }
+
+  /** The same for the one thing we send to a stream server. Asked for afresh each time: reconnecting gives it a new one. */
+  private tuneRoom() {
+    const room = this.room
+    const sender = this.roomTrack?.sender
+    if (room && sender) this.tuneSender(sender, () => this.room !== room)
   }
 
   private tuning = new WeakSet<RTCRtpSender>()
 
-  private tuneSender(pc: RTCPeerConnection, sender: RTCRtpSender) {
-    if (pc.connectionState === 'closed' || this.tuning.has(sender)) return
+  private tuneSender(sender: RTCRtpSender, closed: () => boolean) {
+    if (closed() || this.tuning.has(sender)) return
     const params = sender.getParameters()
     if (!params.encodings || params.encodings.length === 0) return // not negotiated yet; tried again once connected
     const sending = this.sending
@@ -122,8 +151,8 @@ export class VoiceEngine {
     void sender.setParameters(params).then(() => true, () => false).then(done => {
       this.tuning.delete(sender)
       // It changed its mind meanwhile, or could not be switched back on: a voice is never left off by accident.
-      if (this.sending !== sending) this.tuneSender(pc, sender)
-      else if (!done && sending) window.setTimeout(() => this.tuneSender(pc, sender), 200)
+      if (this.sending !== sending) this.tuneSender(sender, closed)
+      else if (!done && sending) window.setTimeout(() => this.tuneSender(sender, closed), 200)
     })
   }
 
@@ -222,9 +251,12 @@ export class VoiceEngine {
       const track = fresh.getAudioTracks()[0]
       track.enabled = !this.muted
       for (const peer of this.peers.values()) {
-        const sender = peer.pc.getSenders().find(s => s.track?.kind === 'audio')
+        const sender = peer.pc?.getSenders().find(s => s.track?.kind === 'audio')
         if (sender) await sender.replaceTrack(track)
       }
+      // Through a stream server there is one thing being sent; it is swapped in place (or sent for the first time).
+      if (this.roomTrack) { await this.roomTrack.replaceTrack(track, true); this.tuneRoom() }
+      else if (this.room) await this.sendMicrophone(this.room, track)
       for (const old of this.local.getTracks()) old.stop()
       if (this.localMeter) { this.localMeter.src.disconnect(); void this.localMeter.ctx.close() }
       this.local = fresh
@@ -253,9 +285,10 @@ export class VoiceEngine {
    * Joins the mesh. If the microphone is unavailable (denied, missing) we still connect receive-only,
    * so you can listen; the error is rethrown after the offers go out so the UI can say "no microphone".
    */
-  async join(existing: VoiceParticipantDto[]) {
+  async join(existing: VoiceParticipantDto[], pass: SfuPassDto | null = null) {
     await this.leave()
     this.joined = true
+    this.viaServer = pass !== null
     let micError: unknown = null
     try {
       this.local = await navigator.mediaDevices.getUserMedia({
@@ -275,15 +308,151 @@ export class VoiceEngine {
     }
     this.startMetering()
 
-    for (const p of existing) {
-      try { await this.offer(p.connectionId) }
-      catch (e) { this.events.log(`Offer to ${p.username} failed: ${e instanceof Error ? e.message : e}`) }
+    if (pass) {
+      // One connection, to the stream server; nobody is offered anything.
+      try { await this.connectRoom(pass) }
+      catch (e) {
+        this.events.log(`Could not reach the stream server: ${e instanceof Error ? e.message : e}`)
+        await this.leave()
+        throw new VoiceConnectError('Could not connect to this voice channel. Try again in a moment.')
+      }
+    } else {
+      for (const p of existing) {
+        try { await this.offer(p.connectionId) }
+        catch (e) { this.events.log(`Offer to ${p.username} failed: ${e instanceof Error ? e.message : e}`) }
+      }
     }
     if (micError) throw micError
   }
 
+  // ---- Through a stream server -------------------------------------------------------------------------------------
+
+  /** This call's voice goes through a stream server rather than from app to app. */
+  private viaServer = false
+  private room: Room | null = null
+  /** Our microphone as the stream server library holds it. */
+  private roomTrack: LocalAudioTrack | null = null
+
+  /** Connects to the channel's room, sends our microphone there, and starts collecting everyone else's voice. */
+  private async connectRoom(pass: SfuPassDto) {
+    const { Room, RoomEvent, Track } = await streamServer()
+    // The microphone is ours: the library must neither stop it nor open another by itself.
+    const room = new Room({ adaptiveStream: false, dynacast: false, stopLocalTrackOnUnpublish: false })
+    this.room = room
+    const mine = () => this.room === room
+    const want = (publication: RemoteTrackPublication, from: RemoteParticipant) => {
+      // Voices only: a shared screen in the same room is collected by the stream engine, and only when watched.
+      if (voiceOf(from.identity) && publication.kind === Track.Kind.Audio && publication.source === Track.Source.Microphone) publication.setSubscribed(true)
+    }
+    room.on(RoomEvent.ParticipantConnected, who => { const id = voiceOf(who.identity); if (id && mine()) this.events.peerState(id, 'connected') })
+    room.on(RoomEvent.TrackPublished, (publication, who) => { if (mine()) want(publication, who) })
+    room.on(RoomEvent.TrackSubscribed, (track, _publication, who) => {
+      const id = voiceOf(who.identity)
+      if (id && mine() && track.kind === Track.Kind.Audio) this.hear(id, track.mediaStreamTrack)
+    })
+    room.on(RoomEvent.TrackUnsubscribed, (track, _publication, who) => {
+      const id = voiceOf(who.identity)
+      if (id && mine() && track.kind === Track.Kind.Audio) this.dropPeer(id)
+    })
+    room.on(RoomEvent.Reconnected, () => { if (mine()) this.tuneRoom() })
+    room.on(RoomEvent.Disconnected, () => {
+      if (!mine()) return
+      // Dropped without our asking. Whatever we were hearing is gone with it; try to get back in.
+      this.room = null
+      this.roomTrack = null
+      for (const id of [...this.peers.keys()]) { this.dropPeer(id); this.events.peerState(id, 'connecting') }
+      void this.reconnectRoom(1)
+    })
+    // No address-finding servers of anyone's: the stream server has a public address and we simply connect to it.
+    await room.connect(pass.url, pass.token, { autoSubscribe: false, rtcConfig: { iceServers: [] } })
+    if (!mine()) { void room.disconnect(); return }
+
+    const microphone = this.local?.getAudioTracks()[0]
+    if (microphone) await this.sendMicrophone(room, microphone)
+    if (!mine()) return
+    for (const who of room.remoteParticipants.values()) {
+      const id = voiceOf(who.identity)
+      if (!id) continue
+      this.events.peerState(id, 'connected')
+      for (const publication of who.trackPublications.values()) want(publication, who)
+    }
+  }
+
+  private async sendMicrophone(room: Room, microphone: MediaStreamTrack) {
+    const { Track } = await streamServer()
+    // Speech settings: silence costs next to nothing, and the bitrate is the server's (or 32 kbps left to ourselves).
+    const published = await room.localParticipant.publishTrack(microphone, {
+      source: Track.Source.Microphone, dtx: true, red: false, forceStereo: false, stopMicTrackOnMute: false,
+      audioPreset: { maxBitrate: (this.maxAudioKbps > 0 ? this.maxAudioKbps : 32) * 1000 },
+    })
+    if (this.room !== room) return
+    this.roomTrack = (published.track as LocalAudioTrack | undefined) ?? null
+    this.tuneRoom()
+  }
+
+  /** The stream server dropped us mid-call: ask for a new pass and go back in, a few times at most. */
+  private async reconnectRoom(attempt: number) {
+    await new Promise(r => setTimeout(r, 1000 * attempt))
+    if (!this.joined || !this.viaServer || this.room) return
+    try {
+      const pass = await this.hub.voicePass()
+      if (!this.joined || !this.viaServer || this.room) return
+      if (!pass) throw new Error('This channel no longer has a stream server.')
+      await this.connectRoom(pass)
+    } catch (e) {
+      if (!this.joined || !this.viaServer) return
+      const room = this.room as Room | null
+      this.room = null
+      this.roomTrack = null
+      void room?.disconnect()
+      this.events.log(`Could not get back to the stream server (${e instanceof Error ? e.message : e}).`)
+      if (attempt < RECONNECT_TRIES) void this.reconnectRoom(attempt + 1)
+      else this.events.lost('The connection to this voice channel was lost.')
+    }
+  }
+
+  /** Someone's voice arrived from the stream server: play it, meter it, at the volume chosen for them. */
+  private hear(connectionId: string, track: MediaStreamTrack) {
+    this.dropPeer(connectionId)
+    const audio = this.makeAudio()
+    const peer: Peer = { pc: null, audio }
+    const stream = new MediaStream([track])
+    audio.srcObject = stream
+    void audio.play().catch(() => {})
+    peer.meter = this.makeMeter(stream)
+    this.peers.set(connectionId, peer)
+    this.applyAudio(connectionId, peer)
+    this.events.peerState(connectionId, 'connected')
+  }
+
+  /** Stops playing one person, keeping what was chosen for their volume in case they come back. */
+  private dropPeer(connectionId: string) {
+    const peer = this.peers.get(connectionId)
+    if (!peer) return
+    this.peers.delete(connectionId)
+    try { peer.pc?.close() } catch { /* already closed */ }
+    if (peer.meter) { peer.meter.src.disconnect(); void peer.meter.ctx.close() }
+    peer.audio.srcObject = null
+    peer.audio.remove()
+    this.events.speaking(connectionId, false)
+  }
+
+  private makeAudio(): HTMLAudioElement {
+    const audio = document.createElement('audio')
+    audio.autoplay = true
+    audio.style.display = 'none'
+    document.body.appendChild(audio)
+    if (this.outputDeviceId && 'setSinkId' in audio) void (audio as HTMLAudioElement & { setSinkId(id: string): Promise<void> }).setSinkId(this.outputDeviceId).catch(() => {})
+    return audio
+  }
+
   async leave() {
     this.joined = false
+    this.viaServer = false
+    const room = this.room
+    this.room = null
+    this.roomTrack = null
+    void room?.disconnect()
     for (const id of [...this.peers.keys()]) await this.removePeer(id)
     window.clearInterval(this.meterTimer)
     if (this.localMeter) { this.localMeter.src.disconnect(); void this.localMeter.ctx.close(); this.localMeter = null }
@@ -337,19 +506,13 @@ export class VoiceEngine {
   }
 
   async removePeer(connectionId: string) {
-    const peer = this.peers.get(connectionId)
-    if (!peer) return
-    this.peers.delete(connectionId)
     this.wanted.delete(connectionId)
-    try { peer.pc.close() } catch { /* already closed */ }
-    if (peer.meter) { peer.meter.src.disconnect(); void peer.meter.ctx.close() }
-    peer.audio.srcObject = null
-    peer.audio.remove()
-    this.events.speaking(connectionId, false)
+    this.dropPeer(connectionId)
   }
 
   async handleSignal(s: VoiceSignalDto) {
-    if (!this.joined) return
+    // Through a stream server no app sets anything up with another.
+    if (!this.joined || this.viaServer) return
     try {
       if (s.kind === 'offer') {
         const peer = this.getOrCreatePeer(s.fromConnectionId)
@@ -359,11 +522,11 @@ export class VoiceEngine {
         await this.hub.signal(s.fromConnectionId, 'answer', peer.pc.localDescription!.sdp)
       } else if (s.kind === 'answer') {
         const peer = this.peers.get(s.fromConnectionId)
-        if (peer) await peer.pc.setRemoteDescription({ type: 'answer', sdp: s.payload })
+        if (peer?.pc) await peer.pc.setRemoteDescription({ type: 'answer', sdp: s.payload })
       } else if (s.kind === 'ice') {
         const peer = this.peers.get(s.fromConnectionId)
         const ice = JSON.parse(s.payload) as { candidate: string; sdpMid: string | null; sdpMLineIndex: number }
-        if (peer && ice.candidate) await peer.pc.addIceCandidate(ice)
+        if (peer?.pc && ice.candidate) await peer.pc.addIceCandidate(ice)
       }
     } catch (e) {
       this.events.log(`Signal ${s.kind} failed: ${e instanceof Error ? e.message : e}`)
@@ -379,9 +542,9 @@ export class VoiceEngine {
     await this.hub.signal(remote, 'offer', peer.pc.localDescription!.sdp)
   }
 
-  private getOrCreatePeer(remote: string): Peer {
+  private getOrCreatePeer(remote: string): Peer & { pc: RTCPeerConnection } {
     const existing = this.peers.get(remote)
-    if (existing) return existing
+    if (existing?.pc) return existing as Peer & { pc: RTCPeerConnection }
 
     const pc = new RTCPeerConnection(this.config)
     if (this.local) for (const track of this.local.getAudioTracks()) pc.addTrack(track, this.local)
@@ -389,13 +552,9 @@ export class VoiceEngine {
     this.tuneSenders(pc)
     pc.addEventListener('connectionstatechange', () => { if (pc.connectionState === 'connected') this.tuneSenders(pc) })
 
-    const audio = document.createElement('audio')
-    audio.autoplay = true
-    audio.style.display = 'none'
-    document.body.appendChild(audio)
-    if (this.outputDeviceId && 'setSinkId' in audio) void (audio as HTMLAudioElement & { setSinkId(id: string): Promise<void> }).setSinkId(this.outputDeviceId).catch(() => {})
+    const audio = this.makeAudio()
 
-    const peer: Peer = { pc, audio }
+    const peer: Peer & { pc: RTCPeerConnection } = { pc, audio }
     pc.ontrack = ev => {
       const stream = ev.streams[0] ?? new MediaStream([ev.track])
       audio.srcObject = stream

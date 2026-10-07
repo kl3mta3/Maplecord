@@ -24,7 +24,7 @@ export const Permission = {
   StartRolls: 1 << 4, JoinVoice: 1 << 5, Speak: 1 << 6, Stream: 1 << 7,
   CreateInvites: 1 << 8, ManageChannels: 1 << 9, ManageRoles: 1 << 10, ManageWebhooks: 1 << 11,
   ManageGuild: 1 << 12, KickMembers: 1 << 13, BanMembers: 1 << 14, MuteMembers: 1 << 15,
-  ManageDirectChannels: 1 << 16, StreamDirect: 1 << 17, JoinDirectVoice: 1 << 18,
+  ManageDirectChannels: 1 << 16, StreamDirect: 1 << 17, JoinDirectVoice: 1 << 18, DisconnectMembers: 1 << 19,
   Administrator: 1 << 30,
 } as const
 export const hasPermission = (held: number, required: number) =>
@@ -74,6 +74,8 @@ export interface MemberDto {
   /** Only on whole-server listings; changes arrive as PresenceStatus. */
   dnd?: boolean
 }
+/** A short-lived pass to a voice channel's room on a stream server: where it is, and who the holder is there. */
+export interface SfuPassDto { url: string; token: string }
 export interface GuildSummaryDto { guild: GuildDto; channels: ChannelDto[]; members: MemberDto[]; roles?: RoleDto[] | null; myPermissions: number; voice?: Record<string, VoiceParticipantDto[]> | null }
 export interface ItemIconDto { path: string }
 /** contentType is what the server found the file to be: image/* and video/* can be shown in place, anything else is a download. */
@@ -121,6 +123,8 @@ export interface StreamSettingsDto {
   maxHeight: number; maxFps: number; maxKbps: number; noViewersMinutes: number; inactiveMinutes: number
   /** The limits in P2P channels and calls, where video does not cross the relay. */
   directMaxHeight?: number; directMaxFps?: number; directMaxKbps?: number
+  /** The voice channel we asked about has a stream server: we send one copy and everyone in the channel may watch. */
+  streamServer?: boolean
 }
 export interface VoiceSignalDto { fromUserId: string; fromConnectionId: string; kind: 'offer' | 'answer' | 'ice'; payload: string }
 

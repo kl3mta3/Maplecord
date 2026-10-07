@@ -24,7 +24,7 @@ function parseRange(text: string): [number, number] | null {
   const min = parseInt(m[1], 10), max = parseInt(m[2], 10)
   return RollRange.isValid(min, max) ? [min, max] : null
 }
-import { AllowDirectDialog, ConfirmDialog, CreateChannelDialog, DirectChannelDialog, IncomingCallDialog, P2PCallDialog, NicknameDialog, PromptDialog, StartRollDialog } from './Dialogs'
+import { AllowDirectDialog, ConfirmDialog, CreateChannelDialog, DeleteGroupDialog, DirectChannelDialog, IncomingCallDialog, P2PCallDialog, NicknameDialog, PromptDialog, StartRollDialog } from './Dialogs'
 import { OverlaySettingsDialog, ServerSettingsDialog } from './Settings'
 import Friends from './Home'
 import { serverMediaUrl } from '../itemIcons'
@@ -48,7 +48,7 @@ import { DropBanner, PluginsDialog } from './Plugins'
 import { SharePicker, StreamStage } from './Streams'
 
 type DialogState =
-  | { kind: 'createGuild' } | { kind: 'joinGuild' } | { kind: 'addGuild' } | { kind: 'discover' } | { kind: 'channelAccess'; channelId: string } | { kind: 'createChannel'; category?: boolean } | { kind: 'startRoll'; rollKind: RollKind }
+  | { kind: 'createGuild' } | { kind: 'joinGuild' } | { kind: 'addGuild' } | { kind: 'discover' } | { kind: 'channelAccess'; channelId: string } | { kind: 'deleteGroup'; channelId: string; name: string } | { kind: 'createChannel'; category?: boolean } | { kind: 'startRoll'; rollKind: RollKind }
   | { kind: 'leaveGuild' } | { kind: 'kick'; member: MemberDto } | { kind: 'ban'; member: MemberDto }
   | { kind: 'audio' } | { kind: 'allowDirect' } | { kind: 'channelKind'; channelId: string; name: string; direct: boolean } | { kind: 'p2pCall'; userId: string; name: string } | { kind: 'share' } | { kind: 'settings' } | { kind: 'renameChannel'; channelId: string; name: string } | { kind: 'deleteChannel'; channelId: string; name: string } | { kind: 'renameFolder'; folderId: string } | { kind: 'overlay' } | { kind: 'server' } | { kind: 'plugins' } | { kind: 'profile' }
   | { kind: 'nickname'; guildId: string; userId: string } | null
@@ -76,7 +76,6 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   const myPerms = g?.myPermissions ?? 0
   const can = (p: number) => hasPermission(myPerms, p)
   const voice = store.voice
-  const speakingUsers = new Set(voice?.participants.filter(p => p.speaking).map(p => p.userId) ?? [])
   const inCall = voice && store.call?.channelId === voice.channelId ? store.call : null
   const voiceChannelName = voice ? (inCall ? inCall.otherName : store.guilds.flatMap(x => x.channels).find(c => c.id === voice.channelId)?.name ?? '') : ''
   const peers = voice?.participants.filter(p => p.userId !== me?.id) ?? []
@@ -306,8 +305,13 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       entries.push({ kind: 'sep' })
       entries.push({ kind: 'item', label: 'Change nickname', onClick: () => setDialog({ kind: 'nickname', guildId: g.guild.id, userId }) })
     }
-    if (member && g && userId !== g.guild.ownerId && !isBot && (can(Permission.KickMembers) || can(Permission.BanMembers))) {
+    // The voice channel they are in on this server, for someone who may take people out of voice.
+    const inVoice = g && can(Permission.DisconnectMembers) ? Object.entries(g.voice ?? {}).find(([, people]) => people.some(p => p.userId === userId))?.[0] : undefined
+    const mayRemove = !isBot && (can(Permission.KickMembers) || can(Permission.BanMembers))
+    if (member && g && userId !== g.guild.ownerId && (mayRemove || inVoice)) {
       entries.push({ kind: 'sep' })
+      if (inVoice) entries.push({ kind: 'item', label: 'Disconnect from voice', danger: true, onClick: () => { void store.disconnectMember(inVoice, userId) } })
+      if (!mayRemove) return entries
       if (can(Permission.KickMembers)) entries.push({ kind: 'item', label: 'Kick from ' + g.guild.name, danger: true, onClick: () => setDialog({ kind: 'kick', member }) })
       if (can(Permission.BanMembers)) entries.push({ kind: 'item', label: 'Ban from ' + g.guild.name, danger: true, onClick: () => setDialog({ kind: 'ban', member }) })
     }
@@ -594,7 +598,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
               {g && [...g.members].sort((a, b) => Number(b.online) - Number(a.online) || a.username.localeCompare(b.username)).map(m => (
                 <div key={m.userId} className={'member' + (m.online ? ' online' : ' offline') + (m.online && store.dndUsers.has(m.userId) ? ' dnd' : '') + (ignored(m.userId) ? ' ignoredmember' : '')} title={'@' + m.username + ' — click for profile, right-click for options'}
                   onClick={e => openCard(e, m.userId, memberName(m))} onContextMenu={e => openUserMenu(e, m.userId, memberName(m))}>
-                  <div className="row" style={{ gap: 0 }}><Avatar who={m} name={memberName(m)} serverUrl={serverUrl} size={28} speaking={speakingUsers.has(m.userId)} /><div className="presence" /></div>
+                  <div className="row" style={{ gap: 0 }}><Avatar who={m} name={memberName(m)} serverUrl={serverUrl} size={28} /><div className="presence" /></div>
                   <div className="grow" style={{ overflow: 'hidden' }}>
                     <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><UserName who={store.appearanceOf(m.userId)} label={memberName(m)} roleColor={roleColor(m.userId, g)} /> {m.isBot && <span className="tag" style={{ fontSize: 10, background: 'var(--accent)', borderRadius: 3, padding: '0 4px', color: '#fff' }}>BOT</span>}</div>
                     <div className="role">{roleLabel(m, g)}</div>
@@ -645,6 +649,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       {menu && <ContextMenu x={menu.x} y={menu.y} entries={menu.kind === 'guild' ? guildEntries(menu.guildId) : menu.kind === 'user' ? userEntries(menu.userId, menu.username) : menu.kind === 'stats' ? rollEntries() : menu.kind === 'folder' ? folderEntries(menu.folderId) : menu.kind === 'status' ? statusEntries() : menu.kind === 'mic' ? deviceEntries('audioinput') : menu.kind === 'speaker' ? deviceEntries('audiooutput') : menu.kind === 'group' ? [
         { kind: 'label', text: menu.name },
         { kind: 'item', label: 'Who can see it', icon: '🔒', onClick: () => setDialog({ kind: 'channelAccess', channelId: menu.channelId }) },
+        { kind: 'item', label: 'Delete group', icon: '🗑', danger: true, onClick: () => setDialog({ kind: 'deleteGroup', channelId: menu.channelId, name: menu.name }) },
       ] : [
         { kind: 'label', text: menu.name },
         { kind: 'item', label: 'Mute channel', icon: '🔕', checked: !!store.settings.mutedChannels?.[menu.channelId], onClick: () => store.setChannelMuted(menu.channelId, !store.settings.mutedChannels?.[menu.channelId]) },
@@ -676,6 +681,10 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       {dialog?.kind === 'renameChannel' && (
         <PromptDialog title={`Rename ${dialog.name}`} label="Channel name" initial={dialog.name} onClose={() => setDialog(null)}
           onSubmit={name => { if (name !== dialog.name) void store.renameChannel(dialog.channelId, name) }} />
+      )}
+      {dialog?.kind === 'deleteGroup' && (
+        <DeleteGroupDialog name={dialog.name} channels={(g?.channels ?? []).filter(c => c.parentId === dialog.channelId).sort((a, b) => a.position - b.position).map(c => c.name)}
+          onConfirm={() => void store.deleteGroup(dialog.channelId)} onClose={() => setDialog(null)} />
       )}
       {dialog?.kind === 'deleteChannel' && (
         <ConfirmDialog title={`Delete ${dialog.name}?`} message="The channel and everything written in it are removed for everyone. This cannot be undone."

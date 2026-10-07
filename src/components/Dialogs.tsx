@@ -171,6 +171,29 @@ export function ConfirmDialog({ title, message, onConfirm, onClose }: { title: s
   )
 }
 
+/**
+ * Deleting a group of channels takes the channels in it too, so it is asked twice: first what will go, then whether
+ * they are sure. The second time the buttons change places, so two quick clicks on one spot cancel rather than delete.
+ */
+export function DeleteGroupDialog({ name, channels, onConfirm, onClose }: { name: string; channels: string[]; onConfirm: () => void; onClose: () => void }) {
+  const [sure, setSure] = useState(false)
+  const n = channels.length
+  if (n === 0) return <ConfirmDialog title={`Delete the group ${name}?`} message="There are no channels in it. The group is removed for everyone, and this cannot be undone." onConfirm={onConfirm} onClose={onClose} />
+  const them = n === 1 ? 'it' : 'them'
+  return (
+    <Dialog title={sure ? 'Are you sure?' : `Delete the group ${name}?`} onClose={onClose}>
+      {sure
+        ? <div>The group <b>{name}</b>, {n === 1 ? 'the channel in it' : `all ${n} channels in it`} and everything written in {them} will be gone for everyone. <b>This cannot be undone.</b></div>
+        : <div>This also deletes {n === 1 ? 'the channel' : `all ${n} channels`} in it, with everything written in {them}: <b>{channels.join(', ')}</b>.</div>}
+      <div className="buttons">
+        {sure
+          ? <><button className="danger" onClick={() => { onConfirm(); onClose() }}>Delete everything</button><button onClick={onClose}>Cancel</button></>
+          : <><button onClick={onClose}>Cancel</button><button className="accent" onClick={() => setSure(true)}>Delete group and channels</button></>}
+      </div>
+    </Dialog>
+  )
+}
+
 export function CreateChannelDialog({ categories, onSubmit, onClose, initialType = ChannelType.Text, canDirect = false }: {
   categories: ChannelDto[]; onSubmit: (name: string, type: number, parentId: string | null, direct: boolean) => void; onClose: () => void; initialType?: number
   /** This person may create P2P voice channels. */
