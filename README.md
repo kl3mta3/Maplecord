@@ -58,8 +58,12 @@ nothing to unlock.
 
 ## P2P
 
+<<<<<<< HEAD
 Everything above works by only connecting to the Maplecord server and using a relay to communicate. P2P is extra: it is
 kept apart from the rest and is off until you turn it on.
+=======
+Everything above works by only connecting to the Maplecord server and using a relay to communicate. P2P is extra: it is kept apart from the rest and is off until you turn it on.
+>>>>>>> 68ea4eaa86f26793c44173c56a7dcadde15a91b2
 
 In a P2P connection your app connects straight to the others. That allows more, but it means **the people
 you connect to that way can, with the know how, find your IP address**.
