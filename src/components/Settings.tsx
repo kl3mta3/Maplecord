@@ -4,6 +4,7 @@ import { Permission, hasPermission, type ChannelDto, type GuildDto, type MemberD
 import type { Api } from '../api'
 import { Dialog } from './Dialogs'
 import { ServerBotsTab, WebhooksTab } from './Integrations'
+import { ListingSettings } from './Servers'
 
 // ---- Overlay / roll settings ---------------------------------------------------
 
@@ -61,17 +62,19 @@ export const PERMISSION_LABELS: { bit: number; name: string; hint: string }[] = 
   { bit: Permission.BanMembers, name: 'Ban members', hint: '' },
   { bit: Permission.MuteMembers, name: 'Mute members', hint: '' },
   { bit: Permission.ManageDirectChannels, name: 'Create P2P channels', hint: 'Make a voice channel P2P or relayed (also needs Manage channels)' },
+  { bit: Permission.JoinDirectVoice, name: 'Join P2P channels', hint: 'Join a P2P voice channel (also needs Join voice, and P2P allowed on their own account)' },
   { bit: Permission.StreamDirect, name: 'Stream in P2P channels', hint: 'Share screen or camera in a P2P channel (also needs Stream)' },
   { bit: Permission.Administrator, name: 'Administrator', hint: 'Every permission, bypasses channel overrides' },
 ]
 
 const ROLE_SWATCHES = ['#9000ff', '#00ddff', '#ff008c', '#2cfc00', '#f19511', '#ff3b3b', '#ffd700', '#1abc9c', '#e91e63', '#3498db', '#95a5a6', '#ffffff']
 
-export function ServerSettingsDialog({ api, channels, guild, roles, members, myPermissions, meId, onRename, onIcon, onCreateRole, onUpdateRole, onDeleteRole, onSetMemberRoles, onClose }: {
+export function ServerSettingsDialog({ api, channels, guild, roles, members, myPermissions, meId, onRename, onIcon, onListing, onCreateRole, onUpdateRole, onDeleteRole, onSetMemberRoles, onClose }: {
   api: Api; channels: ChannelDto[]
   guild: GuildDto; roles: RoleDto[]; members: MemberDto[]; myPermissions: number; meId: string
   onRename: (name: string) => Promise<void>
   onIcon: (file: File | null) => Promise<void>
+  onListing: (patch: { isPublic: boolean; description: string; topics: string[] }) => Promise<void>
   onCreateRole: (name: string, color: string | null, permissions: number) => Promise<void>
   onUpdateRole: (roleId: string, patch: { name?: string; color?: string | null; permissions?: number }) => Promise<void>
   onDeleteRole: (roleId: string) => Promise<void>
@@ -127,6 +130,7 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, myP
             <input className="grow" value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && name.trim() && onRename(name.trim())} />
             <button className="accent" disabled={!name.trim() || name.trim() === guild.name} onClick={() => onRename(name.trim())}>Save</button>
           </div>
+          <ListingSettings key={`${guild.isPublic}|${guild.description ?? ''}|${(guild.topics ?? []).join(',')}`} isPublic={!!guild.isPublic} description={guild.description ?? ''} topics={guild.topics ?? []} onSave={onListing} />
         </>
       )}
 

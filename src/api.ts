@@ -1,5 +1,5 @@
 import type {
-  ApplicationDto, AttachmentDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto,
+  ApplicationDto, AttachmentDto, ChannelOverrideDto, DiscoverGuildDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto,
 } from './types'
 
 export class ApiError extends Error {
@@ -69,6 +69,15 @@ export class Api {
   deleteGuild(id: string) { return this.request<void>('DELETE', `/api/guilds/${id}`) }
   leaveGuild(id: string) { return this.request<void>('POST', `/api/guilds/${id}/leave`) }
   createInvite(guildId: string) { return this.request<InviteDto>('POST', `/api/guilds/${guildId}/invites`, { expiresInMinutes: null, maxUses: null }) }
+  updateGuildListing(id: string, patch: { isPublic: boolean; description: string; topics: string[] }) { return this.request<GuildDto>('PATCH', `/api/guilds/${id}`, patch) }
+  /** Public servers, by name and/or exact topic. */
+  discover(q: string, topic: string) { return this.request<DiscoverGuildDto[]>('GET', `/api/discover?q=${encodeURIComponent(q)}&topic=${encodeURIComponent(topic)}`) }
+  discoverTopics() { return this.request<string[]>('GET', '/api/discover/topics') }
+  joinPublic(guildId: string) { return this.request<GuildSummaryDto>('POST', `/api/discover/${guildId}/join`) }
+  /** What one role or one person is allowed and denied in one channel, beyond what their roles say. */
+  setChannelOverride(channelId: string, kind: 'role' | 'user', id: string, allow: number, deny: number) { return this.request<ChannelOverrideDto>('PUT', `/api/channels/${channelId}/overrides/${kind}/${id}`, { allow, deny }) }
+  deleteChannelOverride(channelId: string, overrideId: string) { return this.request<void>('DELETE', `/api/channels/${channelId}/overrides/${overrideId}`) }
+  invitePreview(code: string) { return this.request<InvitePreviewDto>('GET', `/api/invites/${encodeURIComponent(code)}`) }
   joinInvite(code: string) { return this.request<GuildSummaryDto>('POST', `/api/invites/${encodeURIComponent(code.trim())}/join`) }
   createChannel(guildId: string, name: string, type: number, parentId: string | null, direct = false) {
     return this.request<ChannelDto>('POST', `/api/guilds/${guildId}/channels`, { name, type, parentId, direct })

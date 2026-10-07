@@ -16,6 +16,10 @@ contextBridge.exposeInMainWorld('maplecord', {
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('open-external', url),
   onHotkey: (handler: (key: Action) => void) => subscribe<Action>('hotkey', handler),
 
+  // invite links (maplecord://invite/CODE)
+  takeInviteLink: (): Promise<string | null> => ipcRenderer.invoke('take-invite-link'),
+  onInviteLink: (handler: () => void) => subscribe<void>('invite-link', handler),
+
   // main window → overlay
   setOverlayState: (state: unknown) => ipcRenderer.send('overlay-state', state),
   setOverlayEnabled: (enabled: boolean) => ipcRenderer.send('overlay-enabled', enabled),

@@ -36,11 +36,14 @@ import type { GuildFolder } from '../settings'
 import { Avatar, ProfileEditor, ProfilePopout, UserName } from './Profile'
 import { assetUrl, initials, shownName, type Appearance } from '../profile'
 import { STATUSES, UserSettingsDialog } from './UserSettings'
+import { ArrowLeftRight, ChevronDown, HeadphoneOff, Headphones, LoaderCircle, Menu, Mic, MicOff, MonitorUp, Paperclip, Phone, PhoneOff, Plus, Settings as SettingsIcon, Signal, Users, Video } from 'lucide-react'
+import { AddServerDialog, DiscoverDialog, JoinServerDialog } from './Servers'
+import { ChannelAccessDialog } from './ChannelAccess'
 import { DropBanner, PluginsDialog } from './Plugins'
 import { SharePicker, StreamStage } from './Streams'
 
 type DialogState =
-  | { kind: 'createGuild' } | { kind: 'joinGuild' } | { kind: 'createChannel'; category?: boolean } | { kind: 'startRoll'; rollKind: RollKind }
+  | { kind: 'createGuild' } | { kind: 'joinGuild' } | { kind: 'addGuild' } | { kind: 'discover' } | { kind: 'channelAccess'; channelId: string } | { kind: 'createChannel'; category?: boolean } | { kind: 'startRoll'; rollKind: RollKind }
   | { kind: 'leaveGuild' } | { kind: 'kick'; member: MemberDto } | { kind: 'ban'; member: MemberDto }
   | { kind: 'audio' } | { kind: 'allowDirect' } | { kind: 'channelKind'; channelId: string; name: string; direct: boolean } | { kind: 'p2pCall'; userId: string; name: string } | { kind: 'share' } | { kind: 'settings' } | { kind: 'renameChannel'; channelId: string; name: string } | { kind: 'deleteChannel'; channelId: string; name: string } | { kind: 'renameFolder'; folderId: string } | { kind: 'overlay' } | { kind: 'server' } | { kind: 'plugins' } | { kind: 'profile' }
   | { kind: 'nickname'; guildId: string; userId: string } | null
@@ -156,6 +159,9 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
     ]
   }
   const colorOf = (userId: string) => (g ? roleColor(userId, g) : undefined)
+
+  const [inviteBase, setInviteBase] = useState<string | null>(null)
+  useEffect(() => { void store.api.meta(store.settings.serverUrl).then(meta => setInviteBase(meta?.inviteBase ?? null)) }, [store.api, store.settings.serverUrl])
 
   // ---- Right-click menus ------------------------------------------------------
   // What they change about other people and servers is yours alone and kept on this device; nobody is told.
@@ -283,9 +289,9 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       {/* Only shown on a phone: the way between the three panes. */}
       <div className="mobilebar">
         {/* Each button opens its panel, and pressed again puts the conversation back. */}
-        <button className={pane === 'list' ? 'accent' : ''} onClick={() => setPane(pane === 'list' ? 'chat' : 'list')} title={pane === 'list' ? 'Back to the conversation' : 'Servers and channels'}>☰</button>
+        <button className={pane === 'list' ? 'accent' : ''} onClick={() => setPane(pane === 'list' ? 'chat' : 'list')} title={pane === 'list' ? 'Back to the conversation' : 'Servers and channels'}><Menu size={18} /></button>
         <span className="grow title" onClick={() => setPane('chat')}>{store.selectedChannel ? (store.selectedChannel.type === ChannelType.DirectMessage ? '@' : '#') + store.selectedChannel.name : 'Maplecord'}</span>
-        <button className={pane === 'people' ? 'accent' : ''} onClick={() => setPane(pane === 'people' ? 'chat' : 'people')} title={pane === 'people' ? 'Back to the conversation' : store.home ? 'Friends' : 'Members'}>👥</button>
+        <button className={pane === 'people' ? 'accent' : ''} onClick={() => setPane(pane === 'people' ? 'chat' : 'people')} title={pane === 'people' ? 'Back to the conversation' : store.home ? 'Friends' : 'Members'}><Users size={18} /></button>
       </div>
       {/* ===== Guild rail ===== */}
       <div className="rail" onDragOver={allowDrop} onDrop={e => { const id = dragged(e); if (id) { e.preventDefault(); moveToFolder(id, null) } }}>
@@ -320,11 +326,10 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
                   title={f.name + (f.open ? ' — click to close' : ' — click to open') + ' · right-click for options'}
                   onClick={() => saveFolders(folders.map(y => (y.id === f.id ? { ...y, open: !y.open } : y)))}
                   onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setMenu({ kind: 'folder', folderId: f.id, x: e.clientX, y: e.clientY }) }}>
-                  {f.open ? '📂' : (
-                    <span className="mini">
-                      {inside.slice(0, 4).map(y => (y.guild.iconUrl ? <img key={y.guild.id} src={y.guild.iconUrl} alt="" draggable={false} /> : <i key={y.guild.id}>{initials(y.guild.name)}</i>))}
-                    </span>
-                  )}
+                  {/* No folder picture: the first four servers in it, small. */}
+                  <span className="mini">
+                    {inside.slice(0, 4).map(y => (y.guild.iconUrl ? <img key={y.guild.id} src={y.guild.iconUrl} alt="" draggable={false} /> : <i key={y.guild.id}>{initials(y.guild.name)}</i>))}
+                  </span>
                   {!f.open && unread > 0 && <span className="badge">{unread}</span>}
                 </button>
                 {f.open && inside.map(serverButton)}
@@ -333,8 +338,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           })
         })()}
         <div className="spacer" />
-        <button className="guild" title="Create a server" onClick={() => setDialog({ kind: 'createGuild' })}>+</button>
-        <button className="guild" title="Join with an invite code" onClick={() => setDialog({ kind: 'joinGuild' })}>⇲</button>
+        <button className="guild add" title="Add a server" aria-label="Add a server" onClick={() => setDialog({ kind: 'addGuild' })}><Plus size={22} /></button>
       </div>
 
       {/* ===== Channels (or DMs) + user panel ===== */}
@@ -471,16 +475,16 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       <div className="userpanel">
         {voice && (
           <div className={'voicebox' + (voice.directSince ? ' p2p' : '')}>
-            <span className="signal">{inCall ? '📞' : '📶'}</span>
+            <span className="signal">{inCall ? <Phone size={16} /> : <Signal size={16} />}</span>
             <div className="grow vtext" title={(voiceGuild ? voiceGuild + ' / ' : '') + voiceChannelName + (voiceDetail ? ' · ' + voiceDetail : '')}>
-              <div className="vstate">{voice.directSince ? 'P2P · your IP is visible' : inCall ? (inCall.phase === 'calling' ? 'Calling…' : 'In a call') : 'Voice connected'}</div>
+              <div className="vstate">{voice.directSince ? 'P2P · using your IP' : inCall ? (inCall.phase === 'calling' ? 'Calling…' : 'In a call') : 'Voice connected'}</div>
               <div className="muted vwhere">{voiceGuild ? voiceGuild + ' / ' : ''}{voiceChannelName}{voiceDetail ? ' · ' + voiceDetail : ''}</div>
             </div>
-            <button className={'iconbtn' + (store.sharing === 'camera' ? ' on' : '')} onClick={() => void toggleCamera()} title={store.sharing === 'camera' ? 'Turn your camera off' : 'Turn your camera on'}>📷</button>
+            <button className={'iconbtn' + (store.sharing === 'camera' ? ' on' : '')} onClick={() => void toggleCamera()} title={store.sharing === 'camera' ? 'Turn your camera off' : 'Turn your camera on'}><Video size={17} /></button>
             <button className={'iconbtn' + (screenSharing ? ' on' : '')} disabled={!canShareScreen && !screenSharing}
               title={screenSharing ? 'Stop sharing' : canShareScreen ? 'Share an app or a screen' : 'This browser cannot share its screen. Your camera can still be shared.'}
-              onClick={() => { if (screenSharing) void store.stopShare(); else { void store.loadStreamRules().catch(() => null); setDialog({ kind: 'share' }) } }}>🖥</button>
-            <button className="iconbtn hangup" onClick={store.leaveVoice} title={inCall ? (inCall.phase === 'calling' ? 'Cancel the call' : 'Hang up') : 'Disconnect'}><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M3.5 14.5c5-5.5 12-5.5 17 0" stroke="currentColor" strokeWidth="4.5" strokeLinecap="round" fill="none" /></svg></button>
+              onClick={() => { if (screenSharing) void store.stopShare(); else { void store.loadStreamRules().catch(() => null); setDialog({ kind: 'share' }) } }}><MonitorUp size={17} /></button>
+            <button className="iconbtn hangup" onClick={store.leaveVoice} title={inCall ? (inCall.phase === 'calling' ? 'Cancel the call' : 'Hang up') : 'Disconnect'}><PhoneOff size={17} /></button>
           </div>
         )}
         <div className="selfbar" style={selfStyle}>
@@ -496,14 +500,14 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           </div>
           <span className="controls">
           <span className="split">
-            <button className={'iconbtn' + (store.isMuted ? ' off' : '')} onClick={store.toggleMute} title={store.isMuted ? 'Unmute your microphone' : 'Mute your microphone'}>🎙</button>
-            <button className="caret" onClick={e => openPanelMenu(e, 'mic')} title="Choose a microphone">▾</button>
+            <button className={'iconbtn' + (store.isMuted ? ' off' : '')} onClick={store.toggleMute} title={store.isMuted ? 'Unmute your microphone' : 'Mute your microphone'}>{store.isMuted ? <MicOff size={17} /> : <Mic size={17} />}</button>
+            <button className="caret" onClick={e => openPanelMenu(e, 'mic')} title="Choose a microphone"><ChevronDown size={12} /></button>
           </span>
           <span className="split">
-            <button className={'iconbtn' + (store.deafened ? ' off' : '')} onClick={store.toggleDeafen} title={store.deafened ? 'Hear people again' : 'Stop hearing everyone'}>🎧</button>
-            <button className="caret" onClick={e => openPanelMenu(e, 'speaker')} title="Choose speakers and volume">▾</button>
+            <button className={'iconbtn' + (store.deafened ? ' off' : '')} onClick={store.toggleDeafen} title={store.deafened ? 'Hear people again' : 'Stop hearing everyone'}>{store.deafened ? <HeadphoneOff size={17} /> : <Headphones size={17} />}</button>
+            <button className="caret" onClick={e => openPanelMenu(e, 'speaker')} title="Choose speakers and volume"><ChevronDown size={12} /></button>
           </span>
-          <button className="iconbtn" onClick={() => setDialog({ kind: 'settings' })} title="Settings">⚙</button>
+          <button className="iconbtn" onClick={() => setDialog({ kind: 'settings' })} title="Settings"><SettingsIcon size={17} /></button>
           </span>
         </div>
         <div className="statsline" title="Your roll stats on this device · right-click for options"
@@ -556,7 +560,17 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       </div>
 
       {dialog?.kind === 'createGuild' && <PromptDialog title="Create a server" label="Server name" onSubmit={store.createGuild} onClose={() => setDialog(null)} />}
-      {dialog?.kind === 'joinGuild' && <PromptDialog title="Join a server" label="Invite code" onSubmit={store.joinGuild} onClose={() => setDialog(null)} />}
+      {store.pendingInvite && (
+        <ConfirmDialog title={`Join ${store.pendingInvite.name}?`}
+          message={`You followed an invite to ${store.pendingInvite.name} (${store.pendingInvite.members} ${store.pendingInvite.members === 1 ? 'member' : 'members'}).`}
+          onConfirm={() => void store.acceptInvite()} onClose={store.dismissInvite} />
+      )}
+      {dialog?.kind === 'channelAccess' && g && g.channels.find(c => c.id === dialog.channelId) && (
+        <ChannelAccessDialog api={store.api} channel={g.channels.find(c => c.id === dialog.channelId)!} roles={g.roles ?? []} members={g.members} onClose={() => setDialog(null)} />
+      )}
+      {dialog?.kind === 'addGuild' && <AddServerDialog onCreate={() => setDialog({ kind: 'createGuild' })} onJoin={() => setDialog({ kind: 'joinGuild' })} onDiscover={() => setDialog({ kind: 'discover' })} onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'joinGuild' && <JoinServerDialog example={inviteBase} onJoin={store.joinGuild} onBack={() => setDialog({ kind: 'addGuild' })} onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'discover' && <DiscoverDialog api={store.api} onJoin={store.joinPublicGuild} onOpen={store.selectGuild} onBack={() => setDialog({ kind: 'addGuild' })} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'createChannel' && g && <CreateChannelDialog initialType={dialog.category ? ChannelType.Category : ChannelType.Text} categories={g.channels.filter(c => c.type === ChannelType.Category)} canDirect={can(Permission.ManageDirectChannels)} onSubmit={store.createChannel} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'startRoll' && <StartRollDialog kind={dialog.rollKind} onSubmit={store.startRoll} onClose={() => setDialog(null)} searchItems={store.plugins.some(x => x.items.length > 0) ? store.searchItems : undefined} />}
       {dialog?.kind === 'plugins' && <PluginsDialog store={store} onClose={() => setDialog(null)} />}
@@ -585,6 +599,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           ? [{ kind: 'item', label: menu.direct ? 'Make it a relayed channel' : 'Make it a P2P channel', icon: '⇄', onClick: () => setDialog({ kind: 'channelKind', channelId: menu.channelId, name: menu.name, direct: !menu.direct }) } as MenuEntry] : []),
         ...(can(Permission.ManageChannels) ? [
           { kind: 'sep' } as MenuEntry,
+          { kind: 'item', label: 'Who can see it', icon: '🔒', onClick: () => setDialog({ kind: 'channelAccess', channelId: menu.channelId }) } as MenuEntry,
           { kind: 'item', label: 'Rename channel', icon: '✎', onClick: () => setDialog({ kind: 'renameChannel', channelId: menu.channelId, name: menu.name }) } as MenuEntry,
           { kind: 'item', label: 'Delete channel', icon: '🗑', danger: true, onClick: () => setDialog({ kind: 'deleteChannel', channelId: menu.channelId, name: menu.name }) } as MenuEntry,
         ] : []),
@@ -636,7 +651,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       )}
       {dialog?.kind === 'server' && g && (
         <ServerSettingsDialog api={store.api} channels={g.channels} guild={g.guild} roles={g.roles ?? []} members={g.members} myPermissions={myPerms} meId={me?.id ?? ''}
-          onRename={store.renameGuild} onIcon={store.setGuildIcon} onCreateRole={store.createRole} onUpdateRole={store.updateRole} onDeleteRole={store.deleteRole} onSetMemberRoles={store.setMemberRoles}
+          onRename={store.renameGuild} onIcon={store.setGuildIcon} onListing={store.setGuildListing} onCreateRole={store.createRole} onUpdateRole={store.updateRole} onDeleteRole={store.deleteRole} onSetMemberRoles={store.setMemberRoles}
           onClose={() => setDialog(null)} />
       )}
       {store.directPrompt && (
@@ -663,6 +678,16 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
   const fileRef = useRef<HTMLInputElement>(null)
   const directRef = useRef<HTMLInputElement>(null)
   const channel = store.selectedChannel
+  // Right-click a message: copy it, or delete it if it is yours or you may manage messages here (the server decides).
+  const [messageMenu, setMessageMenu] = useState<{ m: MessageDto; x: number; y: number } | null>(null)
+  const [deleting, setDeleting] = useState<MessageDto | null>(null)
+  const here = store.guilds.find(x => x.guild.id === channel?.guildId)
+  const mayManageMessages = !!here && hasPermission(here.myPermissions, Permission.ManageMessages)
+  // Sending straight from this computer is a P2P thing: offered in a P2P channel and in a conversation with a
+  // friend, to someone who allows P2P. Everywhere else files are attached in the ordinary way.
+  const p2pPlace = !!channel && (channel.directSince != null
+    || (channel.type === ChannelType.DirectMessage && store.dms.some(d => d.channelId === channel.id && store.friends.friends.some(f => f.user.id === d.other.id))))
+  const canSendDirect = store.allowDirect && p2pPlace && store.transferLimits?.enabled !== false
   const party = store.partyChannel
   const noParty = 'Join a voice channel first: rolls go to the people in voice with you'
   const me = store.me()
@@ -683,10 +708,8 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
    */
   // What the ⇄ button can really do here: the size limit is the server's, and only P2P between friends goes past it.
   const limits = store.transferLimits
-  const directSendTitle = 'Send a file from your computer to people who are online. It is not kept on the server.'
-    + (limits && limits.maxRelayedBytes > 0
-      ? ` Up to ${fileSize(limits.maxRelayedBytes)}${limits.maxDirectBytes === 0 || limits.maxDirectBytes > limits.maxRelayedBytes ? '; larger between friends who both allow P2P' : ''}.`
-      : '')
+  const directSendTitle = 'Send a file straight from your computer to friends here who allow P2P. It is not kept on the server'
+    + (limits && limits.maxDirectBytes > 0 ? `. Up to ${fileSize(limits.maxDirectBytes)}.` : ', so it can be any size.')
   const live = store.activeRoll && !store.activeRoll.result ? store.activeRoll.session : null
   const quickRoll = (kind: RollKind) => {
     if (live) {
@@ -764,9 +787,23 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
               fileOffer={m.fileOffer ? <FileOfferView store={store} offer={m.fileOffer} mine={m.authorId === (me?.id ?? '')} /> : undefined}
               author={m.webhookId ? null : store.appearanceOf(m.authorId)} name={m.webhookId ? m.authorName : nameIn(m.authorId, m.authorName)}
               mention={m.authorId !== me?.id && store.mentionsMe(m.content)}
+              onMenu={m.ephemeral ? undefined : e => { e.preventDefault(); setMessageMenu({ m, x: e.clientX, y: e.clientY }) }}
               onUserMenu={m.webhookId ? undefined : e => onUserMenu(e, m.authorId, m.authorName)} onUserCard={m.webhookId ? undefined : e => onUserCard(e, m.authorId, m.authorName)} />)}
       </div>
 
+      {messageMenu && (
+        <ContextMenu x={messageMenu.x} y={messageMenu.y} onClose={() => setMessageMenu(null)} entries={[
+          ...(messageMenu.m.content ? [{ kind: 'item', label: 'Copy text', onClick: () => { void navigator.clipboard.writeText(messageMenu.m.content).catch(() => { /* no clipboard */ }) } } as MenuEntry] : []),
+          ...(messageMenu.m.authorId === me?.id || mayManageMessages
+            ? [{ kind: 'item', label: 'Delete message', danger: true, onClick: () => setDeleting(messageMenu.m) } as MenuEntry]
+            : []),
+          ...(!messageMenu.m.content && messageMenu.m.authorId !== me?.id && !mayManageMessages ? [{ kind: 'label', text: 'Nothing to do with this message' } as MenuEntry] : []),
+        ]} />
+      )}
+      {deleting && (
+        <ConfirmDialog title="Delete this message?" message={deleting.authorId === me?.id ? 'It is removed for everyone and cannot be brought back.' : `This removes ${nameIn(deleting.authorId, deleting.authorName)}'s message for everyone. It cannot be brought back.`}
+          onConfirm={() => void store.deleteMessage(deleting.id)} onClose={() => setDeleting(null)} />
+      )}
       {store.pendingDrops[0] && !store.pendingDrops[0].auto && <DropBanner drop={store.pendingDrops[0]} more={store.pendingDrops.length - 1} channel={store.partyChannel} onAccept={store.acceptDrop} onDismiss={store.dismissDrop} />}
       {store.activeRoll && <RollPanel store={store} meId={me?.id ?? ''} />}
       {store.activeRps && <RpsPanel store={store} meId={me?.id ?? ''} />}
@@ -787,9 +824,9 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
         )}
         <div className="composer">
           <input ref={fileRef} type="file" hidden onChange={async e => { const f = e.target.files?.[0]; if (f) await store.sendFile(f); e.target.value = '' }} />
-          <button title={store.uploading ? `Sending ${store.uploading}…` : 'Send a file'} onClick={() => fileRef.current?.click()} disabled={!channel || !!store.uploading}>{store.uploading ? '⏳' : '📎'}</button>
+          <button title={store.uploading ? `Sending ${store.uploading}…` : 'Send a file'} onClick={() => fileRef.current?.click()} disabled={!channel || !!store.uploading}>{store.uploading ? <LoaderCircle size={17} className="spin" /> : <Paperclip size={17} />}</button>
           <input ref={directRef} type="file" hidden onChange={async e => { const f = e.target.files?.[0]; if (f) await store.offerFile(f); e.target.value = '' }} />
-          <button title={directSendTitle} onClick={() => directRef.current?.click()} disabled={!channel}>⇄</button>
+          {canSendDirect && <button title={directSendTitle} aria-label="Send a file straight from your computer" onClick={() => directRef.current?.click()} disabled={!channel}><ArrowLeftRight size={17} /></button>}
           <textarea
             placeholder={channel ? `Message ${channel.type === ChannelType.DirectMessage ? '@' : '#'}${channel.name}  —  type / for commands` : ''}
             value={text} disabled={!channel} rows={1}
@@ -803,8 +840,10 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
   )
 }
 
-function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu, onUserCard, fileOffer }: {
+function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu, onUserCard, onMenu, fileOffer }: {
   m: MessageDto; color?: string; icon?: string | null; serverUrl: string; mention?: boolean
+  /** Right-click anywhere on the message that is not the author. */
+  onMenu?: (e: React.MouseEvent) => void
   /** Rendered in place of the text when the message is a file offered straight from someone's app. */
   fileOffer?: React.ReactNode
   /** How the author looks, when we know them (null for webhooks and people no longer around). */
@@ -814,7 +853,7 @@ function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu,
   const time = new Date(m.createdAt)
   const timeText = time.toDateString() === new Date().toDateString() ? time.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : time.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
   return (
-    <div className={'message' + (m.ephemeral ? ' ephemeral' : '') + (mention ? ' mention' : '')}>
+    <div className={'message' + (m.ephemeral ? ' ephemeral' : '') + (mention ? ' mention' : '')} onContextMenu={onMenu}>
       <Avatar who={author} name={name} serverUrl={serverUrl} size={32} onClick={onUserCard} onContextMenu={onUserMenu} />
       <div>
         <div className="meta">

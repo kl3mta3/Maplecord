@@ -7,7 +7,9 @@ also runs in a browser.
 
 ### Chat
 
-- Servers with text and voice channels, roles and permissions, and invites
+- Servers with text and voice channels, roles and permissions, and invite links that open in the app or the browser
+- Public servers anyone can find by name or topic and join; private ones are by invite
+- Private channels: only the roles and people you let in can see that they exist
 - Friends and direct messages
 - Files, pictures and videos in chat; pictures and videos show right there
 - Unread counts, per-channel and per-server mute, and folders to group your servers
@@ -89,11 +91,9 @@ npm run dist:win
 Also `dist:mac` and `dist:linux`. Installers end up in `release/`. Set `VITE_SERVER_URL` to your server before
 building.
 
-The Windows build makes two files: `Maplecord-Setup.exe` (the installer) and `Maplecord-Portable.zip` (unzip and run
-`Maplecord.exe`, nothing is installed). Their names carry no version number on purpose: attached to a GitHub release
-under exactly those names, the newest ones are always at
-`https://github.com/<owner>/<repo>/releases/latest/download/Maplecord-Setup.exe` (and `.../Maplecord-Portable.zip`),
-which is where the server's front page sends people.
+The Windows build makes two files: the installer (`.exe`) and a portable copy (`.zip`: unzip and run
+`Maplecord.exe`, nothing is installed). Attach both to a GitHub release. A Maplecord server's front page finds the
+newest release's `.exe` and `.zip` by itself, whatever they are called.
 
 ## Web version
 

@@ -9,6 +9,7 @@ import { appearanceOfMember, appearanceOfUser, shrinkPicture, type Appearance } 
 import { playSound, setQuiet, setSoundPacks, startRing, stopRing, type SoundPack } from './sounds'
 import { applyTheme } from './theme'
 import { VoiceEngine, type IcePolicy } from './voice'
+import { inviteCodeFrom, inviteIsForAnotherServer, takeRememberedInvite } from './invites'
 import { VoiceHub } from './voiceHub'
 import { TransferEngine, fileSource, rememberedSource, openSink, type TransferView } from './transfer'
 import { StreamEngine, applyHint, canShareSound, defaultQuality, qualityChoices, soundConstraints, videoConstraints, type StreamKind, type StreamQuality } from './stream'
@@ -532,16 +533,20 @@ export function useMaplecord() {
       if (now !== cur.directSince) { dropForKindChange(now); return }
       void joinVoiceRef.current(cur.channelId, true)
     }
-    voiceHub.onClosed = () => {
+    const dropVoice = () => {
       if (callRef.current) setCall(null)
-      if (!voiceRef.current) return
+      if (!voiceRef.current) return false
       void Promise.resolve(voiceEngine.leave()).catch(() => { /* nothing to stop */ })
       streamEngine.leaveAll()
       setViewerCounts({})
       voiceRef.current = null
       setVoice(null); setIsSpeaking(false)
+      return true
     }
+    voiceHub.onClosed = () => { dropVoice() }
     await voiceHub.connect({
+      // An account is in voice from one place at a time: it has just joined from another app or device.
+      VoiceMoved: () => { if (dropVoice()) setError('Voice moved to another app or device you joined from.') },
       // These only arrive for the voice channel we are in, and never for ourselves: knock when someone joins, door when they leave.
       ParticipantJoined: (c, p) => {
         const cur = voiceRef.current
@@ -853,22 +858,80 @@ export function useMaplecord() {
   }), [api, selectGuild])
 
   const joinGuild = useCallback(async (code: string) => run(async () => {
-    const g = await api.joinInvite(code)
+    // A whole invite link works as well as the code in it.
+    const g = await api.joinInvite(inviteCodeFrom(code) ?? code)
     const state: GuildState = { ...g, unread: 0, channelUnread: {} }
     setGuilds(gs => [...gs.filter(x => x.guild.id !== g.guild.id), state])
     guildsRef.current = [...guildsRef.current.filter(x => x.guild.id !== g.guild.id), state]
     selectGuild(g.guild.id)
   }), [api, selectGuild])
 
+  /** Joins a public server straight from the list of them. Throws what went wrong, for that list to show. */
+  const joinPublicGuild = useCallback(async (guildId: string) => {
+    const g = await api.joinPublic(guildId)
+    const state: GuildState = { ...g, unread: 0, channelUnread: {} }
+    setGuilds(gs => [...gs.filter(x => x.guild.id !== g.guild.id), state])
+    guildsRef.current = [...guildsRef.current.filter(x => x.guild.id !== g.guild.id), state]
+    selectGuild(g.guild.id)
+  }, [api, selectGuild])
+
+  const setGuildListing = useCallback(async (patch: { isPublic: boolean; description: string; topics: string[] }) => {
+    const g = selected.current.guild
+    if (g) await run(async () => { const guild = await api.updateGuildListing(g, patch); patchGuild(g, x => ({ ...x, guild })) })
+  }, [api, patchGuild])
+
+  /** Yours, or anyone's where you may manage messages; the server decides. */
+  const deleteMessage = useCallback(async (messageId: string) => { await run(() => hub.deleteMessage(messageId)) }, [hub])
+
   const createInvite = useCallback(async (guildId?: string) => {
     const g = guildId ?? selected.current.guild
     if (!g) return
     await run(async () => {
       const invite = await api.createInvite(g)
-      try { await navigator.clipboard.writeText(invite.code) } catch { /* no clipboard */ }
-      setError(`Invite code ${invite.code} copied to clipboard.`)
+      // A link to click where the server gives them out; the bare code otherwise.
+      const meta = await api.meta(settingsRef.current.serverUrl)
+      const link = meta?.inviteBase ? meta.inviteBase + invite.code : null
+      try { await navigator.clipboard.writeText(link ?? invite.code) } catch { /* no clipboard */ }
+      setError(link ? `Invite link copied: ${link}` : `Invite code ${invite.code} copied to clipboard.`)
     })
   }, [api])
+
+  // ---- Invite links (see invites.ts) -------------------------------------------
+  /** A server someone has followed an invite link to, waiting for their yes. */
+  const [pendingInvite, setPendingInvite] = useState<{ code: string; name: string; members: number } | null>(null)
+
+  /** Follows an invite link: straight to the server when already a member, otherwise it asks first. */
+  const openInvite = useCallback(async (link: string) => {
+    if (inviteIsForAnotherServer(link, settingsRef.current.serverUrl)) { setError('That invite is for a different Maplecord server than the one this app is connected to.'); return }
+    const code = inviteCodeFrom(link)
+    if (!code) { setError('That is not an invite link.'); return }
+    try {
+      const preview = await api.invitePreview(code)
+      if (guildsRef.current.some(x => x.guild.id === preview.guild.id)) { selectGuild(preview.guild.id); return }
+      setPendingInvite({ code, name: preview.guild.name, members: preview.memberCount })
+    } catch (e) {
+      setError(e instanceof ApiError && e.status === 404 ? 'That invite is no longer valid.' : e instanceof Error ? e.message : String(e))
+    }
+  }, [api, selectGuild])
+
+  const acceptInvite = useCallback(async () => {
+    const invite = pendingInvite
+    setPendingInvite(null)
+    if (invite) await joinGuild(invite.code)
+  }, [joinGuild, pendingInvite])
+
+  // Once connected: the invite the browser version was opened with, the one the desktop app was started by, and any
+  // link clicked while the desktop app is running (it is told there is one, and takes it).
+  useEffect(() => {
+    if (!ready) return
+    const remembered = takeRememberedInvite()
+    if (remembered) void openInvite(remembered)
+    const desktop = bridge()
+    if (!desktop) return
+    const take = () => void desktop.takeInviteLink().then(link => { if (link) void openInvite(link) })
+    take()
+    return desktop.onInviteLink(take)
+  }, [ready, openInvite])
 
   const createChannel = useCallback(async (name: string, type: number, parentId: string | null, direct = false) => {
     const g = selected.current.guild
@@ -1640,7 +1703,7 @@ export function useMaplecord() {
     soundPacks, reloadSoundPacks, openSoundsFolder,
     startRoll, quickRoll, roll, voteEnd, dismissRoll, coinFlip, invokeCommand,
     activeRps, startRps, rpsPick, rpsThrow, dismissRps,
-    createGuild, joinGuild, createInvite, createChannel, leaveGuild, kickMember, banMember, signOut,
+    createGuild, joinGuild, joinPublicGuild, setGuildListing, deleteMessage, createInvite, pendingInvite, acceptInvite, dismissInvite: () => setPendingInvite(null), createChannel, leaveGuild, kickMember, banMember, signOut,
     sharing, shareQuality: streamEngine.quality, localStream: streamEngine.localStream, shareViewers: streamEngine.viewerCounts(), watching: streamEngine.watching(),
     streamOf: (streamer: string) => streamEngine.streamOf(streamer), viewerCounts, streamRules, loadStreamRules,
     startShare, stopShare, watchStream, unwatchStream, setStreamLimit: (streamer: string, kbps: number) => streamEngine.requestLimit(streamer, kbps),

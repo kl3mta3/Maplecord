@@ -2,6 +2,7 @@ import { HubConnection, HubConnectionBuilder, HubConnectionState, LogLevel } fro
 import type { CallDto, VoiceParticipantDto, VoiceSignalDto } from './types'
 
 export interface VoiceEvents {
+  VoiceMoved: () => void
   ParticipantJoined: (channelId: string, p: VoiceParticipantDto) => void
   ParticipantLeft: (channelId: string, userId: string, connectionId: string) => void
   ParticipantUpdated: (channelId: string, p: VoiceParticipantDto) => void

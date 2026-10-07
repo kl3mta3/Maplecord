@@ -287,6 +287,32 @@ ipcMain.handle('offer-forget', (_event, offerId: string) => offered.forget(offer
 ipcMain.handle('open-external', (_event, url: string) => { if (/^https?:/.test(url)) shell.openExternal(url) })
 
 // Global roll hotkeys work while a game has focus; the renderer decides what they mean for the active roll.
+// ---- Invite links ---------------------------------------------------------------
+// The installed app answers maplecord://invite/CODE links (a server's invite page has an "Open in the app" button).
+// Windows hands the link to a new copy of the app as an argument, so only one copy runs, and a second one passes
+// what it was given to the first and leaves. Only the installed app does this, never a development run.
+const INVITE_LINK = 'maplecord://invite/'
+const inviteLinkIn = (args: string[]) => args.find(a => a.toLowerCase().startsWith(INVITE_LINK)) ?? null
+/** The link the app was started or woken by, kept until the window takes it. */
+let waitingInviteLink: string | null = inviteLinkIn(process.argv)
+
+function followInviteLink(link: string | null) {
+  if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus() }
+  if (!link) return
+  waitingInviteLink = link
+  win?.webContents.send('invite-link')
+}
+
+const onlyCopy = !app.isPackaged || app.requestSingleInstanceLock()
+if (!onlyCopy) app.quit()
+else if (app.isPackaged) {
+  app.setAsDefaultProtocolClient('maplecord')
+  app.on('second-instance', (_event, argv) => followInviteLink(inviteLinkIn(argv)))
+}
+// macOS hands links over this way instead.
+app.on('open-url', (event, url) => { if (url.toLowerCase().startsWith(INVITE_LINK)) { event.preventDefault(); followInviteLink(url) } })
+ipcMain.handle('take-invite-link', () => { const link = waitingInviteLink; waitingInviteLink = null; return link })
+
 function registerHotkeys() {
   const send = (key: string) => () => win?.webContents.send('hotkey', key)
   globalShortcut.register('Control+Alt+R', send('primary'))
@@ -295,6 +321,7 @@ function registerHotkeys() {
 }
 
 app.whenReady().then(() => {
+  if (!onlyCopy) return
   registerPluginProtocol()
   registerDisplayCapture()
   try { plugins.reload() } catch (e) { console.error('[plugins]', e) }

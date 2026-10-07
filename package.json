@@ -21,7 +21,7 @@
     "lint": "oxlint .",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json",
-    "test": "node electron/plugins.test.ts && node electron/soundPacks.test.ts && node electron/fileCache.test.ts && node electron/saveStreams.test.ts && node electron/offeredFiles.test.ts",
+    "test": "node electron/plugins.test.ts && node electron/soundPacks.test.ts && node electron/fileCache.test.ts && node electron/saveStreams.test.ts && node electron/offeredFiles.test.ts && node src/invites.test.ts",
     "sounds": "node tools/make-sounds.mjs"
   },
   "dependencies": {
@@ -47,6 +47,7 @@
     "@vitejs/plugin-react": "^6.1.2",
     "electron": "^44.5.1",
     "electron-builder": "^26.15.3",
+    "lucide-react": "^1.52.0",
     "oxlint": "^1.87.0",
     "typescript": "~6.0.3",
     "vite": "^8.3.2",
@@ -64,15 +65,23 @@
       "dist-electron/**"
     ],
     "icon": "build/icon.png",
+    "protocols": [
+      {
+        "name": "Maplecord invite",
+        "schemes": [
+          "maplecord"
+        ]
+      }
+    ],
     "win": {
       "target": [
         "nsis",
         "zip"
       ],
-      "artifactName": "Maplecord-Portable.${ext}"
+      "artifactName": "Maplecord-Portable-${version}.${ext}"
     },
     "nsis": {
-      "artifactName": "Maplecord-Setup.${ext}",
+      "artifactName": "Maplecord-Setup-${version}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     },

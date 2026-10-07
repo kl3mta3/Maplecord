@@ -7,8 +7,10 @@ import { PENDING_DIRECT, useMaplecord } from './store'
 import { hasValidToken } from './settings'
 import { ApiError } from './api'
 import { CLIENT_PROTOCOL } from './platform'
+import { rememberInviteFromAddress } from './invites'
 
 const isOverlayWindow = new URLSearchParams(window.location.search).get('overlay') === '1'
+if (!isOverlayWindow) rememberInviteFromAddress()
 if (isOverlayWindow) document.documentElement.classList.add('overlay-mode')
 
 export default function App() {

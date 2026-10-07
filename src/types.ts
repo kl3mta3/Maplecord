@@ -24,7 +24,7 @@ export const Permission = {
   StartRolls: 1 << 4, JoinVoice: 1 << 5, Speak: 1 << 6, Stream: 1 << 7,
   CreateInvites: 1 << 8, ManageChannels: 1 << 9, ManageRoles: 1 << 10, ManageWebhooks: 1 << 11,
   ManageGuild: 1 << 12, KickMembers: 1 << 13, BanMembers: 1 << 14, MuteMembers: 1 << 15,
-  ManageDirectChannels: 1 << 16, StreamDirect: 1 << 17,
+  ManageDirectChannels: 1 << 16, StreamDirect: 1 << 17, JoinDirectVoice: 1 << 18,
   Administrator: 1 << 30,
 } as const
 export const hasPermission = (held: number, required: number) =>
@@ -44,9 +44,13 @@ export interface UserProfileDto {
 export type UpdateProfileRequest = Partial<Record<'displayName' | 'bio' | 'pronouns' | 'accentColor' | 'nameFont' | 'nameColor' | 'nameColor2' | 'decoration' | 'effect', string>>
 export interface DecorationDto { id: string; name: string; kind: 'avatar' | 'effect'; url: string }
 /** What a server says about itself before sign-in: the protocol it speaks and the oldest client protocol it accepts. */
-export interface ServerMetaDto { protocol: number; minClientProtocol: number; version: string }
+export interface ServerMetaDto { protocol: number; minClientProtocol: number; version: string; /** What an invite link starts with on this server; the code follows. */ inviteBase?: string | null }
+/** What an invite leads to, shown before joining. */
+export interface InvitePreviewDto { code: string; guild: GuildDto; memberCount: number }
 export interface TokenResponse { accessToken: string; expiresAt: string; user: UserDto }
-export interface GuildDto { id: string; name: string; iconUrl: string | null; ownerId: string; createdAt: string }
+export interface GuildDto { id: string; name: string; iconUrl: string | null; ownerId: string; createdAt: string; /** Listed for anyone to find and join. */ isPublic?: boolean; description?: string | null; topics?: string[] | null }
+/** A public server as the list of them shows it. */
+export interface DiscoverGuildDto { id: string; name: string; iconUrl: string | null; description: string | null; topics: string[]; memberCount: number; joined: boolean }
 export interface ChannelOverrideDto { id: string; channelId: string; roleId: string | null; userId: string | null; allow: number; deny: number }
 /** directSince is set on a P2P voice channel: people in it connect straight to each other and can see each other's IP address. */
 export interface ChannelDto { id: string; guildId: string | null; parentId: string | null; name: string; type: ChannelType; position: number; overrides?: ChannelOverrideDto[] | null; directSince?: string | null }

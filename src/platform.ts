@@ -67,6 +67,10 @@ export interface MaplecordBridge {
   oauthLogin(serverUrl: string, provider: string): Promise<string>
   openExternal(url: string): Promise<void>
   onHotkey(handler: (key: OverlayAction) => void): () => void
+  /** The maplecord:// invite link the app was started or woken by, once; null when there is none waiting. */
+  takeInviteLink(): Promise<string | null>
+  /** Told when such a link arrives while the app is running; take it with takeInviteLink. */
+  onInviteLink(handler: () => void): () => void
   // main window → overlay
   setOverlayState(state: OverlayState | null): void
   setOverlayEnabled(enabled: boolean): void
