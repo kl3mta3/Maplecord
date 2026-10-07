@@ -28,6 +28,8 @@ const EMPTY_FRIENDS: FriendsDto = { friends: [], incoming: [], outgoing: [] }
 const offerScope = (serverUrl: string, userId: string) => `${serverUrl.replace(/\/$/, '').toLowerCase()}|${userId}`
 /** Set (to the account id) while a browser is away signing in again in order to allow P2P. */
 export const PENDING_DIRECT = 'maplecord.pendingDirect'
+/** The same, when the page left to prove who is here so that the account could be deleted. */
+export const PENDING_DELETE = 'maplecord.pendingDelete'
 
 export interface ActiveRps { session: RpsSessionDto; result: RpsResultDto | null; myPick: RpsChoice | null }
 
@@ -194,6 +196,8 @@ export function useMaplecord() {
   useEffect(() => { activeRpsRef.current = activeRps }, [activeRps])
   const [typing, setTyping] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /** Said on the sign-in screen after the account was deleted, in place of whatever the closing connections reported. */
+  const [farewell, setFarewell] = useState<string | null>(null)
   /** Messages from the server's admin, shown until dismissed. */
   const [systemMessages, setSystemMessages] = useState<SystemMessageDto[]>([])
   /** signOut is defined further down; the connection's status handler needs to reach it. */
@@ -348,6 +352,7 @@ export function useMaplecord() {
   }, [api])
 
   const connect = useCallback(async () => {
+    setFarewell(null)
     hub.onStatus = s => {
       setStatus(s === 'connected' ? 'Connected' : s === 'reconnecting' ? 'Reconnecting…' : s === 'connecting' ? 'Connecting…' : 'Disconnected')
       // The server closes the connection of an account it has just suspended. Ask it why we were dropped, and
@@ -1359,10 +1364,11 @@ export function useMaplecord() {
   }, [api])
 
   /**
-   * Sign in again and, if it comes back as the same account, allow P2P. The desktop app and the development sign-in
-   * do it in place. A browser has to leave for the provider and come back; App.tsx finishes the job on return.
+   * Sign in again as the account in use, to prove it is really its owner asking. The desktop app and the development
+   * sign-in do it in place and this resolves true. A browser has to leave for the provider and come back: this
+   * leaves a note of why under `marker`, resolves false, and App.tsx finishes the job on return.
    */
-  const reauthenticateForDirect = useCallback(async (provider: string, devUsername = '') => {
+  const signInAgain = useCallback(async (provider: string, devUsername: string, marker: string): Promise<boolean> => {
     const serverUrl = settingsRef.current.serverUrl
     const mine = settingsRef.current.user?.id ?? ''
     let token: TokenResponse
@@ -1370,16 +1376,34 @@ export function useMaplecord() {
     else {
       const desktop = bridge()
       if (!desktop) {
-        sessionStorage.setItem(PENDING_DIRECT, mine)
+        sessionStorage.setItem(marker, mine)
         window.location.href = `${serverUrl.replace(/\/$/, '')}/auth/login/${provider}?redirect_uri=${encodeURIComponent(window.location.origin + window.location.pathname)}`
-        return
+        return false
       }
       token = await api.exchangeCode(serverUrl, await desktop.oauthLogin(serverUrl, provider))
     }
     if (token.user.id !== mine) throw new Error('That sign-in is a different account. Sign in as the account you are using now.')
     updateSettings({ accessToken: token.accessToken, tokenExpires: token.expiresAt, user: token.user })
-    await setAllowDirect(true)
-  }, [api, setAllowDirect, updateSettings])
+    return true
+  }, [api, updateSettings])
+
+  /** Sign in again and, if it comes back as the same account, allow P2P. */
+  const reauthenticateForDirect = useCallback(async (provider: string, devUsername = '') => {
+    if (await signInAgain(provider, devUsername, PENDING_DIRECT)) await setAllowDirect(true)
+  }, [setAllowDirect, signInAgain])
+
+  // ---- Deleting the account (see DeleteAccount.tsx): explain and sign in again, then confirm
+  const [deleteStep, setDeleteStep] = useState<'explain' | 'confirm' | null>(null)
+  const reauthenticateForDelete = useCallback(async (provider: string, devUsername = '') => {
+    if (await signInAgain(provider, devUsername, PENDING_DELETE)) setDeleteStep('confirm')
+  }, [signInAgain])
+  /** Throws what the server said if it refuses; on success the account is gone and this app is signed out. */
+  const deleteAccount = useCallback(async (username: string) => {
+    await api.deleteAccount(username)
+    setDeleteStep(null)
+    await signOutRef.current().catch(() => { /* the server has already closed everything */ })
+    setFarewell('Your account has been deleted.')
+  }, [api])
 
   const renameChannel = useCallback(async (channelId: string, name: string) => { await run(() => api.renameChannel(channelId, name)) }, [api])
   const deleteChannel = useCallback(async (channelId: string) => { await run(() => api.deleteChannel(channelId)) }, [api])
@@ -1713,6 +1737,7 @@ export function useMaplecord() {
     voice, isMuted, isSpeaking, joinVoice, leaveVoice, toggleMute,
     call, startCall, answerCall, declineCall, renameChannel, deleteChannel, setChannelMuted,
     preferences, savePreferences, blocked, setBlocked, dndUsers, deafened, toggleDeafen, ownLook, transferLimits,
+    farewell, deleteStep, openDeleteAccount: (step: 'explain' | 'confirm' = 'explain') => setDeleteStep(step), closeDeleteAccount: () => setDeleteStep(null), reauthenticateForDelete, deleteAccount,
     allowDirect, setAllowDirect, reauthenticateForDirect, directPrompt, confirmDirect, dismissDirectPrompt: () => setDirectPrompt(null), setChannelDirect,
     setAudioDevices, me: () => settingsRef.current.user,
     MessageKind,

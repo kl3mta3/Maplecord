@@ -59,6 +59,8 @@ export function UserSettingsDialog({ store, onOpen, onSignOut, onClose }: {
                 <button onClick={() => onOpen('audio')}>Voice settings</button>
               </div>
               <div className="muted">You sign in with Google or GitHub; Maplecord has no password of yours to change.</div>
+              <h4>Leaving</h4>
+              <div className="row"><button className="danger" onClick={() => { onClose(); store.openDeleteAccount() }}>Delete account…</button></div>
             </>
           )}
 

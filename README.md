@@ -3,6 +3,9 @@
 Chat, voice and loot rolling for game groups. This is the client: an Electron app for Windows, macOS and Linux that
 also runs in a browser.
 
+**No ID verification. No face scans. No password database.** We don’t store your password because we never ask for
+one.
+
 ## Features
 
 ### Chat
@@ -79,8 +82,6 @@ you connect to that way can, with the know how, find your IP address**.
 - **Files of any size** between friends who both allow P2P, straight from one computer to the other (the ⇄ button).
 - **Higher stream quality.** A server can allow more in P2P channels and calls, 1080p at 60 for example.
 
-Whoever runs the server sets the P2P limits (stream quality, file size) and can switch P2P off for everyone.
-
 ## Development
 
 Node 22.18 or newer.
@@ -136,7 +137,7 @@ opens: an installed copy runs the new installer silently, a portable copy unpack
 Then it starts again.
 
 An update is only ever taken from the releases of the repository named in `package.json` (`repository`). If
-anything goes wrong the app opens as it was and says so, and it does not try the same version again for a few hours.
+anything goes wrong the app opens as it was and says so, and it does not try the same version again for a week.
 What it did is written to `update.log` in the app's data folder.
 
 ## Web version
@@ -171,6 +172,34 @@ roll  win  lose  you100  they100  one  sixtyNine  emo  join  leave
 as `.wav`, `.mp3` or `.ogg`. Missing ones fall back to the default.
 
 ## Privacy
+
+### What we keep, and why
+
+Maplecord is free and runs on a small server with limited storage. We are more interested in letting go of your data
+than holding on to it.
+
+- **Your email address,** which Google or GitHub hands over when you sign in. It is only for account notices and
+  support, and nobody else is shown it.
+- **That you signed in with Google or GitHub.** They know you use Maplecord because you chose them to sign in with.
+  They give the server your name, picture and email, never your password.
+- **Your profile, friends, servers, settings, and the messages and files you post.** These are the things you and
+  the people you talk to will ask for again, so they are kept: for every device you use, and for anyone who was
+  offline when something was sent. They travel encrypted. Uploaded files are cleared out after 30 days.
+
+What we never have: your password, your ID, or your face.
+
+Leaving: you can delete your account yourself, in Settings. Your profile, your sign-in, your friends and the servers
+you own go with it. What you wrote in other people's servers stays, shown as written by "Deleted user".
+
+One thing we cannot undo: anything removed from the server can still exist in any app that had already seen or
+downloaded it.
+
+What is never kept: voice, video, screen sharing and files sent straight between people. They are encrypted from one
+app to the other; they do not pass through the server, and the relay that carries them cannot hear or see them.
+
+No ads. No trackers. The app loads nothing from anyone but the Maplecord server.
+
+### In the app
 
 - Plugin log watching is off until you turn it on, and only reads the file the plugin names. The log contents stay
   on your machine.

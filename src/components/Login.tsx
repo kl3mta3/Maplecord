@@ -83,7 +83,7 @@ export default function Login({ store, onSignedIn }: { store: Store; onSignedIn:
           </>
         )}
 
-        {(status || store.error) && <div className="muted" style={{ marginTop: 8 }}>{status || store.error}</div>}
+        {(status || store.farewell || store.error) && <div className="muted" style={{ marginTop: 8 }}>{status || store.farewell || store.error}</div>}
         <button className="subtle" style={{ alignSelf: 'flex-end', fontSize: 10, marginTop: 8 }} onClick={() => setShowServer(s => !s)} title="Connect to a self-hosted server">Advanced</button>
       </div>
     </div>

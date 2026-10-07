@@ -17,13 +17,13 @@ import { fileFor, isNewer, trustedUrl, type LatestRelease, type ReleaseFile } fr
  *   the app to close, then starts it again.
  *
  * Anything that goes wrong leaves the app as it was and opens it as usual. A version that was tried and did not
- * take is not tried again for a few hours, so a bad release cannot trap the app in a loop.
+ * take is not tried again for a week, so a bad or mislabelled release cannot trap the app in a loop.
  *
  * Windows only, and only for the built app: a development run never updates.
  */
 export interface UpdateNotice { version: string; reason: string }
 
-const RETRY_AFTER_MS = 6 * 60 * 60 * 1000
+const RETRY_AFTER_MS = 7 * 24 * 60 * 60 * 1000
 const CHECK_TIMEOUT_MS = 4000
 /** Set to stop just short of replacing anything: the file is downloaded and checked, and what would run is logged. */
 const DRY_RUN = !!process.env.MAPLECORD_UPDATE_DRY_RUN
@@ -165,11 +165,18 @@ export async function updateAtStartup(options: { server: string; repo: string; l
     const file = fileFor(latest, installed)
     if (!file || !trustedUrl(file.url, options.repo)) { log('the release has no file this copy can use'); return stay({ version: latest.version, reason: 'no file' }) }
 
-    // Tried already, and still the old version: leave it for now rather than try at every start.
+    // Put in place already, and this is still the old version: either it did not take, or the release is labelled
+    // with a version its own files do not carry. Trying again at every start would reinstall the same thing over and
+    // over, so it is left for a week, and mentioned once.
     const statePath = path.join(app.getPath('userData'), 'update.json')
     try {
-      const state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as { attempted?: string; at?: number }
-      if (state.attempted === latest.version && Date.now() - (state.at ?? 0) < RETRY_AFTER_MS) { log('already tried this version recently'); return stay({ version: latest.version, reason: 'tried' }) }
+      const state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as { attempted?: string; at?: number; told?: boolean }
+      if (state.attempted === latest.version && Date.now() - (state.at ?? 0) < RETRY_AFTER_MS) {
+        log('this version was put in place before and did not change what this app is; leaving it')
+        if (state.told) return stay()
+        fs.writeFileSync(statePath, JSON.stringify({ ...state, told: true }))
+        return stay({ version: latest.version, reason: 'tried' })
+      }
     } catch { /* never tried */ }
 
     if (!installed) {

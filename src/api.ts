@@ -1,5 +1,5 @@
 import type {
-  ApplicationDto, AttachmentDto, ChannelOverrideDto, DiscoverGuildDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto,
+  AccountDeletionDto, ApplicationDto, AttachmentDto, ChannelOverrideDto, DiscoverGuildDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto,
 } from './types'
 
 export class ApiError extends Error {
@@ -101,6 +101,11 @@ export class Api {
   guildApplications(guildId: string) { return this.request<ApplicationDto[]>('GET', `/api/guilds/${guildId}/applications`) }
   addGuildApplication(guildId: string, appId: string) { return this.request<ApplicationDto>('POST', `/api/guilds/${guildId}/applications/${encodeURIComponent(appId)}`) }
   removeGuildApplication(guildId: string, appId: string) { return this.request<void>('DELETE', `/api/guilds/${guildId}/applications/${appId}`) }
+
+  /** What deleting the account would take with it (the servers it owns, its bots). */
+  deletionPreview() { return this.request<AccountDeletionDto>('GET', '/api/me/deletion') }
+  /** Deletes the signed-in account. Refused (code "reauth") unless this sign-in is only a few minutes old. */
+  deleteAccount(username: string) { return this.request<void>('POST', '/api/me/delete', { username }) }
 
   privacy() { return this.request<PrivacyDto>('GET', '/api/me/privacy') }
   preferences() { return this.request<PreferencesDto>('GET', '/api/me/preferences') }

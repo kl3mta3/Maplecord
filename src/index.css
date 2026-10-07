@@ -636,3 +636,6 @@ button.chip { cursor: pointer; }
 @keyframes recpulse { 50% { opacity: .35; } }
 .soundchip { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; max-width: 360px; }
 .soundchip audio { width: 100%; height: 40px; }
+
+/* A short list inside a dialog (the servers that go with a deleted account). */
+.plainlist { margin: 6px 0 0; padding-left: 20px; }

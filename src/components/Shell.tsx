@@ -39,6 +39,7 @@ import { STATUSES, UserSettingsDialog } from './UserSettings'
 import { ArrowLeftRight, AudioLines, ChevronDown, HeadphoneOff, Headphones, LoaderCircle, Menu, Mic, MicOff, MonitorUp, Paperclip, Phone, PhoneOff, Plus, Settings as SettingsIcon, Signal, Users, Video } from 'lucide-react'
 import { AddServerDialog, DiscoverDialog, JoinServerDialog } from './Servers'
 import { ChannelAccessDialog } from './ChannelAccess'
+import { DeleteAccountDialog } from './DeleteAccount'
 import { VoiceMessageBar } from './VoiceMessage'
 import { canRecordVoiceMessage } from '../voiceMessage'
 import { appleTouch } from '../platform'
@@ -563,6 +564,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       </div>
 
       {dialog?.kind === 'createGuild' && <PromptDialog title="Create a server" label="Server name" onSubmit={store.createGuild} onClose={() => setDialog(null)} />}
+      {store.deleteStep && <DeleteAccountDialog store={store} />}
       {store.pendingInvite && (
         <ConfirmDialog title={`Join ${store.pendingInvite.name}?`}
           message={`You followed an invite to ${store.pendingInvite.name} (${store.pendingInvite.members} ${store.pendingInvite.members === 1 ? 'member' : 'members'}).`}
