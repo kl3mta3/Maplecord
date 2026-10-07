@@ -58,8 +58,8 @@ nothing to unlock.
 
 ## P2P
 
-Everything above works without your app ever connecting to another person's. P2P is extra: it is kept apart from the
-rest and is off until you turn it on.
+Everything above works by only connecting to the Maplecord server and using a relay to communicate. P2P is extra: it is
+kept apart from the rest and is off until you turn it on.
 
 In a P2P connection your app connects straight to the others. That allows more, but it means **the people
 you connect to that way can, with the know how, find your IP address**.
@@ -107,8 +107,33 @@ Also `dist:mac` and `dist:linux`. Installers end up in `release/`. Set `VITE_SER
 building.
 
 The Windows build makes two files: the installer (`.exe`) and a portable copy (`.zip`: unzip and run
-`Maplecord.exe`, nothing is installed). Attach both to a GitHub release. A Maplecord server's front page finds the
-newest release's `.exe` and `.zip` by itself, whatever they are called.
+`Maplecord.exe`, nothing is installed).
+
+### Version and releases
+
+The version is written in one place, `version.txt`. Every build reads it first, so the app, the installer and the
+file names all carry it.
+
+To release:
+
+1. Put the new version in `version.txt` (it has to be higher than the last release).
+2. `npm run dist:win`.
+3. Make a GitHub release whose tag is that version (`0.1.2`, or `v0.1.2`) and attach the `.exe` and the `.zip` from
+   `release/`.
+
+A Maplecord server's front page finds the newest release's `.exe` and `.zip` by itself, whatever they are called.
+
+### Updates
+
+The desktop app updates itself on Windows. When it starts it asks the Maplecord server it was built for
+(`VITE_SERVER_URL`) whether there is a newer release; the server asks GitHub, the app does not. If there is one, the
+app downloads it from that release, checks it against its size and digest, and puts it in place before its window
+opens: an installed copy runs the new installer silently, a portable copy unpacks the new zip over its own folder.
+Then it starts again.
+
+An update is only ever taken from the releases of the repository named in `package.json` (`repository`). If
+anything goes wrong the app opens as it was and says so, and it does not try the same version again for a few hours.
+What it did is written to `update.log` in the app's data folder.
 
 ## Web version
 
