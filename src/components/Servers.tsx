@@ -26,6 +26,38 @@ export function AddServerDialog({ onCreate, onJoin, onDiscover, onClose }: { onC
   )
 }
 
+/**
+ * Making a server: its name, who can join it, and for a private one how its voice and video travel. A public server
+ * is always the standard kind, because P2P is for people who know each other.
+ */
+export function CreateServerDialog({ onCreate, onClose }: { onCreate: (name: string, isPublic: boolean, kind: 'standard' | 'hybrid' | 'p2p') => void; onClose: () => void }) {
+  const [name, setName] = useState('')
+  const [open, setOpen] = useState(false)
+  const [kind, setKind] = useState<'standard' | 'hybrid' | 'p2p'>('standard')
+  const submit = () => { if (name.trim()) { onCreate(name.trim(), open, open ? 'standard' : kind); onClose() } }
+  return (
+    <Dialog title="Create a server" onClose={onClose}>
+      <div className="listing">
+        <div className="muted">Server name</div>
+        <input autoFocus value={name} maxLength={100} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()} aria-label="Server name" />
+        <div className="muted">Who can join</div>
+        <label className="choice"><input type="radio" name="newlisting" checked={!open} onChange={() => setOpen(false)} /><span><b>Private</b> <span className="muted">Only people with an invite</span></span></label>
+        <label className="choice"><input type="radio" name="newlisting" checked={open} onChange={() => setOpen(true)} /><span><b>Public</b> <span className="muted">Listed for everyone to find and join. A public server cannot have P2P channels.</span></span></label>
+        {!open && (
+          <>
+            <div className="muted">Kind of server</div>
+            <label className="choice"><input type="radio" name="newkind" checked={kind === 'standard'} onChange={() => setKind('standard')} /><span><b>Standard</b> <span className="muted">Voice and video go through the relay. Nobody sees anyone's IP address.</span></span></label>
+            <label className="choice"><input type="radio" name="newkind" checked={kind === 'hybrid'} onChange={() => setKind('hybrid')} /><span><b>Hybrid</b> <span className="muted">Text is kept by the server. Voice and video are P2P: people in the voice channel connect straight to each other and can find each other's IP address.</span></span></label>
+            <label className="choice"><input type="radio" name="newkind" checked={kind === 'p2p'} onChange={() => setKind('p2p')} /><span><b>Full P2P</b> <span className="muted">Text, voice and video are all P2P. What is typed is kept only on people's own devices: the server keeps none of it, so someone who was not connected at the time does not get it.</span></span></label>
+          </>
+        )}
+        <div className="muted">You can add and change channels afterwards.</div>
+      </div>
+      <div className="buttons"><button onClick={onClose}>Cancel</button><button className="accent" disabled={!name.trim()} onClick={submit}>Create</button></div>
+    </Dialog>
+  )
+}
+
 /** Joining with an invite: a link or the bare code, with what they look like. */
 export function JoinServerDialog({ example, onJoin, onBack, onClose }: {
   /** What an invite link starts with on this server, to show a true example. */

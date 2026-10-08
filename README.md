@@ -55,7 +55,7 @@ nothing to unlock.
 - Bigger files: up to 32 MB in chat on the public server, larger than many other platforms allow for free
 - Files of any size between friends who both allow P2P
 - Sharper streams: up to 1080p at 60 frames a second in P2P channels and calls, with sound
-- Animated profile pictures, and animated decorations around them
+- Animated profile pictures, and animated decorations around them: ours in your own colours, or one you made
 - Profile banners, a colour of your own, a bio and pronouns
 - Name fonts and colours, including two-colour names
 - Colour themes for the whole app
@@ -63,12 +63,8 @@ nothing to unlock.
 
 ## P2P
 
-<<<<<<< HEAD
 Everything above works by only connecting to the Maplecord server and using a relay to communicate. P2P is extra: it is
 kept apart from the rest and is off until you turn it on.
-=======
-Everything above works by only connecting to the Maplecord server and using a relay to communicate. P2P is extra: it is kept apart from the rest and is off until you turn it on.
->>>>>>> 68ea4eaa86f26793c44173c56a7dcadde15a91b2
 
 In a P2P connection your app connects straight to the others. That allows more, but it means **the people
 you connect to that way can, with the know how, find your IP address**.
@@ -196,8 +192,9 @@ you own go with it. What you wrote in other people's servers stays, shown as wri
 One thing we cannot undo: anything removed from the server can still exist in any app that had already seen or
 downloaded it.
 
-What is never kept: voice, video, screen sharing and files sent straight between people. They are encrypted from one
-app to the other; they do not pass through the server, and the relay that carries them cannot hear or see them.
+What is never kept: voice, video, screen sharing and files sent straight between people. They do not pass through the
+Maplecord server. Your app encrypts them before they leave it, and the relay or stream server that carries them
+cannot hear or see them.
 
 No ads. No trackers. The app loads nothing from anyone but the Maplecord server.
 

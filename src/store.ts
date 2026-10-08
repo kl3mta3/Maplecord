@@ -9,6 +9,8 @@ import { appearanceOfMember, appearanceOfUser, shrinkPicture, type Appearance } 
 import { playSound, setQuiet, setSoundPacks, startRing, stopRing, type SoundPack } from './sounds'
 import { applyTheme } from './theme'
 import { VoiceConnectError, VoiceEngine, type IcePolicy } from './voice'
+import { type DirectTextPeer, P2PTextEngine, P2PFileUnavailable, describeFile, MAX_P2P_FILE, MAX_P2P_FILES, P2P_PICTURE, type P2PFile, type P2PMessage } from './p2pText'
+import { forgetFile, holds, keep, keepFile, kept, keptBefore, keptFile, keyPrint, knownKeys, loadIdentity, p2pTextSupported, rememberKey, sha256Hex } from './p2pIdentity'
 import { inviteCodeFrom, inviteIsForAnotherServer, takeRememberedInvite } from './invites'
 import { DEFAULT_PUSH_KEY, PUSH_RELEASE_MS, isChoosingPushKey, isPushKey, type PushKey } from './pushToTalk'
 import { VoiceHub } from './voiceHub'
@@ -27,6 +29,11 @@ import {
 const dmChannel = (dm: DmChannelDto): ChannelDto => ({ id: dm.channelId, guildId: null, parentId: null, name: dm.other.displayName || dm.other.username, type: ChannelType.DirectMessage, position: 0 })
 const EMPTY_FRIENDS: FriendsDto = { friends: [], incoming: [], outgoing: [] }
 /** Whose remembered file offers are whose: one account on one server. */
+/**
+ * Where one account's copy of a P2P channel is kept on this device. Another account that signs in here, and can open
+ * the same channel, starts with nothing: it does not read what the first one kept.
+ */
+const p2pBox = (userId: string | undefined, channelId: string) => `${userId ?? ''}|${channelId}`
 const offerScope = (serverUrl: string, userId: string) => `${serverUrl.replace(/\/$/, '').toLowerCase()}|${userId}`
 /** Set (to the account id) while a browser is away signing in again in order to allow P2P. */
 export const PENDING_DIRECT = 'maplecord.pendingDirect'
@@ -85,6 +92,15 @@ const STATS_KEY = 'maplecord.stats'
 const loadStats = (): Stats => { try { return { totalRolls: 0, rollSum: 0, perfect100s: 0, ones: 0, wins: 0, losses: 0, ...JSON.parse(localStorage.getItem(STATS_KEY) ?? '{}') } } catch { return { totalRolls: 0, rollSum: 0, perfect100s: 0, ones: 0, wins: 0, losses: 0 } } }
 
 /** All client state and actions. One instance for the app; components read what they need. */
+/** A P2P message in the shape the chat screen draws every message in. */
+const p2pToMessage = (m: P2PMessage): MessageDto => ({
+  id: m.id, channelId: m.channelId, authorId: m.authorId, authorName: m.authorName, kind: MessageKind.Text, content: m.content,
+  createdAt: m.sentAt, editedAt: null, attachments: [], roll: null, p2pFiles: m.files,
+})
+
+/** A file on a P2P message, as the screen shows it: whether this device has it, is fetching it, or could not find it. */
+export interface P2PFileView { state: 'have' | 'fetching' | 'nobody' | 'relay'; got: number; url?: string }
+
 export function useMaplecord() {
   const settingsRef = useRef<Settings>(loadSettings())
   const [settings, setSettingsState] = useState<Settings>(settingsRef.current)
@@ -104,12 +120,15 @@ export function useMaplecord() {
   const [isMuted, setIsMuted] = useState(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
   /** A P2P voice channel the person tried to join and has to decide about: read its warning, or first allow P2P at all. */
-  const [directPrompt, setDirectPrompt] = useState<{ channelId: string; kind: 'warn' | 'blocked' } | null>(null)
+  const [directPrompt, setDirectPrompt] = useState<{ channelId: string; kind: 'warn' | 'blocked'; text?: boolean } | null>(null)
   /** Whether this account allows P2P connections. Kept on the server; until we have heard from it, the answer is no. */
   const [allowDirect, setAllowDirectState] = useState(false)
   const allowDirectRef = useRef(false)
   const voiceRef = useRef<VoiceState | null>(null)
   const joinVoiceRef = useRef<(channelId: string, acknowledged?: boolean) => Promise<void>>(async () => { /* set below */ })
+  /** Whether a voice channel is being joined right now (one at a time), and how many joins have got as far as being in one. */
+  const voiceJoining = useRef(false)
+  const voiceJoins = useRef(0)
   useEffect(() => { voiceRef.current = voice }, [voice])
   /** The call we are placing, being rung for, or in. Once answered its sound is `voice`, exactly like a voice channel's. */
   const [call, setCallState] = useState<CallState | null>(null)
@@ -150,6 +169,116 @@ export function useMaplecord() {
     wantRelay: () => !allowDirectRef.current,
     changed: setTransfers,
   }))
+  // ---- P2P text (see p2pText.ts). What is typed in a P2P channel goes straight between apps; the history is kept here.
+  /** For the P2P channel being read: whether we are connected to it, and to how many of the people there. */
+  const [p2pText, setP2pText] = useState<{ channelId: string; state: 'ask' | 'blocked' | 'connecting' | 'on' | 'failed'; reachable: number; present: number; note: string } | null>(null)
+  /** Goes up each time the chat connection comes back: the server has forgotten which P2P channels we were connected to. */
+  const [hubEpoch, setHubEpoch] = useState(0)
+  /** This app's key as registered for each account that has used it here. */
+  const p2pKeys = useRef(new Map<string, Promise<{ keyId: string; sign(text: string): Promise<string> }>>())
+  const p2pChanged = useRef<(channelId: string) => void>(() => {})
+  const p2pReceived = useRef<(message: P2PMessage, caughtUp: boolean) => void>(() => {})
+  /** Whose key is whose, as the server answered, for checking messages passed on by other members. */
+  const p2pKeyOwners = useRef(new Map<string, Promise<{ userId: string; publicKey: string } | null>>())
+  /** This app's signing key as registered for the account in use, and how to sign with it. */
+  function p2pIdentityNow() {
+    const userId = settingsRef.current.user?.id ?? ''
+    let mine = p2pKeys.current.get(userId)
+    if (!mine) {
+      mine = (async () => { const id = await loadIdentity(); const key = await api.registerKey(id.publicKey); return { keyId: key.id, sign: id.sign } })()
+      p2pKeys.current.set(userId, mine)
+      mine.catch(() => p2pKeys.current.delete(userId))
+    }
+    return mine
+  }
+  const [p2pEngine] = useState(() => new P2PTextEngine({
+    join: (channelId, keyId, seal) => hub.joinDirectText(channelId, keyId, seal),
+    met: (channelId, peer) => { void p2pMet.current(channelId, peer) },
+    connectsTo: (channelId, peer) => {
+      if (!peer.bot) return true
+      // A bot: only one this person agreed to by name, and never while they keep their own address behind the relay.
+      const s = settingsRef.current
+      const viaRelay = !!s.p2pViaRelay
+      const agreed = !!s.p2pBotsAccepted?.[peer.userId] && !viaRelay
+      if (!agreed) queueMicrotask(() => setP2pBotsWaiting(all => (all.some(x => x.channelId === channelId && x.userId === peer.userId) ? all : [...all, { channelId, userId: peer.userId, username: peer.username, viaRelay }])))
+      return agreed
+    },
+    leave: async channelId => { await hub.leaveDirectText(channelId) },
+    signal: async (channelId, target, kind, payload) => { await hub.directTextSignal(channelId, target, kind, payload) },
+    rtcConfig: async channelId => {
+      const ice = await api.iceServers(channelId)
+      // The person's choice to go through the relay in P2P channels holds for text as it does for voice.
+      const viaRelay = !!settingsRef.current.p2pViaRelay
+      if (viaRelay && !ice.some(s => s.urls.some(u => /^turns?:/i.test(u))))
+        throw new Error('The relay is not available to you in P2P channels on this server. To connect directly, turn off "Join P2P channels through the relay" under Settings, Voice & audio.')
+      return { iceServers: ice.map(s => ({ urls: s.urls, username: s.username ?? undefined, credential: s.credential ?? undefined })), iceTransportPolicy: viaRelay ? 'relay' : 'all' }
+    },
+    identity: () => p2pIdentityNow(),
+    me: () => { const u = settingsRef.current.user; return { id: u?.id ?? '', name: u?.displayName || u?.username || '' } },
+    received: (message, caughtUp) => p2pReceived.current(message, caughtUp),
+    changed: channelId => p2pChanged.current(channelId),
+    held: async channelId => (await kept<{ p2p?: P2PMessage }>(p2pBox(settingsRef.current.user?.id, channelId), 600)).map(e => e.p2p).filter((m): m is P2PMessage => !!m),
+    known: async channelId => (await kept<{ p2p?: P2PMessage; server?: MessageDto; removed?: string }>(p2pBox(settingsRef.current.user?.id, channelId), 5000)).map(e => e.p2p?.id ?? e.server?.id ?? e.removed).filter((id): id is string => !!id),
+    holds: (channelId, ids) => holds(p2pBox(settingsRef.current.user?.id, channelId), ids),
+    heldBefore: async (channelId, before, limit) => (await keptBefore<{ p2p?: P2PMessage }>(p2pBox(settingsRef.current.user?.id, channelId), before, limit)).map(e => e.p2p).filter((m): m is P2PMessage => !!m),
+    broadcasting: channelId => !settingsRef.current.p2pNoBroadcast?.[channelId],
+    keyOwner: keyId => {
+      let owner = p2pKeyOwners.current.get(keyId)
+      if (!owner) {
+        owner = api.keyOwner(keyId).then(k => (k ? { userId: k.userId, publicKey: k.publicKey } : null))
+        p2pKeyOwners.current.set(keyId, owner)
+        // A lookup that failed is tried again next time; an answer (even "unknown") is remembered while the app runs.
+        owner.catch(() => p2pKeyOwners.current.delete(keyId))
+      }
+      return owner
+    },
+    member: (channelId, userId) => {
+      const m = findChannel(channelId)?.guild?.members.find(x => x.userId === userId)
+      return m ? m.nickname || m.displayName || m.username : null
+    },
+    file: (channelId, hash) => keptFile(p2pBox(settingsRef.current.user?.id, channelId), hash),
+    relayedFileLimit: () => p2pRelayedLimit.current,
+  }))
+  /**
+   * People connected from an app this device has not seen them use before. The server says whose key is whose; this
+   * is what makes it have to say the same thing every time. The first app someone is ever seen with is simply
+   * remembered. A different one later is pointed out until the person here says it is fine.
+   */
+  const [p2pNewApps, setP2pNewApps] = useState<{ channelId: string; userId: string; username: string; print: string }[]>([])
+  const p2pMet = useRef<(channelId: string, peer: DirectTextPeer) => Promise<void>>(async () => {})
+  p2pMet.current = async (channelId, peer) => {
+    try {
+      const account = settingsRef.current.user?.id ?? ''
+      const [print, known] = [await keyPrint(peer.publicKey), await knownKeys(account, peer.userId)]
+      if (known.includes(print)) return
+      if (known.length === 0) { await rememberKey(account, peer.userId, print); return }
+      setP2pNewApps(all => (all.some(x => x.userId === peer.userId && x.print === print && x.channelId === channelId) ? all : [...all, { channelId, userId: peer.userId, username: peer.username, print }]))
+    } catch { /* this device's storage would not answer: nothing is said either way */ }
+  }
+  // P2P voice channels and calls seal their set-up messages with the same signing key, and notice new apps the same way.
+  useEffect(() => {
+    voiceHub.identity = async () => {
+      if (!p2pTextSupported()) throw new Error('This browser cannot seal P2P connections, so P2P calls cannot be used in it.')
+      return p2pIdentityNow()
+    }
+    hub.identity = voiceHub.identity
+    voiceHub.onMet = (channelId, who) => {
+      // In a P2P voice channel and in a P2P call between friends alike.
+      if (who.publicKey) void p2pMet.current(channelId, { connectionId: who.connectionId, userId: who.userId, username: who.username, keyId: '', publicKey: who.publicKey, seal: who.seal ?? '' })
+    }
+  }, [voiceHub]) // eslint-disable-line react-hooks/exhaustive-deps
+  const acceptP2pApp = useCallback(async (userId: string, print: string) => {
+    await rememberKey(settingsRef.current.user?.id ?? '', userId, print).catch(() => {})
+    setP2pNewApps(all => all.filter(x => !(x.userId === userId && x.print === print)))
+  }, [])
+  /** Bots in a P2P channel that this app is not connected to: the person has not agreed to them, or joins through the relay. */
+  const [p2pBotsWaiting, setP2pBotsWaiting] = useState<{ channelId: string; userId: string; username: string; viaRelay: boolean }[]>([])
+  /** The most a file may be to cross the relay in a P2P channel: what this server takes as an upload. */
+  const p2pRelayedLimit = useRef(32 * 1024 * 1024)
+  /** The files on the P2P messages on screen, by channel and hash. */
+  const [p2pFiles, setP2pFiles] = useState<Record<string, P2PFileView>>({})
+  const p2pFilesBusy = useRef(new Set<string>())
+
   /** What to do when the voice engine loses its channel for good; set once leaving voice is defined, further down. */
   const voiceLostRef = useRef<(reason: string) => void>(() => {})
   const [voiceEngine] = useState(() => new VoiceEngine(voiceHub, {
@@ -178,6 +307,8 @@ export function useMaplecord() {
     changed: () => setStreamTick(t => t + 1),
     // The shared window was closed, or the browser's own "stop sharing" bar was used.
     captureEnded: () => { void stopShareRef.current() },
+    // The tile stays, saying why; the server is told we are no longer watching, so the place is free for someone else.
+    overLimit: streamer => { void voiceHub.unwatchStream(streamer).catch(() => { /* the stream or the call is already gone */ }) },
     sharePass: kind => voiceHub.shareStream(kind),
     shareLost: reason => { void stopShareRef.current(); setError(reason) },
   }))
@@ -360,12 +491,26 @@ export function useMaplecord() {
 
   const connect = useCallback(async () => {
     setFarewell(null)
+    let wasConnected = false
     hub.onStatus = s => {
+      // Back after a drop: the P2P channel being read has to be connected to afresh, and whatever the server told
+      // its connected apps while this one was away (a channel made or deleted, someone joining or leaving, a role
+      // changed, a friend request) never reached it. So the servers, friends and conversations are asked for again:
+      // once, here, and never on a timer.
+      if (s === 'connected') {
+        if (wasConnected) {
+          setHubEpoch(n => n + 1)
+          void loadGuilds().catch(() => { /* still what we had; the next reconnect asks again */ })
+          void api.friends().then(setFriends).catch(() => {})
+          void api.dms().then(list => { setDms(list); dmsRef.current = list }).catch(() => {})
+        }
+        wasConnected = true
+      }
       setStatus(s === 'connected' ? 'Connected' : s === 'reconnecting' ? 'Reconnecting…' : s === 'connecting' ? 'Connecting…' : 'Disconnected')
       // The server closes the connection of an account it has just suspended. Ask it why we were dropped, and
       // if this sign-in is no longer accepted, say so and go back to the sign-in screen instead of sitting dead.
       // Offers are live on the connection that made them. We still have the files, so back online they are offered again.
-      if (s === 'connected') void resumeOffers()
+      if (s === 'connected') { if (wasConnected && allowDirectRef.current) void hub.presentSeal(); void resumeOffers() }
       if (s === 'disconnected' || s === 'reconnecting') {
         api.me().catch(e => { if (e instanceof ApiError && e.unauthorized) { setError(e.message); void signOutRef.current() } })
       }
@@ -400,6 +545,7 @@ export function useMaplecord() {
     }
     await hub.connect({
       MessageReceived: m => {
+        if (!m.ephemeral && findChannel(m.channelId)?.channel.directSince && findChannel(m.channelId)?.guild) void keep(p2pBox(settingsRef.current.user?.id, m.channelId), m.id, m.createdAt, { server: m }).catch(() => {})
         if (selected.current.channel === m.channelId) {
           setMessages(ms => (ms.some(x => x.id === m.id) ? ms : [...ms, m]))
           if (m.authorId !== me()) { setTyping(null); window.clearTimeout(typingTimer.current) }
@@ -462,6 +608,19 @@ export function useMaplecord() {
         if (u.id === me()) updateSettings({ user: u })
       },
       MessageDeleted: (channelId, messageId) => { if (selected.current.channel === channelId) setMessages(ms => ms.filter(x => x.id !== messageId)) },
+      // Someone was banned and what they wrote was deleted with them: all of it, or what they wrote since a moment.
+      MessagesRemoved: (channelId, authorId, since) => {
+        if (selected.current.channel !== channelId) return
+        const from = since ? Date.parse(since) : null
+        setMessages(ms => ms.filter(x => !(x.authorId === authorId && !x.webhookId && (from === null || Date.parse(x.createdAt) >= from))))
+      },
+      DirectTextPeerJoined: (channelId, peer) => p2pEngine.peerJoined(channelId, peer),
+      DirectTextPeerLeft: (channelId, connectionId) => p2pEngine.peerLeft(channelId, connectionId),
+      DirectTextSignalReceived: (channelId, from, kind, payload) => { void p2pEngine.signal(channelId, from, kind, payload) },
+      DirectTextClosed: (channelId, reason) => {
+        p2pEngine.closed(channelId)
+        setP2pText(p => (p && p.channelId === channelId ? { ...p, state: 'failed', reachable: 0, present: 0, note: reason } : p))
+      },
       Typing: (channelId, userId, username) => {
         if (selected.current.channel !== channelId || userId === me() || isIgnored(userId)) return
         setTyping(`${username} is typing…`)
@@ -543,7 +702,13 @@ export function useMaplecord() {
       // P2P while we were away, rejoining is the person's decision to make again, not ours.
       const now = findChannel(cur.channelId)?.channel.directSince ?? null
       if (now !== cur.directSince) { dropForKindChange(now); return }
-      void joinVoiceRef.current(cur.channelId, true)
+      void (async () => {
+        const before = voiceJoins.current
+        await joinVoiceRef.current(cur.channelId, true)
+        // Still showing the call from before the connection dropped, and no join got in: the server has forgotten
+        // us and we are not in it. Stop showing that we are.
+        if (voiceRef.current && voiceJoins.current === before && !voiceJoining.current && dropVoice()) setError(e => e ?? 'The connection to this voice channel was lost.')
+      })()
     }
     const dropVoice = () => {
       if (callRef.current) setCall(null)
@@ -566,6 +731,7 @@ export function useMaplecord() {
         const cur = voiceRef.current
         if (cur?.channelId === c && !cur.participants.some(x => x.connectionId === p.connectionId))
           playSound('join', settingsRef.current.soundProfile, settingsRef.current.soundEnabled)
+        voiceEngine.setPeerSilenced(p.connectionId, !!p.silenced)
         setVoice(v => (v && v.channelId === c && !v.participants.some(x => x.connectionId === p.connectionId)
           ? { ...v, participants: [...v.participants, { ...p, state: 'connecting', speaking: false }] } : v))
       },
@@ -581,8 +747,11 @@ export function useMaplecord() {
       ParticipantUpdated: (c, p) => {
         // They stopped sharing: whatever we were watching of theirs is over.
         if (!p.stream) streamEngine.unwatch(p.connectionId)
+        // Whether they can be heard: ourselves (our app stops sending) or someone else (our app stops playing them).
+        if (p.connectionId === voiceHub.connectionId) voiceEngine.setSilenced(!!p.silenced)
+        else voiceEngine.setPeerSilenced(p.connectionId, !!p.silenced)
         setVoice(v => (v && v.channelId === c
-          ? { ...v, participants: v.participants.map(x => (x.connectionId === p.connectionId ? { ...x, muted: p.muted, stream: p.stream ?? null } : x)) } : v))
+          ? { ...v, participants: v.participants.map(x => (x.connectionId === p.connectionId ? { ...x, muted: p.muted, stream: p.stream ?? null, silenced: !!p.silenced } : x)) } : v))
       },
       SignalReceived: (_c, s) => { void voiceEngine.handleSignal(s) },
       CallIncoming: c => {
@@ -619,10 +788,15 @@ export function useMaplecord() {
     const list = await loadGuilds()
     const [fr, dmList, decos] = await Promise.all([api.friends().catch(() => EMPTY_FRIENDS), api.dms().catch(() => [] as DmChannelDto[]), api.decorations().catch(() => [] as DecorationDto[])])
     setFriends(fr); setDms(dmList); dmsRef.current = dmList; setDecorations(decos)
-    void api.privacy().then(p => { allowDirectRef.current = p.allowDirect; setAllowDirectState(p.allowDirect) }).catch(() => { /* stays "no" */ })
+    void api.privacy().then(p => {
+      allowDirectRef.current = p.allowDirect; setAllowDirectState(p.allowDirect)
+      // Someone who allows P2P says which key their app seals with, so a file between friends can go P2P with its set-up messages sealed.
+      if (p.allowDirect) void hub.presentSeal()
+    }).catch(() => { /* stays "no" */ })
     void api.preferences().then(applyPreferences).catch(() => { /* shown as online */ })
     void api.blocks().then(setBlockedList).catch(() => { /* none shown */ })
     void api.transferSettings().then(setTransferLimits).catch(() => { /* the tooltip says less */ })
+    void api.uploadSettings().then(rules => { p2pRelayedLimit.current = rules.maxBytes }).catch(() => { /* the usual limit is assumed */ })
     const self = settingsRef.current.user
     if (self) void api.profile(self.id).then(p => setOwnLook({ accentColor: p.accentColor, bannerUrl: p.bannerUrl })).catch(() => { /* plain background */ })
     setDndUsers(new Set([
@@ -693,6 +867,11 @@ export function useMaplecord() {
   const removeFriend = useCallback(async (userId: string) => run(() => api.removeFriend(userId)), [api])
   const searchUsers = useCallback((q: string) => api.searchUsers(q), [api])
 
+  // Pictures from P2P messages are shown through addresses made on this device. They are given back when the channel is left.
+  useEffect(() => () => {
+    setP2pFiles(all => { for (const view of Object.values(all)) if (view.url) URL.revokeObjectURL(view.url); return {} })
+  }, [selectedChannelId])
+
   // Load history + active roll + commands when the channel changes.
   useEffect(() => {
     setMessages([]); setTyping(null); setCanLoadOlder(false)
@@ -702,6 +881,18 @@ export function useMaplecord() {
       try {
         const page = await api.messages(selectedChannelId)
         if (cancelled) return
+        const opened = findChannel(selectedChannelId)
+        if (opened?.guild && opened.channel.directSince) {
+          // A P2P channel: the server has nothing of it. What was said is what this device kept.
+          const mine = p2pTextSupported() ? await kept<{ p2p?: P2PMessage; server?: MessageDto }>(p2pBox(settingsRef.current.user?.id, selectedChannelId)).catch(() => []) : []
+          if (cancelled) return
+          const local = mine.map(e => (e.p2p ? p2pToMessage(e.p2p) : e.server)).filter((m): m is MessageDto => !!m)
+          const all = new Map([...page, ...local].map(m => [m.id, m]))
+          setMessages([...all.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt)))
+          // There may be more further back: on this device, or with the people connected.
+          setCanLoadOlder(all.size > 0)
+          return
+        }
         setMessages(page.slice().reverse())
         setCanLoadOlder(page.length >= 50)
         if (!inParty(selectedChannelId)) return
@@ -713,6 +904,30 @@ export function useMaplecord() {
     })()
     return () => { cancelled = true }
   }, [api, hub, onRollStarted, selectedChannelId])
+
+  // Back after a drop (see hubEpoch): what was said in the channel on screen while we were away is fetched and put
+  // in place. Nothing shown is cleared, and a P2P channel is left alone: the server has none of it, and the apps of
+  // the people there fill each other in.
+  useEffect(() => {
+    if (hubEpoch === 0) return
+    const channelId = selected.current.channel
+    const reading = channelId ? findChannel(channelId) : null
+    if (!channelId || (reading?.guild && reading.channel.directSince)) return
+    let cancelled = false
+    api.messages(channelId).then(page => {
+      if (cancelled || selected.current.channel !== channelId) return
+      setMessages(shown => {
+        const have = new Set(shown.map(m => m.id))
+        const missed = page.filter(m => !have.has(m.id))
+        if (missed.length === 0) return shown
+        // More was said than one page holds: there is a gap between what was on screen and now, so the newest page
+        // replaces it and the rest is there to scroll back to.
+        if (missed.length === page.length && shown.length > 0) { setCanLoadOlder(page.length >= 50); return page.slice().reverse() }
+        return [...shown, ...missed].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      })
+    }).catch(() => { /* what is on screen stays */ })
+    return () => { cancelled = true }
+  }, [api, hubEpoch])
 
   useEffect(() => {
     if (!selectedGuildId) { setCommands([]); return }
@@ -732,8 +947,101 @@ export function useMaplecord() {
   const sendMessage = useCallback(async (text: string, attachmentIds: string[] | null = null) => {
     const channelId = selected.current.channel
     if (!channelId || (!text.trim() && !attachmentIds?.length)) return
+    const sendingIn = findChannel(channelId)
+    if (sendingIn?.guild && sendingIn.channel.directSince) {
+      // A P2P channel: signed here and sent straight to everyone connected. The server is not involved.
+      if (!text.trim()) return
+      await run(async () => {
+        const message = await p2pEngine.send(channelId, text)
+        await keep(p2pBox(settingsRef.current.user?.id, channelId), message.id, message.sentAt, { p2p: message })
+        if (selected.current.channel === channelId) setMessages(ms => [...ms, p2pToMessage(message)])
+      })
+      return
+    }
     await run(() => hub.sendMessage(channelId, text.trim(), attachmentIds))
   }, [hub])
+
+  /**
+   * Files in a P2P channel. Each is kept on this device (encrypted, like the messages) and described on the message
+   * by name, size, kind and the hash of its contents; other people's apps fetch the contents from ours, or from
+   * anyone else who has them by then. Nothing about them goes to the server.
+   */
+  const sendP2pFiles = useCallback(async (channelId: string, picked: File[], text = '') => {
+    await run(async () => {
+      if (!p2pEngine.isIn(channelId)) throw new Error('You are not connected to this channel.')
+      if (picked.length > MAX_P2P_FILES) throw new Error(`Up to ${MAX_P2P_FILES} files can go with one message.`)
+      for (const f of picked) {
+        if (f.size === 0) throw new Error(`${f.name} is empty.`)
+        if (f.size > MAX_P2P_FILE) throw new Error(`${f.name} is ${(f.size / 1048576).toFixed(1)} MB. The most a file can be in a P2P channel is ${MAX_P2P_FILE / 1048576} MB.`)
+      }
+      const box = p2pBox(settingsRef.current.user?.id, channelId)
+      setUploading(picked[0].name)
+      try {
+        const files: P2PFile[] = []
+        for (const f of picked) {
+          const bytes = new Uint8Array(await f.arrayBuffer())
+          const hash = await sha256Hex(bytes)
+          await keepFile(box, hash, bytes)
+          files.push(describeFile(f.name, f.type, bytes.byteLength, hash))
+        }
+        const message = await p2pEngine.send(channelId, text, files)
+        await keep(box, message.id, message.sentAt, { p2p: message })
+        if (selected.current.channel === channelId) setMessages(ms => [...ms, p2pToMessage(message)])
+      } finally { setUploading(null) }
+    })
+  }, [p2pEngine])
+
+  /**
+   * Makes a file on a P2P message ready to show or save: from this device if it is kept here, otherwise (when
+   * `fetch` says so) from someone connected who has it. Returns its contents, or null if it is not to be had now.
+   */
+  const loadP2pFile = useCallback(async (channelId: string, file: P2PFile, authorId: string, fetch: boolean): Promise<Uint8Array<ArrayBuffer> | null> => {
+    const key = `${channelId}|${file.hash}`
+    if (p2pFilesBusy.current.has(key)) return null
+    p2pFilesBusy.current.add(key)
+    const box = p2pBox(settingsRef.current.user?.id, channelId)
+    const show = (view: P2PFileView) => setP2pFiles(all => {
+      if (all[key]?.url && all[key].url !== view.url) URL.revokeObjectURL(all[key].url!)
+      return { ...all, [key]: view }
+    })
+    const have = (bytes: Uint8Array<ArrayBuffer>) => {
+      // Only a picture gets an address the page can show, and only as the kind of picture it is.
+      show({ state: 'have', got: file.size, url: P2P_PICTURE.test(file.type) ? URL.createObjectURL(new Blob([bytes], { type: file.type })) : undefined })
+      return bytes
+    }
+    try {
+      const mine = await keptFile(box, file.hash).catch(() => null)
+      if (mine) return have(mine)
+      if (!fetch) return null
+      show({ state: 'fetching', got: 0 })
+      let shown = 0
+      const bytes = await p2pEngine.fetchFile(channelId, file, authorId, got => {
+        // Often enough to see it move, not so often that the whole chat is redrawn for every piece.
+        if (got - shown < file.size / 50 && got < file.size) return
+        shown = got
+        show({ state: 'fetching', got })
+      })
+      await keepFile(box, file.hash, bytes).catch(() => { /* shown now; fetched again next time */ })
+      return have(bytes)
+    } catch (e) {
+      show({ state: e instanceof P2PFileUnavailable && e.why === 'relay' ? 'relay' : 'nobody', got: 0 })
+      return null
+    } finally { p2pFilesBusy.current.delete(key) }
+  }, [p2pEngine])
+
+  /** Saves a file from a P2P message where the person chooses, fetching it first if this device does not have it yet. */
+  const saveP2pFile = useCallback(async (channelId: string, file: P2PFile, authorId: string) => {
+    await run(async () => {
+      const bytes = await loadP2pFile(channelId, file, authorId, true)
+      if (!bytes) return
+      const sink = await openSink(file.name, file.size, bridge())
+      if (!sink) return
+      try {
+        for (let at = 0; at < bytes.byteLength; at += 1024 * 1024) await sink.write(bytes.subarray(at, at + 1024 * 1024))
+        await sink.close()
+      } catch (e) { await sink.abort().catch(() => {}); throw e }
+    })
+  }, [loadP2pFile])
 
   /** Keep the file behind an offer ready to send. The desktop app also remembers where it is, for after a restart. */
   const holdOffer = useCallback((offerId: string, file: File) => {
@@ -746,11 +1054,13 @@ export function useMaplecord() {
   const offerFile = useCallback(async (file: File) => {
     const channelId = selected.current.channel
     if (!channelId) return
+    // In a P2P channel every file already goes straight between apps.
+    if (findChannel(channelId)?.guild && findChannel(channelId)?.channel.directSince) { await sendP2pFiles(channelId, [file]); return }
     await run(async () => {
       const m = await hub.offerFile(channelId, file.name, file.size)
       if (m.fileOffer) holdOffer(m.fileOffer.id, file)
     })
-  }, [hub, holdOffer])
+  }, [hub, holdOffer, sendP2pFiles])
 
   const withdrawFile = useCallback(async (offerId: string) => {
     transferEngine.removeOffer(offerId)
@@ -764,7 +1074,7 @@ export function useMaplecord() {
       const sink = await openSink(offer.fileName, offer.size, bridge())
       if (!sink) return
       transferEngine.receive(offer.id, offer.fileName, offer.size, sink)
-      try { await hub.requestFile(offer.id) }
+      try { await hub.requestFile(offer.id, allowDirectRef.current) }
       catch (e) { transferEngine.cancel(`${offer.id}<`); throw e }
     })
   }, [hub, transferEngine])
@@ -775,6 +1085,8 @@ export function useMaplecord() {
   const sendFile = useCallback(async (file: File, text = '') => {
     const channelId = selected.current.channel
     if (!channelId) return
+    // Not to the server, and not its name or size either: in a P2P channel a file goes between people's apps.
+    if (findChannel(channelId)?.guild && findChannel(channelId)?.channel.directSince) { await sendP2pFiles(channelId, [file], text); return }
     await run(async () => {
       // Ask first, so a file that is too big is refused before it is uploaded rather than after.
       const rules = await api.uploadSettings().catch(() => null)
@@ -794,11 +1106,13 @@ export function useMaplecord() {
       try { const a = await api.upload(channelId, file); await hub.sendMessage(channelId, text, [a.id]) }
       finally { setUploading(null) }
     })
-  }, [api, hub, holdOffer])
+  }, [api, hub, holdOffer, sendP2pFiles])
 
   const notifyTyping = useCallback(() => {
     const channelId = selected.current.channel
     if (!channelId || !hub.connected || Date.now() - lastTypingSent.current < 3000) return
+    // In a P2P channel the server is not told when someone is typing either.
+    if (findChannel(channelId)?.channel.directSince && findChannel(channelId)?.guild) return
     lastTypingSent.current = Date.now()
     void hub.setTyping(channelId)
   }, [hub])
@@ -807,8 +1121,25 @@ export function useMaplecord() {
     const channelId = selected.current.channel
     const oldest = messages[0]
     if (!channelId || !oldest) return
+    const reading = findChannel(channelId)
+    if (reading?.guild && reading.channel.directSince) {
+      // A P2P channel: first what this device kept from further back; when that runs out, the people connected are
+      // asked what they hold from before the oldest message on screen, and it arrives like anything else caught up.
+      await run(async () => {
+        const mine = await keptBefore<{ p2p?: P2PMessage; server?: MessageDto }>(p2pBox(settingsRef.current.user?.id, channelId), oldest.createdAt, 100)
+        const local = mine.map(e => (e.p2p ? p2pToMessage(e.p2p) : e.server)).filter((m): m is MessageDto => !!m)
+        if (local.length > 0) {
+          if (selected.current.channel === channelId) setMessages(ms => { const have = new Set(ms.map(m => m.id)); return [...local.filter(m => !have.has(m.id)), ...ms] })
+          return
+        }
+        // Nothing more here. If someone connected has more, it comes; the button is offered again when it does.
+        setCanLoadOlder(false)
+        if (p2pEngine.askOlder(channelId, oldest.createdAt) === 0) setError('That is everything this device has kept. Nobody else is connected to ask for more.')
+      })
+      return
+    }
     await run(async () => { const page = await api.messages(channelId, oldest.id); setMessages(ms => [...page.slice().reverse(), ...ms]); setCanLoadOlder(page.length >= 50) })
-  }, [api, messages])
+  }, [api, messages, p2pEngine])
 
   const startRoll = useCallback(async (kind: RollKind, item: RollItemDto | null, min = 1, max = 100) => {
     const channelId = requireParty()
@@ -861,11 +1192,13 @@ export function useMaplecord() {
   const invokeCommand = useCallback(async (command: CommandDto, args: Record<string, string>) => {
     const channelId = selected.current.channel
     if (!channelId) return
+    // A bot's command goes through the server, and nothing typed in a P2P channel does.
+    if (findChannel(channelId)?.guild && findChannel(channelId)?.channel.directSince) { setError('Bot commands do not work in a P2P channel: what is typed there does not go to the server.'); return }
     await run(() => hub.invokeCommand(channelId, command.id, args))
   }, [hub])
 
-  const createGuild = useCallback(async (name: string) => run(async () => {
-    const g = await api.createGuild(name)
+  const createGuild = useCallback(async (name: string, isPublic = false, kind: 'standard' | 'hybrid' | 'p2p' = 'standard') => run(async () => {
+    const g = await api.createGuild(name, isPublic, kind)
     setGuilds(gs => [...gs, { ...g, unread: 0, channelUnread: {} }])
     guildsRef.current = [...guildsRef.current, { ...g, unread: 0, channelUnread: {} }]
     selectGuild(g.guild.id)
@@ -925,9 +1258,29 @@ export function useMaplecord() {
   }, [api, patchGuild])
 
   /** Yours, or anyone's where you may manage messages; the server decides. */
-  const deleteMessage = useCallback(async (messageId: string) => { await run(() => hub.deleteMessage(messageId)) }, [hub])
+  const deleteMessage = useCallback(async (messageId: string) => {
+    const channelId = selected.current.channel
+    const deletingIn = channelId ? findChannel(channelId) : null
+    if (channelId && deletingIn?.guild && deletingIn.channel.directSince) {
+      // A P2P channel: there is only this device's copy to remove. Everyone else keeps theirs.
+      // What is kept in its place is only "this one was removed", so that catching up from others does not bring it back.
+      const removing = messages.find(m => m.id === messageId)
+      const removedAt = removing?.createdAt ?? new Date().toISOString()
+      // Its files go from this device with it, unless another message still here carries the same file.
+      for (const file of removing?.p2pFiles ?? []) {
+        if (messages.some(m => m.id !== messageId && m.p2pFiles?.some(f => f.hash === file.hash))) continue
+        void forgetFile(p2pBox(settingsRef.current.user?.id, channelId), file.hash).catch(() => {})
+      }
+      // Written over the message in one step, so there is no moment with neither the message nor the note.
+      await run(async () => { await keep(p2pBox(settingsRef.current.user?.id, channelId), messageId, removedAt, { removed: messageId }); setMessages(ms => ms.filter(x => x.id !== messageId)) })
+      return
+    }
+    await run(() => hub.deleteMessage(messageId))
+  }, [hub, messages])
   /** Takes someone out of the voice channel they are in on a server; the server decides whether we may. */
   const disconnectMember = useCallback(async (channelId: string, userId: string) => { await run(() => voiceHub.disconnectMember(channelId, userId)) }, [voiceHub])
+  /** Mute someone in this server's voice channels, or undo it. Everyone is told by the server. */
+  const setVoiceMuted = useCallback(async (guildId: string, userId: string, muted: boolean) => { await run(() => api.setVoiceMuted(guildId, userId, muted)) }, [api])
 
   /** Makes an invite to one of our servers and sends it to someone as a direct message. */
   const inviteToServer = useCallback(async (guildId: string, userId: string) => {
@@ -1014,7 +1367,7 @@ export function useMaplecord() {
   }, [api])
 
   const kickMember = useCallback(async (m: MemberDto) => { const g = selected.current.guild; if (g) await run(() => api.kick(g, m.userId)) }, [api])
-  const banMember = useCallback(async (m: MemberDto) => { const g = selected.current.guild; if (g) await run(() => api.ban(g, m.userId)) }, [api])
+  const banMember = useCallback(async (m: MemberDto, deleteDays: number | null = null) => { const g = selected.current.guild; if (g) await run(() => api.ban(g, m.userId, deleteDays)) }, [api])
 
   // ---- Server settings --------------------------------------------------------
 
@@ -1234,7 +1587,10 @@ export function useMaplecord() {
       if (!allowDirectRef.current) { setDirectPrompt({ channelId, kind: 'blocked' }); return }
       if (!acknowledged && s.directAcknowledged[channelId] !== directSince) { setDirectPrompt({ channelId, kind: 'warn' }); return }
     }
-    await run(async () => {
+    // One join at a time: a second click while the first is still opening the microphone starts nothing more.
+    if (voiceJoining.current) return
+    voiceJoining.current = true
+    try { await run(async () => {
       // For a relayed channel the server hands out a relay or refuses: there is nothing here to fall back to.
       const ice = await api.iceServers(channelId)
       // In a P2P channel a person's own choice of voice quality comes first: it is their connection, not a relay's.
@@ -1245,7 +1601,7 @@ export function useMaplecord() {
       const viaRelay = !!directSince && !!s.p2pViaRelay
       const policy = voiceEngine.configure(ice, directSince && !viaRelay ? 'direct' : 'relay')
       if (!directSince && policy !== 'relay') throw new Error('No voice relay is available right now, so this channel cannot connect.')
-      if (viaRelay && policy !== 'relay') throw new Error('The relay is not available to you in P2P channels on this server. To join directly, turn off "Join P2P voice channels through the relay" under Settings, Voice & audio.')
+      if (viaRelay && policy !== 'relay') throw new Error('The relay is not available to you in P2P channels on this server. To join directly, turn off "Join P2P channels through the relay" under Settings, Voice & audio.')
       if (voiceRef.current) await leaveVoice()
       voiceEngine.setDevices(s.audioInputDeviceId, s.audioOutputDeviceId)
       // An ordinary channel may answer with a pass: its voice then goes through the stream server, not app to app.
@@ -1257,10 +1613,11 @@ export function useMaplecord() {
         channelId, guildId, directSince, policy, status: '',
         participants: [
           ...others.map(p => ({ ...p, state: 'connecting', speaking: false })),
-          { userId: user.id, username: user.username, connectionId: selfId, muted: isMuted, state: '', speaking: false },
+          { userId: user.id, username: user.username, connectionId: selfId, muted: isMuted, state: '', speaking: false, silenced: voiceHub.selfSilenced },
         ],
       }
       voiceRef.current = joined // before the next render, so a roll that starts right now already counts as ours
+      voiceJoins.current++
       setVoice(joined)
       // A roll or round may already be running in the party we just walked into.
       void (async () => {
@@ -1272,16 +1629,28 @@ export function useMaplecord() {
         } catch { /* not worth an error banner */ }
       })()
       if (isMuted) void voiceHub.setMuted(true)
-      try { await voiceEngine.join(others, answer.pass) }
+      try { await voiceEngine.join(others, answer.pass, voiceHub.selfSilenced) }
       catch (e) {
         // No way in at all is different from no microphone: we are not in the call, and the server is told so.
         if (e instanceof VoiceConnectError) { await leaveVoice(); throw e }
         setVoice(v => (v ? { ...v, status: 'No microphone: ' + (e instanceof Error ? e.message : e) } : v))
       }
-    })
+    }) }
+    finally { voiceJoining.current = false }
   }, [api, hub, isMuted, leaveVoice, onRollStarted, voiceEngine, voiceHub])
 
   useEffect(() => { joinVoiceRef.current = joinVoice }, [joinVoice])
+
+  // The relay's sign-in details run out after a while. While in a call they are fetched again now and then, so a
+  // connection to someone who joins later is made with ones that still work.
+  const voiceChannelNow = voice?.channelId ?? null
+  useEffect(() => {
+    if (!voiceChannelNow) return
+    const timer = window.setInterval(() => {
+      api.iceServers(voiceChannelNow).then(ice => { if (voiceRef.current?.channelId === voiceChannelNow) voiceEngine.reconfigure(ice) }).catch(() => { /* the ones we have are used until the next try */ })
+    }, 20 * 60_000)
+    return () => window.clearInterval(timer)
+  }, [api, voiceChannelNow, voiceEngine])
 
   // ---- Calls with a friend ---------------------------------------------------------
   // A call is voice in the direct-message channel the two share. It is relayed unless the caller asked for a P2P
@@ -1341,7 +1710,7 @@ export function useMaplecord() {
       await run(async () => {
         if (voiceRef.current) await leaveVoice()
         try {
-          await enterCall(c.channelId, c.direct, () => voiceHub.joinCall(c.id, c.direct))
+          await enterCall(c.channelId, c.direct, () => voiceHub.joinCall(c.id, c.direct, c.channelId))
           if (callRef.current?.id === c.id) setCall({ ...c, phase: 'active' })
         } catch (e) {
           if (callRef.current?.id === c.id) setCall(null)
@@ -1398,6 +1767,13 @@ export function useMaplecord() {
     return p
   }, [api, applyOwnProfile])
 
+  /** Stores an animation of our own (around the picture, or over the profile card) and wears it, or with null takes ours away. */
+  const setProfileAnimation = useCallback(async (kind: 'avatar' | 'effect', file: File | null) => {
+    const p = file ? await api.uploadAnimation(kind, file) : await api.deleteAnimation(kind)
+    applyOwnProfile(p)
+    return p
+  }, [api, applyOwnProfile])
+
   /** A name on one server only (null removes it). The server tells everyone, including us, through MemberUpdated. */
   const setNickname = useCallback(async (guildId: string, userId: string, nickname: string | null) => run(async () => {
     const member = await api.setNickname(guildId, userId, nickname)
@@ -1441,7 +1817,8 @@ export function useMaplecord() {
     const since = findChannel(p.channelId)?.channel.directSince
     if (!since) return
     updateSettings({ directAcknowledged: { ...settingsRef.current.directAcknowledged, [p.channelId]: since } })
-    await joinVoice(p.channelId, true)
+    // For a voice channel this is the moment of joining. A text channel connects by itself once the warning is accepted.
+    if (findChannel(p.channelId)?.channel.type === ChannelType.Voice && !p.text) await joinVoice(p.channelId, true)
   }, [directPrompt, joinVoice, updateSettings])
 
   /** Turning P2P off is immediate. Turning it on is refused by the server unless this sign-in is minutes old. */
@@ -1449,7 +1826,9 @@ export function useMaplecord() {
     const p = await api.setPrivacy(on)
     allowDirectRef.current = p.allowDirect
     setAllowDirectState(p.allowDirect)
-  }, [api])
+    // From now on a file between friends may go P2P: say which key this app seals its set-up messages with.
+    if (p.allowDirect) void hub.presentSeal()
+  }, [api, hub])
 
   /**
    * Sign in again as the account in use, to prove it is really its owner asking. The desktop app and the development
@@ -1587,6 +1966,7 @@ export function useMaplecord() {
 
 
   const signOut = useCallback(async () => {
+    await p2pEngine.leaveAll()
     await leaveVoice()
     await voiceHub.disconnect()
     await hub.disconnect()
@@ -1601,6 +1981,135 @@ export function useMaplecord() {
   const selectedGuild = home ? null : guilds.find(g => g.guild.id === selectedGuildId) ?? null
   const selectedDm = home ? dms.find(d => d.channelId === selectedChannelId) ?? null : null
   const selectedChannel = selectedDm ? dmChannel(selectedDm) : selectedGuild?.channels.find(c => c.id === selectedChannelId) ?? null
+
+  // ---- P2P text: connected to the P2P channel being read, for as long as it is being read ------------------------------
+  const p2pChannelId = !selectedDm && selectedChannel?.directSince ? selectedChannel.id : null
+  const p2pSince = p2pChannelId ? selectedChannel?.directSince ?? null : null
+  const p2pAccepted = !!p2pChannelId && settings.directAcknowledged[p2pChannelId] === p2pSince
+  p2pChanged.current = channelId => {
+    if (selected.current.channel !== channelId) return
+    setP2pText(p => (p && p.channelId === channelId && (p.state === 'on' || p.state === 'connecting' || (p.state === 'failed' && p2pEngine.isIn(channelId)))
+      ? p2pEngine.isIn(channelId) ? { ...p, state: 'on', reachable: p2pEngine.reachable(channelId).length, present: p2pEngine.present(channelId) } : { ...p, state: 'connecting', reachable: 0, present: 0 }
+      : p))
+  }
+  p2pReceived.current = (message, caughtUp) => {
+    void keep(p2pBox(settingsRef.current.user?.id, message.channelId), message.id, message.sentAt, { p2p: message }).catch(() => {})
+    if (selected.current.channel === message.channelId) {
+      // Something from further back arrived: there may be more behind it.
+      if (caughtUp) setCanLoadOlder(true)
+      // One that was caught up belongs where it was said, not at the end.
+      setMessages(ms => (ms.some(x => x.id === message.id) ? ms
+        : caughtUp ? [...ms, p2pToMessage(message)].sort((a, b) => a.createdAt.localeCompare(b.createdAt)) : [...ms, p2pToMessage(message)]))
+      return
+    }
+    // A subscribed channel that is not being read: it shows as unread, like any other, unless it is muted.
+    const found = findChannel(message.channelId)
+    if (!found?.guild || settingsRef.current.mutedChannels?.[message.channelId] || isIgnored(message.authorId)) return
+    patchGuild(found.guild.guild.id, g => ({ ...g, unread: g.unread + 1, channelUnread: { ...g.channelUnread, [message.channelId]: (g.channelUnread[message.channelId] ?? 0) + 1 } }))
+  }
+
+  // Which P2P channels this app should be connected to: the one being read, the voice channel we are sitting in
+  // (its chat reaches us whatever is on screen), and every one subscribed to. Subscribing is for the ones we are
+  // not in. All of them only once their warning has been accepted, and only while the account allows P2P.
+  const p2pWanted = !allowDirect || !ready || !p2pTextSupported() ? [] : guilds.flatMap(x => x.channels)
+    .filter(c => c.directSince && settings.directAcknowledged[c.id] === c.directSince && (c.id === p2pChannelId || c.id === voice?.channelId || settings.p2pSubscribed?.[c.id]))
+    .map(c => c.id).sort()
+  const p2pWantedKey = p2pWanted.join(',')
+  useEffect(() => {
+    // After the chat connection came back the server has forgotten us everywhere: start from nothing.
+    p2pEngine.closedAll()
+  }, [hubEpoch, p2pEngine])
+  /** What is wanted right now, for work that finishes later to check against. */
+  const p2pWantedNow = useRef(new Set<string>())
+  /** Channels being connected to right now; and, for those that failed, how many times in a row and the timer for the next try. */
+  const p2pJoining = useRef(new Set<string>())
+  const p2pFailures = useRef(new Map<string, { times: number; timer: number }>())
+  const [p2pRetry, setP2pRetry] = useState(0)
+  useEffect(() => {
+    const wanted = new Set(p2pWantedKey ? p2pWantedKey.split(',') : [])
+    p2pWantedNow.current = wanted
+    for (const channelId of p2pEngine.joined()) if (!wanted.has(channelId)) void p2pEngine.leave(channelId)
+    for (const [channelId, failure] of [...p2pFailures.current]) if (!wanted.has(channelId)) { window.clearTimeout(failure.timer); p2pFailures.current.delete(channelId) }
+    for (const channelId of wanted) {
+      if (p2pEngine.isIn(channelId) || p2pJoining.current.has(channelId)) continue
+      // One that failed waits for its next try, unless it is the channel being looked at: that one is tried now.
+      const failed = p2pFailures.current.get(channelId)
+      if (failed?.timer && channelId !== p2pChannelId) continue
+      window.clearTimeout(failed?.timer)
+      p2pJoining.current.add(channelId)
+      // Who is there is learned afresh on connecting, the bots among them too.
+      setP2pBotsWaiting(all => (all.some(x => x.channelId === channelId) ? all.filter(x => x.channelId !== channelId) : all))
+      p2pEngine.join(channelId).then(
+        () => {
+          p2pJoining.current.delete(channelId)
+          p2pFailures.current.delete(channelId)
+          // No longer wanted by the time it connected (they went on to another channel): let go of it again.
+          if (!p2pWantedNow.current.has(channelId)) { void p2pEngine.leave(channelId); return }
+          p2pChanged.current(channelId)
+        },
+        e => {
+          p2pJoining.current.delete(channelId)
+          setP2pText(p => (p && p.channelId === channelId ? { ...p, state: 'failed', note: e instanceof Error ? e.message : String(e) } : p))
+          if (!p2pWantedNow.current.has(channelId)) return
+          // Tried again by itself: after a quarter of a minute, then less and less often.
+          const times = (p2pFailures.current.get(channelId)?.times ?? 0) + 1
+          const timer = window.setTimeout(() => {
+            const waiting = p2pFailures.current.get(channelId)
+            if (waiting) p2pFailures.current.set(channelId, { ...waiting, timer: 0 })
+            setP2pRetry(n => n + 1)
+          }, Math.min(120_000, 15_000 * 2 ** (times - 1)))
+          p2pFailures.current.set(channelId, { times, timer })
+        })
+    }
+  }, [p2pWantedKey, hubEpoch, p2pEngine, p2pRetry, p2pChannelId])
+  useEffect(() => {
+    const timer = window.setInterval(() => { void p2pEngine.refresh() }, 20 * 60_000)
+    return () => window.clearInterval(timer)
+  }, [p2pEngine])
+  // What the screen says about the channel being read.
+  useEffect(() => {
+    if (!p2pChannelId || !ready) { setP2pText(null); return }
+    const channelId = p2pChannelId
+    const state = (s: 'ask' | 'blocked' | 'connecting' | 'on' | 'failed', note = '') => setP2pText({ channelId, state: s, reachable: 0, present: 0, note })
+    if (!p2pTextSupported()) { state('failed', 'This browser cannot keep or sign P2P messages, so P2P channels cannot be used in it.'); return }
+    if (!allowDirect) { state('blocked'); return }
+    if (!p2pAccepted) { state('ask'); return }
+    if (p2pEngine.isIn(channelId)) setP2pText({ channelId, state: 'on', reachable: p2pEngine.reachable(channelId).length, present: p2pEngine.present(channelId), note: '' })
+    else state('connecting')
+  }, [p2pChannelId, p2pAccepted, allowDirect, ready, hubEpoch, p2pEngine])
+
+  /**
+   * Agree to connect to a P2P bot. It is remembered for that bot everywhere it turns up. The channel is left and
+   * joined again, which is what makes this app the one to offer the bot a connection.
+   */
+  const acceptP2pBot = useCallback(async (channelId: string, userId: string, username: string) => {
+    updateSettings({ p2pBotsAccepted: { ...(settingsRef.current.p2pBotsAccepted ?? {}), [userId]: username } })
+    setP2pBotsWaiting(all => all.filter(x => x.userId !== userId))
+    await p2pEngine.leave(channelId)
+    setP2pRetry(n => n + 1)
+  }, [p2pEngine, updateSettings])
+  const dismissP2pBot = useCallback((channelId: string, userId: string) => setP2pBotsWaiting(all => all.filter(x => !(x.channelId === channelId && x.userId === userId))), [])
+
+  /** Subscribe to a P2P channel (stay connected to it whenever the app is open), or stop. */
+  const setP2pSubscribed = useCallback((channelId: string, on: boolean) => {
+    const all = { ...(settingsRef.current.p2pSubscribed ?? {}) }
+    if (on) all[channelId] = true; else delete all[channelId]
+    updateSettings({ p2pSubscribed: all })
+    // Subscribing to a channel whose warning has not been read yet shows it: nothing connects until it is accepted.
+    const since = findChannel(channelId)?.channel.directSince
+    if (on && since && settingsRef.current.directAcknowledged[channelId] !== since) setDirectPrompt({ channelId, kind: allowDirectRef.current ? 'warn' : 'blocked', text: true })
+  }, [updateSettings])
+  /** Whether this app hands other members the messages they missed in a P2P channel. */
+  const setP2pBroadcast = useCallback((channelId: string, on: boolean) => {
+    const all = { ...(settingsRef.current.p2pNoBroadcast ?? {}) }
+    if (on) delete all[channelId]; else all[channelId] = true
+    updateSettings({ p2pNoBroadcast: all })
+  }, [updateSettings])
+
+  /** Show a P2P text channel's warning (or say why this account cannot connect). Accepting it connects. */
+  const askDirectText = useCallback((channelId: string) => {
+    setDirectPrompt({ channelId, kind: allowDirectRef.current ? 'warn' : 'blocked', text: true })
+  }, [])
   const voiceChannelId = voice?.channelId ?? null
   /** The channel a game started now would go to (see gameChannelId), for labels and for enabling the roll buttons. */
   const partyChannel = useMemo(() => (selectedDm ? dmChannel(selectedDm)
@@ -1851,13 +2360,13 @@ export function useMaplecord() {
     renameGuild, setGuildIcon, createRole, updateRole, deleteRole, setMemberRoles,
     partyChannel, partyLabel,
     setUserPrefs, setGuildPrefs, markGuildRead, mentionsMe,
-    appearanceOf, decorations, loadProfile, saveProfile, setProfilePicture, setNickname,
+    appearanceOf, decorations, loadProfile, saveProfile, setProfilePicture, setProfileAnimation, setNickname,
     plugins, pendingDrops, resolveItem, itemIcon, searchItems, acceptDrop, dismissDrop, simulateDrop,
     setPluginSettings, reloadPlugins, installPlugin, openPluginsFolder, pickPluginLog,
     soundPacks, reloadSoundPacks, openSoundsFolder,
     startRoll, quickRoll, roll, voteEnd, dismissRoll, coinFlip, invokeCommand,
     activeRps, startRps, rpsPick, rpsThrow, dismissRps,
-    createGuild, joinGuild, joinPublicGuild, setGuildListing, deleteMessage, disconnectMember, moveChannel, inviteToServer, openInvite, createInvite, pendingInvite, acceptInvite, dismissInvite: () => setPendingInvite(null), createChannel, leaveGuild, kickMember, banMember, signOut,
+    createGuild, joinGuild, joinPublicGuild, setGuildListing, deleteMessage, disconnectMember, setVoiceMuted, moveChannel, inviteToServer, openInvite, createInvite, pendingInvite, acceptInvite, dismissInvite: () => setPendingInvite(null), createChannel, leaveGuild, kickMember, banMember, signOut,
     sharing, shareQuality: streamEngine.quality, localStream: streamEngine.localStream, shareViewers: streamEngine.viaServer ? { total: viewerCounts[voiceHub.connectionId ?? ''] ?? 0, relayed: 0 } : streamEngine.viewerCounts(), watching: streamEngine.watching(),
     streamOf: (streamer: string) => streamEngine.streamOf(streamer), viewerCounts, streamRules, loadStreamRules,
     startShare, stopShare, watchStream, unwatchStream, setStreamLimit: (streamer: string, kbps: number) => streamEngine.requestLimit(streamer, kbps),
@@ -1865,6 +2374,7 @@ export function useMaplecord() {
     call, startCall, answerCall, declineCall, renameChannel, deleteChannel, deleteGroup, setChannelMuted,
     preferences, savePreferences, blocked, setBlocked, dndUsers, deafened, toggleDeafen, ownLook, transferLimits,
     farewell, deleteStep, openDeleteAccount: (step: 'explain' | 'confirm' = 'explain') => setDeleteStep(step), closeDeleteAccount: () => setDeleteStep(null), reauthenticateForDelete, deleteAccount,
+    p2pText, askDirectText, setP2pSubscribed, setP2pBroadcast, p2pFiles, loadP2pFile, saveP2pFile, p2pNewApps, acceptP2pApp, p2pBotsWaiting, acceptP2pBot, dismissP2pBot,
     allowDirect, setAllowDirect, reauthenticateForDirect, directPrompt, confirmDirect, dismissDirectPrompt: () => setDirectPrompt(null), setChannelDirect,
     setAudioDevices, me: () => settingsRef.current.user,
     MessageKind,

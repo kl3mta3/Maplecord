@@ -191,7 +191,8 @@ export function MyBots({ api }: { api: Api }) {
     setBots(list => ((list ?? []).some(b => b.id === saved.id) ? (list ?? []).map(b => (b.id === saved.id ? { ...saved, token: null, interactionsSecret: null } : b)) : [...(list ?? []), saved]))
     if (saved.token) setFresh({ id: saved.id, token: saved.token, secret: saved.interactionsSecret ?? null })
   }
-  const create = () => run(async () => { keep(await api.createApplication(name.trim())); setName('') })
+  const [direct, setDirect] = useState(false)
+  const create = () => run(async () => { keep(await api.createApplication(name.trim(), direct)); setName(''); setDirect(false) })
   const patch = (id: string, change: { name?: string; description?: string; interactionsUrl?: string }) => run(async () => keep(await api.updateApplication(id, change)))
   const renew = (id: string) => run(async () => keep(await api.regenerateApplication(id)))
   const remove = (id: string) => run(async () => {
@@ -211,6 +212,12 @@ export function MyBots({ api }: { api: Api }) {
         <input className="grow" placeholder="Name for a new bot" value={name} maxLength={80} onChange={e => setName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && name.trim().length >= 2) void create() }} />
         <button className="accent" disabled={name.trim().length < 2} onClick={() => void create()}>Create bot</button>
       </div>
+      <label className="row"><input type="checkbox" checked={direct} onChange={e => setDirect(e.target.checked)} /> <span>Make it a P2P bot</span></label>
+      <div className="muted">
+        {direct
+          ? 'A P2P bot connects straight to people\'s apps in the P2P channels it is let into, one channel at a time, in private servers only. It has no commands, cannot read or post in ordinary channels, and each person is asked before their app connects to it. This cannot be changed after the bot is made.'
+          : 'An ordinary bot talks to the server: slash commands, messages in ordinary channels. It is never in a P2P channel. This cannot be changed after the bot is made.'}
+      </div>
 
       {bots === null && !problem && <div className="muted">Loading…</div>}
       {bots?.length === 0 && <div className="muted">You have not made any bots.</div>}
@@ -221,15 +228,18 @@ export function MyBots({ api }: { api: Api }) {
               onBlur={e => { const next = e.target.value.trim(); if (next.length >= 2 && next !== b.name) void patch(b.id, { name: next }); else e.target.value = b.name }}
               onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }} />
             <span className="muted">@{b.botUsername}</span>
+            {b.direct && <span className="p2ptag">P2P bot</span>}
             <ConfirmButton label="New token" sure="Replace the token?" onConfirm={() => void renew(b.id)} />
             <ConfirmButton label="Delete" sure="Delete this bot?" onConfirm={() => void remove(b.id)} />
           </div>
           <Secret label="Bot ID" value={b.id} />
-          <div className="row">
-            <input className="grow" defaultValue={b.interactionsUrl ?? ''} placeholder="Web address to send its slash commands to (optional)" aria-label="Slash command address"
-              onBlur={e => { const next = e.target.value.trim(); if (next !== (b.interactionsUrl ?? '')) void patch(b.id, { interactionsUrl: next }) }}
-              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }} />
-          </div>
+          {!b.direct && (
+            <div className="row">
+              <input className="grow" defaultValue={b.interactionsUrl ?? ''} placeholder="Web address to send its slash commands to (optional)" aria-label="Slash command address"
+                onBlur={e => { const next = e.target.value.trim(); if (next !== (b.interactionsUrl ?? '')) void patch(b.id, { interactionsUrl: next }) }}
+                onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }} />
+            </div>
+          )}
           {fresh?.id === b.id && (
             <>
               <Secret label="Token" value={fresh.token} />

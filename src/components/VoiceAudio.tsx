@@ -132,7 +132,7 @@ export function VoiceAudioSettings({ store, onAllowDirect }: {
         <>
           <label className="row">
             <input type="checkbox" checked={!!s.p2pViaRelay} onChange={e => store.updateSettings({ p2pViaRelay: e.target.checked })} />
-            <span>Join P2P voice channels through the relay</span>
+            <span>Join P2P channels through the relay</span>
           </label>
           <div className="muted">
             Nobody in the channel learns your address, and what you send and receive there is held to the ordinary relayed limits.

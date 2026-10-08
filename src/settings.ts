@@ -35,6 +35,18 @@ export interface Settings {
    */
   /** Join P2P voice channels through the relay rather than directly: nobody there learns this person's address, and the relayed limits apply to them. */
   p2pViaRelay?: boolean
+  /**
+   * P2P channels this person has subscribed to: their app stays connected to these whenever it is open, not only while
+   * they are being read, so messages arrive as they are sent.
+   */
+  p2pSubscribed?: Record<string, boolean>
+  /**
+   * The P2P bots this person has agreed to connect to, by the bot's account, with the name it had then. A bot's host
+   * can find the address of whoever connects to it, so nobody's app connects to one until they have said so.
+   */
+  p2pBotsAccepted?: Record<string, string>
+  /** P2P channels where this app does NOT hand other members the messages they missed. Unset means it does. */
+  p2pNoBroadcast?: Record<string, boolean>
   p2pAudioKbps?: number
   p2pVideoKbps?: number
   /** The key or mouse button held to talk (see pushToTalk.ts). */

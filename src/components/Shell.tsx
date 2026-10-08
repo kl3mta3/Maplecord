@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Store } from '../store'
 import type { TransferView } from '../transfer'
-import { ChannelType, MessageKind, Permission, UserStatus, RollChoice, RollKind, RollRange, RpsChoice, hasPermission, type AttachmentDto, type FileOfferDto, type CommandDto, type MemberDto, type MessageDto, type RoleDto } from '../types'
+import { ChannelType, MessageKind, Permission, UserStatus, RollChoice, RollKind, RollRange, RpsChoice, hasPermission, type AttachmentDto, type ChannelBotDto, type FileOfferDto, type CommandDto, type MemberDto, type MessageDto, type RoleDto } from '../types'
 
 const RPS_ICON: Record<number, string> = { [RpsChoice.Rock]: '✊', [RpsChoice.Paper]: '✋', [RpsChoice.Scissors]: '✌️' }
 const RPS_NAME: Record<number, string> = { [RpsChoice.Rock]: 'Rock', [RpsChoice.Paper]: 'Paper', [RpsChoice.Scissors]: 'Scissors' }
@@ -24,11 +24,12 @@ function parseRange(text: string): [number, number] | null {
   const min = parseInt(m[1], 10), max = parseInt(m[2], 10)
   return RollRange.isValid(min, max) ? [min, max] : null
 }
-import { AllowDirectDialog, ConfirmDialog, CreateChannelDialog, DeleteGroupDialog, DirectChannelDialog, IncomingCallDialog, P2PCallDialog, NicknameDialog, PromptDialog, StartRollDialog } from './Dialogs'
+import { AllowDirectDialog, BanDialog, ConfirmDialog, CreateChannelDialog, DeleteGroupDialog, DirectChannelDialog, IncomingCallDialog, P2PCallDialog, NicknameDialog, PromptDialog, StartRollDialog } from './Dialogs'
 import { OverlaySettingsDialog, ServerSettingsDialog } from './Settings'
 import Friends from './Home'
 import { serverMediaUrl } from '../itemIcons'
 import { isElectron } from '../platform'
+import { P2P_PICTURE, type P2PFile } from '../p2pText'
 import { soundPackNames } from '../sounds'
 import { DEFAULT_GATE_LEVEL, DEFAULT_NOTIFY, type NotifyLevel } from '../settings'
 import { ContextMenu, type MenuEntry } from './ContextMenu'
@@ -37,7 +38,7 @@ import { Avatar, ProfileEditor, ProfilePopout, UserName } from './Profile'
 import { assetUrl, initials, shownName, type Appearance } from '../profile'
 import { STATUSES, UserSettingsDialog } from './UserSettings'
 import { ArrowLeftRight, AudioLines, ChevronDown, ChevronRight, HeadphoneOff, Headphones, LoaderCircle, Menu, Mic, MicOff, MonitorUp, Paperclip, Phone, PhoneOff, Plus, Settings as SettingsIcon, Signal, Users, Video } from 'lucide-react'
-import { AddServerDialog, DiscoverDialog, JoinServerDialog } from './Servers'
+import { AddServerDialog, CreateServerDialog, DiscoverDialog, JoinServerDialog } from './Servers'
 import { ChannelAccessDialog } from './ChannelAccess'
 import { DeleteAccountDialog } from './DeleteAccount'
 import { VoiceMessageBar } from './VoiceMessage'
@@ -77,6 +78,9 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   const can = (p: number) => hasPermission(myPerms, p)
   const voice = store.voice
   const inCall = voice && store.call?.channelId === voice.channelId ? store.call : null
+  /** Whether we cannot be heard in the voice channel we are in, and our own entry on its server (which says whether a moderator did it). */
+  const silencedHere = !!voice?.participants.find(p => p.userId === me?.id)?.silenced
+  const myMember = store.guilds.find(x => x.guild.id === voice?.guildId)?.members.find(m => m.userId === me?.id)
   const voiceChannelName = voice ? (inCall ? inCall.otherName : store.guilds.flatMap(x => x.channels).find(c => c.id === voice.channelId)?.name ?? '') : ''
   const peers = voice?.participants.filter(p => p.userId !== me?.id) ?? []
   // Only a P2P connection is remarked on; an ordinary one is simply a connection.
@@ -115,6 +119,9 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   const CHANNEL_DRAG = 'text/maplecord-channel'
   // A group of channels folds shut with a click on its heading. What is going on inside still shows: the channel
   // being read, channels with something unread, and voice channels with people in them.
+  /** The P2P bots of each P2P channel whose menu has been opened, asked for as the menu opens. */
+  const [channelBots, setChannelBots] = useState<Record<string, ChannelBotDto[]>>({})
+  const loadChannelBots = (channelId: string) => { void store.api.channelBots(channelId).then(list => setChannelBots(all => ({ ...all, [channelId]: list }))).catch(() => {}) }
   const collapsedGroups = store.settings.collapsedGroups ?? {}
   const toggleGroup = (id: string) => {
     const all = { ...collapsedGroups }
@@ -331,6 +338,11 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
         })
       }
     }
+    // Muting someone in this server's voice channels, for someone who may mute members. It holds until it is undone.
+    if (member && g && !isBot && userId !== me?.id && userId !== g.guild.ownerId && can(Permission.MuteMembers)) {
+      entries.push({ kind: 'sep' })
+      entries.push({ kind: 'item', label: 'Mute in voice channels', checked: !!member.voiceMuted, onClick: () => { void store.setVoiceMuted(g.guild.id, userId, !member.voiceMuted) } })
+    }
     // The voice channel they are in on this server, for someone who may take people out of voice.
     const inVoice = g && can(Permission.DisconnectMembers) ? Object.entries(g.voice ?? {}).find(([, people]) => people.some(p => p.userId === userId))?.[0] : undefined
     const mayRemove = !isBot && (can(Permission.KickMembers) || can(Permission.BanMembers))
@@ -490,7 +502,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
                     title={can(Permission.ManageChannels) ? 'Click to fold or unfold. Drag to reorder the groups. Drop a channel here to move it into this group. Right-click to choose who can see it.' : 'Click to fold or unfold'}
                     onContextMenu={can(Permission.ManageChannels) ? e => { e.preventDefault(); e.stopPropagation(); setMenu({ kind: 'group', channelId: c.id, name: c.name, x: e.clientX, y: e.clientY }) } : undefined}
                     {...(can(Permission.ManageChannels) ? channelDrag(c.id, true, (dragged, isGroup) => void store.moveChannel(dragged, isGroup ? null : c.id, isGroup ? c.id : null)) : {})}>
-                    {collapsedGroups[c.id] ? <ChevronRight size={12} /> : <ChevronDown size={12} />}<span>{c.name}</span></div>
+                    {collapsedGroups[c.id] ? <ChevronRight size={12} /> : <ChevronDown size={12} />}<span>{c.name}</span>{c.directSince && <span className="p2ptag">P2P</span>}</div>
                 : (
                   <div key={c.id}>
                     <div
@@ -503,6 +515,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
                       onClick={() => c.type === ChannelType.Text ? store.selectChannel(c.id) : openVoice(c.id)}
                       onContextMenu={e => {
                         e.preventDefault()
+                        if (c.directSince) loadChannelBots(c.id)
                         setMenu({ kind: 'channel', channelId: c.id, name: c.name, direct: !!c.directSince, voice: c.type === ChannelType.Voice, x: e.clientX, y: e.clientY })
                       }}>
                       <span className="muted">{c.type === ChannelType.Text ? '#' : '🔊'}</span>
@@ -532,7 +545,9 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
                                       onClick={() => void (on ? store.unwatchStream(p.connectionId) : store.watchStream(p.connectionId))}>{on ? 'WATCHING' : 'LIVE'}</button>
                                   : <span className="livebadge still" title={mineHere ? `You are sharing your ${what}` : `Sharing their ${what}. Join the channel to watch.`}>LIVE</span>
                               })()}
-                              {p.muted && <span title="Microphone muted">🔇</span>}
+                              {p.silenced
+                                ? <span title={g.members.find(m => m.userId === p.userId)?.voiceMuted ? 'Muted by a moderator' : 'May not speak in this channel'}>🚫</span>
+                                : p.muted && <span title="Microphone muted">🔇</span>}
                               {p.userId !== me?.id && prefsOf(p.userId).muted && <span title="You muted them">🔕</span>}
                               {voice?.channelId === c.id && p.userId !== me?.id && p.state !== 'connected' && <span style={{ fontSize: 10 }}>{p.state}</span>}
                             </div>
@@ -577,7 +592,9 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           </div>
           <span className="controls">
           <span className="split">
-            <button className={'iconbtn' + (store.isMuted ? ' off' : '')} onClick={store.toggleMute} title={store.isMuted ? 'Unmute your microphone' : 'Mute your microphone'}>{store.isMuted ? <MicOff size={17} /> : <Mic size={17} />}</button>
+            {silencedHere
+              ? <button className="iconbtn off" disabled title={myMember?.voiceMuted ? 'A moderator muted you in this server\'s voice channels. You can listen, and nobody hears you.' : 'You may not speak in this channel. You can listen, and nobody hears you.'}><MicOff size={17} /></button>
+              : <button className={'iconbtn' + (store.isMuted ? ' off' : '')} onClick={store.toggleMute} title={store.isMuted ? 'Unmute your microphone' : 'Mute your microphone'}>{store.isMuted ? <MicOff size={17} /> : <Mic size={17} />}</button>}
             <button className="caret" onClick={e => openPanelMenu(e, 'mic')} title="Choose a microphone"><ChevronDown size={12} /></button>
           </span>
           <span className="split">
@@ -636,7 +653,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
         )}
       </div>
 
-      {dialog?.kind === 'createGuild' && <PromptDialog title="Create a server" label="Server name" onSubmit={store.createGuild} onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'createGuild' && <CreateServerDialog onCreate={(name, isPublic, kind) => void store.createGuild(name, isPublic, kind)} onClose={() => setDialog(null)} />}
       {store.deleteStep && <DeleteAccountDialog store={store} />}
       {store.pendingInvite && (
         <ConfirmDialog title={`Join ${store.pendingInvite.name}?`}
@@ -679,6 +696,20 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       ] : [
         { kind: 'label', text: menu.name },
         { kind: 'item', label: 'Mute channel', icon: '🔕', checked: !!store.settings.mutedChannels?.[menu.channelId], onClick: () => store.setChannelMuted(menu.channelId, !store.settings.mutedChannels?.[menu.channelId]) },
+        // A P2P channel: stay connected to it while the app is open, and whether to hand others what they missed.
+        ...(menu.direct ? [
+          { kind: 'item', label: 'Subscribe (stay connected)', checked: !!store.settings.p2pSubscribed?.[menu.channelId], onClick: () => store.setP2pSubscribed(menu.channelId, !store.settings.p2pSubscribed?.[menu.channelId]) } as MenuEntry,
+          { kind: 'item', label: 'Send others what they missed', checked: !store.settings.p2pNoBroadcast?.[menu.channelId], onClick: () => store.setP2pBroadcast(menu.channelId, !!store.settings.p2pNoBroadcast?.[menu.channelId]) } as MenuEntry,
+        ] : []),
+        // The P2P bots added to this server, and which of them are let into this channel. Whoever decides which
+        // channels are P2P decides this too; everyone else just sees the ones that are in.
+        ...(menu.direct && (channelBots[menu.channelId]?.length ?? 0) > 0 ? [{
+          kind: 'submenu', label: 'P2P bots',
+          entries: channelBots[menu.channelId].map(b => ({
+            kind: 'item' as const, label: b.name, checked: b.granted, disabled: !can(Permission.ManageDirectChannels),
+            onClick: () => { void store.api.letBotIn(menu.channelId, b.applicationId, !b.granted).then(() => loadChannelBots(menu.channelId)).catch(e => store.setError(e instanceof Error ? e.message : String(e))) },
+          })),
+        } as MenuEntry] : []),
         // A public server has no P2P channels; one that somehow has can still be turned back into a relayed one.
         ...(menu.voice && can(Permission.ManageChannels) && can(Permission.ManageDirectChannels) && (menu.direct || !g?.guild.isPublic)
           ? [{ kind: 'item', label: menu.direct ? 'Make it a relayed channel' : 'Make it a P2P channel', icon: '⇄', onClick: () => setDialog({ kind: 'channelKind', channelId: menu.channelId, name: menu.name, direct: !menu.direct }) } as MenuEntry] : []),
@@ -690,7 +721,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
         ] : []),
       ]} onClose={() => setMenu(null)} />}
       {dialog?.kind === 'kick' && <ConfirmDialog title={`Kick ${dialog.member.username}?`} message="They can rejoin with an invite." onConfirm={() => store.kickMember(dialog.member)} onClose={() => setDialog(null)} />}
-      {dialog?.kind === 'ban' && <ConfirmDialog title={`Ban ${dialog.member.username}?`} message="They will not be able to rejoin." onConfirm={() => store.banMember(dialog.member)} onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'ban' && <BanDialog name={dialog.member.username} onBan={deleteDays => store.banMember(dialog.member, deleteDays)} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'share' && <SharePicker store={store} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'allowDirect' && <AllowDirectStep store={store} onClose={() => setDialog({ kind: 'audio' })} />}
       {dialog?.kind === 'channelKind' && (
@@ -741,7 +772,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           onClose={() => setDialog(null)} />
       )}
       {store.directPrompt && (
-        <DirectChannelDialog kind={store.directPrompt.kind}
+        <DirectChannelDialog kind={store.directPrompt.kind} text={!!store.directPrompt.text}
           channelName={store.guilds.flatMap(x => x.channels).find(c => c.id === store.directPrompt?.channelId)?.name ?? 'This channel'}
           onJoin={() => void store.confirmDirect()} onSettings={() => setDialog({ kind: 'audio' })} onClose={store.dismissDirectPrompt} />
       )}
@@ -771,8 +802,10 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
   const mayManageMessages = !!here && hasPermission(here.myPermissions, Permission.ManageMessages)
   // Sending straight from this computer is a P2P thing: offered in a P2P channel and in a conversation with a
   // friend, to someone who allows P2P. Everywhere else files are attached in the ordinary way.
-  const p2pPlace = !!channel && (channel.directSince != null
-    || (channel.type === ChannelType.DirectMessage && store.dms.some(d => d.channelId === channel.id && store.friends.friends.some(f => f.user.id === d.other.id))))
+  const p2pPlace = !!channel && channel.type === ChannelType.DirectMessage && store.dms.some(d => d.channelId === channel.id && store.friends.friends.some(f => f.user.id === d.other.id))
+  // A P2P channel on a server: what is typed goes straight between apps, and only text travels that way so far.
+  const p2pChat = !!channel && channel.type !== ChannelType.DirectMessage && channel.directSince != null
+  const p2p = p2pChat && store.p2pText?.channelId === channel?.id ? store.p2pText : null
   const canSendDirect = store.allowDirect && p2pPlace && store.transferLimits?.enabled !== false
   // A voice message: recorded here, sent like any file. The server's upload limit is looked up when one is started.
   const [voiceMessage, setVoiceMessage] = useState<{ maxBytes: number } | null>(null)
@@ -881,6 +914,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
           ? <div key={m.id} className="message ignored"><span /><span className="muted">Message from {m.authorName}, who you ignore · <button className="subtle" onClick={() => setRevealed(new Set([...revealed, m.id]))}>show</button></span></div>
           : <Message key={m.id} m={m} color={colorOf(m.authorId)} icon={store.itemIcon(m.roll?.item)} serverUrl={store.settings.serverUrl} onInvite={link => void store.openInvite(link)}
               fileOffer={m.fileOffer ? <FileOfferView store={store} offer={m.fileOffer} mine={m.authorId === (me?.id ?? '')} /> : undefined}
+              p2pFiles={m.p2pFiles?.map(f => <P2PFileChip key={f.hash} store={store} channelId={m.channelId} authorId={m.authorId} file={f} />)}
               author={m.webhookId ? null : store.appearanceOf(m.authorId)} name={m.webhookId ? m.authorName : nameIn(m.authorId, m.authorName)}
               mention={m.authorId !== me?.id && store.mentionsMe(m.content)}
               onMenu={m.ephemeral ? undefined : e => { e.preventDefault(); setMessageMenu({ m, x: e.clientX, y: e.clientY }) }}
@@ -890,20 +924,73 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
       {messageMenu && (
         <ContextMenu x={messageMenu.x} y={messageMenu.y} onClose={() => setMessageMenu(null)} entries={[
           ...(messageMenu.m.content ? [{ kind: 'item', label: 'Copy text', onClick: () => { void navigator.clipboard.writeText(messageMenu.m.content).catch(() => { /* no clipboard */ }) } } as MenuEntry] : []),
-          ...(messageMenu.m.authorId === me?.id || mayManageMessages
-            ? [{ kind: 'item', label: 'Delete message', danger: true, onClick: () => setDeleting(messageMenu.m) } as MenuEntry]
+          // In a P2P channel anyone may remove any message from their own device: it touches nobody else's copy.
+          ...(messageMenu.m.authorId === me?.id || mayManageMessages || p2pChat
+            ? [{ kind: 'item', label: p2pChat ? 'Remove from this device' : 'Delete message', danger: true, onClick: () => setDeleting(messageMenu.m) } as MenuEntry]
             : []),
           ...(!messageMenu.m.content && messageMenu.m.authorId !== me?.id && !mayManageMessages ? [{ kind: 'label', text: 'Nothing to do with this message' } as MenuEntry] : []),
         ]} />
       )}
       {deleting && (
-        <ConfirmDialog title="Delete this message?" message={deleting.authorId === me?.id ? 'It is removed for everyone and cannot be brought back.' : `This removes ${nameIn(deleting.authorId, deleting.authorName)}'s message for everyone. It cannot be brought back.`}
+        <ConfirmDialog title={p2pChat ? 'Remove this message from this device?' : 'Delete this message?'} message={p2pChat ? 'Only your own copy is removed. Everyone else who received it keeps theirs.' : deleting.authorId === me?.id ? 'It is removed for everyone and cannot be brought back.' : `This removes ${nameIn(deleting.authorId, deleting.authorName)}'s message for everyone. It cannot be brought back.`}
           onConfirm={() => void store.deleteMessage(deleting.id)} onClose={() => setDeleting(null)} />
       )}
       {store.pendingDrops[0] && !store.pendingDrops[0].auto && <DropBanner drop={store.pendingDrops[0]} more={store.pendingDrops.length - 1} channel={store.partyChannel} onAccept={store.acceptDrop} onDismiss={store.dismissDrop} />}
       {store.activeRoll && <RollPanel store={store} meId={me?.id ?? ''} />}
       {store.activeRps && <RpsPanel store={store} meId={me?.id ?? ''} />}
 
+      {p2pChat && (
+        <div className={'p2pbar' + (p2p?.state === 'on' ? '' : ' wide')}>
+          {!p2p || p2p.state === 'connecting' ? <span className="muted">P2P · connecting…</span>
+            : p2p.state === 'on' ? (
+              <span className="muted">
+                {p2p.reachable > 0 ? `P2P · connected to ${p2p.reachable} ${p2p.reachable === 1 ? 'person' : 'people'} here`
+                  : p2p.present > 0 ? 'P2P · connecting to the people here…'
+                  : 'P2P · nobody else is here right now. A message sent now reaches them when they next connect to someone who has it.'}
+                {channel && store.settings.p2pSubscribed?.[channel.id] ? ' · subscribed' : ''}
+              </span>
+            ) : p2p.state === 'failed' ? <span className="bad">{p2p.note || 'Could not connect to this channel.'}</span>
+            : (
+              <>
+                <span className="grow">
+                  <b>This is a P2P channel.</b> What is typed here goes straight between people's apps and is kept only on their own devices; the server keeps none of it.
+                  People connected to it can find each other's IP address.
+                </span>
+                <button className="accent" onClick={() => channel && store.askDirectText(channel.id)}>{p2p.state === 'blocked' ? 'Why can I not connect?' : 'Connect'}</button>
+              </>
+            )}
+        </div>
+      )}
+      {/* Shown for the P2P channel on screen, and wherever this is while in a P2P call or P2P voice channel. */}
+      {store.p2pNewApps.filter(x => (p2pChat && x.channelId === channel?.id) || x.channelId === store.voice?.channelId).map(x => (
+        <div key={x.channelId + x.userId + x.print} className="p2pbar wide" role="status">
+          <span className="grow">
+            <b>{x.userId === me?.id ? 'Your account' : nameIn(x.userId, x.username)}</b> {x.channelId !== store.voice?.channelId ? 'is connected here' : store.call?.channelId === x.channelId ? 'is in your call' : 'is in your voice channel'} from an app or browser this device has not seen {x.userId === me?.id ? 'you' : 'them'} use before.
+            If that is not expected, check with {x.userId === me?.id ? 'your other devices' : 'them'} some other way before trusting what it sends.
+          </span>
+          <button className="subtle" onClick={() => void store.acceptP2pApp(x.userId, x.print)}>That is fine</button>
+        </div>
+      ))}
+      {p2pChat && channel && store.p2pBotsWaiting.filter(x => x.channelId === channel.id).map(x => (
+        <div key={x.userId} className="p2pbar wide">
+          {x.viaRelay ? (
+            <span className="grow">
+              <b>{nameIn(x.userId, x.username)}</b> is a bot in this channel. You join P2P channels through the relay, and a bot is never reached through it, so your app is not connected to it.
+              What you write here can still reach it through the people who are connected to it. How long it keeps that is up to whoever runs it.
+            </span>
+          ) : (
+            <>
+              <span className="grow">
+                <b>{nameIn(x.userId, x.username)}</b> is a bot in this channel. It receives what is said here and can hand you what you missed. How long it keeps that is up to whoever runs it.{' '}
+                Connecting to it lets whoever runs it find your IP address; it is never reached through the relay.
+                Not connecting keeps your address from it, but what you write here can still reach it through the people who are connected to it.
+              </span>
+              <button className="accent" onClick={() => void store.acceptP2pBot(channel.id, x.userId, x.username)}>Connect to it</button>
+            </>
+          )}
+          <button className="subtle" title="Not now" onClick={() => store.dismissP2pBot(channel.id, x.userId)}>×</button>
+        </div>
+      ))}
       <div className="typing muted">{store.typing}</div>
       {store.error && <div className="error"><span className="grow">{store.error}</span><button className="subtle" onClick={() => store.setError(null)}>×</button></div>}
 
@@ -923,20 +1010,21 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
         ) : (
         <div className="composer">
           <input ref={fileRef} type="file" hidden onChange={async e => { const f = e.target.files?.[0]; if (f) await store.sendFile(f); e.target.value = '' }} />
-          <button title={store.uploading ? `Sending ${store.uploading}…` : 'Send a file'} onClick={() => fileRef.current?.click()} disabled={!channel || !!store.uploading}>{store.uploading ? <LoaderCircle size={17} className="spin" /> : <Paperclip size={17} />}</button>
+          <button title={store.uploading ? `Sending ${store.uploading}…` : p2pChat ? 'Send a picture or a file to the people in this channel' : 'Send a file'} onClick={() => fileRef.current?.click()}
+            disabled={!channel || !!store.uploading || (p2pChat && p2p?.state !== 'on')}>{store.uploading ? <LoaderCircle size={17} className="spin" /> : <Paperclip size={17} />}</button>
           <input ref={directRef} type="file" hidden onChange={async e => { const f = e.target.files?.[0]; if (f) await store.offerFile(f); e.target.value = '' }} />
-          {canRecordVoiceMessage() && (
+          {canRecordVoiceMessage() && !p2pChat && (
             <button title={voiceBusy ? 'Leave voice to record a voice message on this device' : 'Record a voice message'} aria-label="Record a voice message"
               onClick={() => void startVoiceMessage()} disabled={!channel || !!store.uploading || voiceBusy}><AudioLines size={17} /></button>
           )}
           {canSendDirect && <button title={directSendTitle} aria-label="Send a file straight from your computer" onClick={() => directRef.current?.click()} disabled={!channel}><ArrowLeftRight size={17} /></button>}
           <textarea
-            placeholder={channel ? `Message ${channel.type === ChannelType.DirectMessage ? '@' : '#'}${channel.name}  —  type / for commands` : ''}
-            value={text} disabled={!channel} rows={1}
+            placeholder={!channel ? '' : p2pChat ? `Message #${channel.name}  ·  P2P` : `Message ${channel.type === ChannelType.DirectMessage ? '@' : '#'}${channel.name}  —  type / for commands`}
+            value={text} disabled={!channel || (p2pChat && p2p?.state !== 'on')} rows={1}
             onChange={e => { setText(e.target.value); if (e.target.value) store.notifyTyping() }}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit() } }}
           />
-          <button className="accent" onClick={submit} disabled={!channel}>Send</button>
+          <button className="accent" onClick={submit} disabled={!channel || (p2pChat && p2p?.state !== 'on')}>Send</button>
         </div>
         )}
       </div>
@@ -961,7 +1049,9 @@ function withInviteLinks(text: string, open?: (link: string) => void): React.Rea
     : part))
 }
 
-function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu, onUserCard, onMenu, onInvite, fileOffer }: {
+function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu, onUserCard, onMenu, onInvite, fileOffer, p2pFiles }: {
+  /** The files on a message from a P2P channel, drawn below its text. */
+  p2pFiles?: React.ReactNode
   /** Pressed an invite link in the text. */
   onInvite?: (link: string) => void
   m: MessageDto; color?: string; icon?: string | null; serverUrl: string; mention?: boolean
@@ -1010,6 +1100,7 @@ function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu,
             <div className="row"><img src={import.meta.env.BASE_URL + (m.content === 'Tails' ? 'coin_tails.png' : 'coin_heads.png')} width={40} height={40} alt="" /> flipped a coin — <b>{m.content}</b></div>
           ) : <div className="body">{withInviteLinks(m.content, onInvite)}</div>}
         {m.attachments.map(a => <AttachmentView key={a.id} file={a} />)}
+        {p2pFiles}
         {m.embeds?.map((e, i) => (
           <div key={i} className="card" style={{ borderLeftColor: e.color != null ? '#' + e.color.toString(16).padStart(6, '0') : undefined }}>
             {e.title && <div className="title">{e.url ? <a href={e.url} target="_blank" rel="noreferrer" style={{ color: 'inherit' }}>{e.title}</a> : e.title}</div>}
@@ -1080,6 +1171,37 @@ function FileOfferView({ store, offer, mine }: { store: Store; offer: FileOfferD
       ))}
       {active.length === 0 && last && last.state === 'done' && <div className="muted ok">{last.direction === 'send' ? 'Sent' : 'Saved'}{route(last)}.</div>}
       {active.length === 0 && last && (last.state === 'failed' || last.state === 'cancelled') && <div className="muted bad">{last.state === 'cancelled' ? 'Cancelled.' : last.error ?? 'The transfer failed.'}</div>}
+    </div>
+  )
+}
+
+/**
+ * One file on a message in a P2P channel. It is not on the server: its contents come from the app of someone
+ * connected who has them. A picture of an ordinary size is fetched and shown by itself; anything else waits to be
+ * asked for. Once fetched it is kept on this device with the message.
+ */
+function P2PFileChip({ store, channelId, authorId, file }: { store: Store; channelId: string; authorId: string; file: P2PFile }) {
+  const view = store.p2pFiles[`${channelId}|${file.hash}`]
+  const picture = P2P_PICTURE.test(file.type)
+  const byItself = picture && file.size <= 10 * 1024 * 1024
+  // Tried again when someone else connects: they may be the one who has it.
+  const reachable = store.p2pText?.channelId === channelId ? store.p2pText.reachable : 0
+  const { loadP2pFile } = store
+  useEffect(() => { void loadP2pFile(channelId, file, authorId, byItself) }, [loadP2pFile, channelId, file.hash, authorId, byItself, reachable]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (picture && view?.url) return <img className="attachment" src={view.url} alt={file.name} title={file.name} />
+  const fetching = view?.state === 'fetching'
+  const note = fetching ? `fetching · ${Math.min(100, Math.round(view.got / file.size * 100))}%`
+    : view?.state === 'nobody' ? 'nobody connected has it right now'
+    : view?.state === 'relay' ? 'too large to fetch through the relay'
+    : view?.state === 'have' ? 'on this device' : 'not fetched yet'
+  return (
+    <div className="filechip">
+      <span className="ico">{picture ? '🖼' : '📄'}</span>
+      <span className="grow"><b>{file.name}</b><span className="muted"> · {fileSize(file.size)} · {note}</span></span>
+      {!fetching && (view?.state === 'have'
+        ? <button className="subtle" onClick={() => void store.saveP2pFile(channelId, file, authorId)}>Save</button>
+        : <button className="subtle" onClick={() => void (isElectron() && !picture ? store.saveP2pFile(channelId, file, authorId) : loadP2pFile(channelId, file, authorId, true))}>{picture ? 'Show' : 'Download'}</button>)}
     </div>
   )
 }

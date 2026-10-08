@@ -82,6 +82,7 @@ export function SharePicker({ store, onClose }: { store: Store; onClose: () => v
           {choices.map(q => <option key={`${q.height}x${q.fps}`} value={`${q.height}x${q.fps}`}>{q.height}p at {q.fps} frames a second</option>)}
         </select>
         {direct && <span className="muted">P2P channel: higher qualities are allowed here</span>}
+        {!direct && store.streamRules?.unrestricted && <span className="muted">You may share above this server's usual limits. Everyone watching pulls that rate, so use the higher ones when there is a reason.</span>}
       </label>
       <label className="row" style={{ gap: 8 }}>
         <span className="muted">When the connection is slow, keep</span>

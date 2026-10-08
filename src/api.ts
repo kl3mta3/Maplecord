@@ -1,5 +1,5 @@
 import type {
-  AccountDeletionDto, ApplicationDto, AttachmentDto, ChannelOverrideDto, DiscoverGuildDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto,
+  AccountDeletionDto, ApplicationDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto,
 } from './types'
 
 export class ApiError extends Error {
@@ -65,7 +65,7 @@ export class Api {
   me() { return this.request<UserDto>('GET', '/api/me') }
   guilds() { return this.request<GuildSummaryDto[]>('GET', '/api/guilds') }
   guild(id: string) { return this.request<GuildSummaryDto>('GET', `/api/guilds/${id}`) }
-  createGuild(name: string) { return this.request<GuildSummaryDto>('POST', '/api/guilds', { name }) }
+  createGuild(name: string, isPublic = false, kind: 'standard' | 'hybrid' | 'p2p' = 'standard') { return this.request<GuildSummaryDto>('POST', '/api/guilds', { name, isPublic, kind }) }
   deleteGuild(id: string) { return this.request<void>('DELETE', `/api/guilds/${id}`) }
   leaveGuild(id: string) { return this.request<void>('POST', `/api/guilds/${id}/leave`) }
   createInvite(guildId: string) { return this.request<InviteDto>('POST', `/api/guilds/${guildId}/invites`, { expiresInMinutes: null, maxUses: null }) }
@@ -97,7 +97,10 @@ export class Api {
 
   /** The bots this person has made. */
   applications() { return this.request<ApplicationDto[]>('GET', '/api/applications') }
-  createApplication(name: string) { return this.request<ApplicationDto>('POST', '/api/applications', { name }) }
+  createApplication(name: string, direct = false) { return this.request<ApplicationDto>('POST', '/api/applications', { name, direct }) }
+  /** The P2P bots in a P2P channel; for someone who may decide that, also the ones that could be let in. */
+  channelBots(channelId: string) { return this.request<ChannelBotDto[]>('GET', `/api/channels/${channelId}/p2p-bots`) }
+  letBotIn(channelId: string, applicationId: string, on: boolean) { return this.request<void>(on ? 'PUT' : 'DELETE', `/api/channels/${channelId}/p2p-bots/${applicationId}`) }
   updateApplication(id: string, patch: { name?: string; description?: string; interactionsUrl?: string }) { return this.request<ApplicationDto>('PATCH', `/api/applications/${id}`, patch) }
   /** Gives it a new token; the old one stops working. */
   regenerateApplication(id: string) { return this.request<ApplicationDto>('POST', `/api/applications/${id}/regenerate`) }
@@ -124,7 +127,8 @@ export class Api {
   deleteGroup(id: string) { return this.request<void>('DELETE', `/api/channels/${id}?withChannels=true`) }
   renameChannel(id: string, name: string) { return this.request<ChannelDto>('PATCH', `/api/channels/${id}`, { name }) }
   kick(guildId: string, userId: string) { return this.request<void>('DELETE', `/api/guilds/${guildId}/members/${userId}`) }
-  ban(guildId: string, userId: string) { return this.request<void>('POST', `/api/guilds/${guildId}/bans/${userId}`, { reason: null }) }
+  /** deleteDays: also delete what they wrote in the server in the last 1, 3 or 7 days, or (0) all of it. Null deletes nothing. */
+  ban(guildId: string, userId: string, deleteDays: number | null = null) { return this.request<void>('POST', `/api/guilds/${guildId}/bans/${userId}`, { reason: null, deleteDays }) }
 
   // ---- roles ----
   roles(guildId: string) { return this.request<RoleDto[]>('GET', `/api/guilds/${guildId}/roles`) }
@@ -135,6 +139,8 @@ export class Api {
     return this.request<RoleDto>('PATCH', `/api/roles/${roleId}`, patch)
   }
   deleteRole(roleId: string) { return this.request<void>('DELETE', `/api/roles/${roleId}`) }
+  /** Mutes someone in a server's voice channels, or undoes it. For people who may mute members there. */
+  setVoiceMuted(guildId: string, userId: string, muted: boolean) { return this.request<MemberDto>('PUT', `/api/guilds/${guildId}/members/${userId}/voice-mute`, { muted }) }
   setMemberRoles(guildId: string, userId: string, roleIds: string[]) {
     return this.request<unknown>('PUT', `/api/guilds/${guildId}/members/${userId}/roles`, { roleIds })
   }
@@ -180,6 +186,13 @@ export class Api {
   deleteAvatar() { return this.request<UserProfileDto>('DELETE', '/api/me/avatar') }
   deleteBanner() { return this.request<UserProfileDto>('DELETE', '/api/me/banner') }
   decorations() { return this.request<DecorationDto[]>('GET', '/api/decorations') }
+  /** An animation of your own: 'avatar' goes around your picture, 'effect' plays over your profile card. It is worn as soon as it is stored. */
+  uploadAnimation(kind: 'avatar' | 'effect', file: File) {
+    const form = new FormData()
+    form.append('file', file, file.name)
+    return this.request<UserProfileDto>('POST', `/api/me/animations/${kind}`, undefined, form)
+  }
+  deleteAnimation(kind: 'avatar' | 'effect') { return this.request<UserProfileDto>('DELETE', `/api/me/animations/${kind}`) }
 
   // ---- friends / DMs ----
   searchUsers(q: string) { return this.request<UserDto[]>('GET', `/api/users/search?q=${encodeURIComponent(q)}`) }
@@ -199,5 +212,18 @@ export class Api {
   streamSettings(channelId?: string | null) { return this.request<StreamSettingsDto>('GET', '/api/voice/streams/settings' + (channelId ? `?channelId=${channelId}` : '')) }
   /** How the server wants voice sent (see the admin panel's voice quality). Older servers do not have this. */
   voiceSettings() { return this.request<{ audioKbps: number }>('GET', '/api/voice/settings') }
+  /** Registers this app's public signing key (for P2P text) and gives back the id the server knows it by. */
+  registerKey(publicKey: string) { return this.request<{ id: string; userId: string; publicKey: string }>('POST', '/api/me/keys', { publicKey }) }
+  /** Whose signing key this is, as the server vouches. Null when the server does not know the key (any more). */
+  async keyOwner(keyId: string) {
+    // The id comes out of a message someone else handed over. It is used as an id or not at all, and the answer
+    // only counts if it is about that very key.
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(keyId)) return null
+    try {
+      const key = await this.request<{ id: string; userId: string; publicKey: string }>('GET', `/api/keys/${encodeURIComponent(keyId)}`)
+      return key && typeof key.id === 'string' && key.id.toLowerCase() === keyId.toLowerCase() && typeof key.userId === 'string' && typeof key.publicKey === 'string' ? key : null
+    }
+    catch (e) { if (e instanceof ApiError && e.status === 404) return null; throw e }
+  }
   iceServers(channelId: string) { return this.request<IceServerDto[]>('GET', `/api/voice/ice?channelId=${channelId}`) }
 }

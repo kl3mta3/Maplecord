@@ -28,6 +28,7 @@ import type { VoiceHub } from './voiceHub'
 
 /** The stream server library is only fetched (from this app's own files) the first time it is needed. */
 const streamServer = () => import('livekit-client')
+import { letGo, openRoom } from './sealedRoom'
 
 /** How someone's voice is named in a stream server room: "a:" and their voice connection. */
 const voiceOf = (identity: string) => (identity.startsWith('a:') ? identity.slice(2) : null)
@@ -198,9 +199,17 @@ export class VoiceEngine {
     }
   }
   effectivePolicy: IcePolicy = 'direct'
+  private wantedPolicy: IcePolicy = 'relay'
+
+  /**
+   * The relay's sign-in details run out after a while. Connections already made are not affected, but one made later
+   * in the same call needs current ones: fresh details, the same rules as when the call was joined.
+   */
+  reconfigure(ice: IceServerDto[]) { if (this.joined) this.configure(ice, this.wantedPolicy) }
 
   /** Returns the policy actually in effect: relay only if a TURN server is available. */
   configure(ice: IceServerDto[], wanted: IcePolicy): IcePolicy {
+    this.wantedPolicy = wanted
     const hasTurn = ice.some(s => s.urls.some(u => /^turns?:/i.test(u)))
     const policy: IcePolicy = wanted === 'relay' && hasTurn ? 'relay' : 'direct'
     this.config = {
@@ -257,19 +266,22 @@ export class VoiceEngine {
   private async reopenMicrophone(): Promise<boolean> {
     if (!this.local) return false
     const inputDeviceId = this.inputDeviceId
+    const sitting = this.sitting
     try {
       const fresh = await navigator.mediaDevices.getUserMedia({
         audio: { deviceId: inputDeviceId ? { exact: inputDeviceId } : undefined, echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
       })
+      // The call was left while the microphone was opening: it is closed again.
+      if (this.sitting !== sitting || !this.local) { for (const t of fresh.getTracks()) t.stop(); return false }
       const track = fresh.getAudioTracks()[0]
-      track.enabled = !this.muted
+      track.enabled = !this.muted && !this.silencedSelf
       for (const peer of this.peers.values()) {
         const sender = peer.pc?.getSenders().find(s => s.track?.kind === 'audio')
         if (sender) await sender.replaceTrack(track)
       }
       // Through a stream server there is one thing being sent; it is swapped in place (or sent for the first time).
       if (this.roomTrack) { await this.roomTrack.replaceTrack(track, true); this.tuneRoom() }
-      else if (this.room) await this.sendMicrophone(this.room, track)
+      else if (this.room && !this.silencedSelf) await this.sendMicrophone(this.room, track)
       for (const old of this.local.getTracks()) old.stop()
       if (this.localMeter) { this.localMeter.src.disconnect(); void this.localMeter.ctx.close() }
       this.local = fresh
@@ -293,31 +305,50 @@ export class VoiceEngine {
   private inputDeviceId: string | null = null
 
   private joined = false
+  /** Goes up with every join and every leave, so work begun for one call can tell that it is no longer the current one. */
+  private sitting = 0
+  /** Set while a join is opening the microphone. Set-up messages from other apps that arrive meanwhile wait for it. */
+  private opening: Promise<void> | null = null
 
   /**
    * Joins the mesh. If the microphone is unavailable (denied, missing) we still connect receive-only,
    * so you can listen; the error is rethrown after the offers go out so the UI can say "no microphone".
+   *
+   * Opening the microphone can take as long as the person takes to answer the browser's question. If the call is left
+   * (or another one joined) in that time, the microphone is closed again and nothing is sent anywhere.
    */
-  async join(existing: VoiceParticipantDto[], pass: SfuPassDto | null = null) {
+  async join(existing: VoiceParticipantDto[], pass: SfuPassDto | null = null, silenced = false) {
     await this.leave()
+    this.silencedSelf = silenced
+    for (const p of existing) if (p.silenced) this.silencedPeers.add(p.connectionId)
+    const sitting = ++this.sitting
     this.joined = true
     this.viaServer = pass !== null
     let micError: unknown = null
+    let opened!: () => void
+    const opening = new Promise<void>(resolve => { opened = resolve })
+    this.opening = opening
     try {
-      this.local = await navigator.mediaDevices.getUserMedia({
+      const local = await navigator.mediaDevices.getUserMedia({
         audio: {
           deviceId: this.inputDeviceId ? { exact: this.inputDeviceId } : undefined,
           echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1,
         },
       })
-      if (this.muted) for (const t of this.local.getAudioTracks()) t.enabled = false
+      if (this.sitting !== sitting) { for (const t of local.getTracks()) t.stop(); return }
+      this.local = local
+      if (this.muted || this.silencedSelf) for (const t of this.local.getAudioTracks()) t.enabled = false
       this.localMeter = this.makeMeter(this.local)
       void this.listen(this.localMeter)
       this.events.log(`Microphone started (${this.effectivePolicy === 'relay' ? 'relayed' : 'direct'}).`)
     } catch (e) {
+      if (this.sitting !== sitting) return
       micError = e
       this.local = null
       this.events.log(`No microphone (${e instanceof Error ? e.message : e}); joining receive-only.`)
+    } finally {
+      if (this.opening === opening) this.opening = null
+      opened()
     }
     this.startMetering()
 
@@ -325,12 +356,15 @@ export class VoiceEngine {
       // One connection, to the stream server; nobody is offered anything.
       try { await this.connectRoom(pass) }
       catch (e) {
+        if (this.sitting !== sitting) return
         this.events.log(`Could not reach the stream server: ${e instanceof Error ? e.message : e}`)
         await this.leave()
         throw new VoiceConnectError('Could not connect to this voice channel. Try again in a moment.')
       }
+      if (this.sitting !== sitting) return
     } else {
       for (const p of existing) {
+        if (this.sitting !== sitting) return
         try { await this.offer(p.connectionId) }
         catch (e) { this.events.log(`Offer to ${p.username} failed: ${e instanceof Error ? e.message : e}`) }
       }
@@ -348,10 +382,18 @@ export class VoiceEngine {
 
   /** Connects to the channel's room, sends our microphone there, and starts collecting everyone else's voice. */
   private async connectRoom(pass: SfuPassDto) {
-    const { Room, RoomEvent, Track } = await streamServer()
-    // The microphone is ours: the library must neither stop it nor open another by itself.
-    const room = new Room({ adaptiveStream: false, dynacast: false, stopLocalTrackOnUnpublish: false })
+    const { RoomEvent, Track } = await streamServer()
+    const sitting = this.sitting
+    // The microphone is ours: the library must neither stop it nor open another by itself. What is sent into the
+    // room is encrypted here first, with the key that came with the pass (see sealedRoom).
+    const room = await openRoom({ adaptiveStream: false, dynacast: false, stopLocalTrackOnUnpublish: false }, pass,
+      why => this.events.log(`Something from the stream server could not be decrypted (${why}).`))
+    // Left while the room was being made ready: it is let go of unused.
+    if (this.sitting !== sitting || this.room) { letGo(room); return }
     this.room = room
+    // Whether this room ever connected. One that never did also reports itself "disconnected"; whoever asked for it
+    // hears that as an error and decides what happens next, so it must not also start a round of retries here.
+    let up = false
     const mine = () => this.room === room
     const want = (publication: RemoteTrackPublication, from: RemoteParticipant) => {
       // Voices only: a shared screen in the same room is collected by the stream engine, and only when watched.
@@ -368,8 +410,15 @@ export class VoiceEngine {
       if (id && mine() && track.kind === Track.Kind.Audio) this.dropPeer(id)
     })
     room.on(RoomEvent.Reconnected, () => { if (mine()) this.tuneRoom() })
+    // The stream server stopped taking our microphone, or takes it again (see setSilenced).
+    room.on(RoomEvent.ParticipantPermissionsChanged, (_before, who) => {
+      if (!mine() || who !== room.localParticipant) return
+      if (!who.permissions?.canPublish) { this.roomTrack = null; return }
+      const microphone = this.local?.getAudioTracks()[0]
+      if (!this.silencedSelf && !this.roomTrack && microphone) void this.sendMicrophone(room, microphone).catch(() => { /* it is offered again when we are told we may speak */ })
+    })
     room.on(RoomEvent.Disconnected, () => {
-      if (!mine()) return
+      if (!mine() || !up) return
       // Dropped without our asking. Whatever we were hearing is gone with it; try to get back in.
       this.room = null
       this.roomTrack = null
@@ -378,10 +427,12 @@ export class VoiceEngine {
     })
     // No address-finding servers of anyone's: the stream server has a public address and we simply connect to it.
     await room.connect(pass.url, pass.token, { autoSubscribe: false, rtcConfig: { iceServers: [] } })
+    up = true
     if (!mine()) { void room.disconnect(); return }
 
     const microphone = this.local?.getAudioTracks()[0]
-    if (microphone) await this.sendMicrophone(room, microphone)
+    // Someone who cannot be heard here has a pass that takes no microphone: nothing is offered.
+    if (microphone && !this.silencedSelf) await this.sendMicrophone(room, microphone)
     if (!mine()) return
     for (const who of room.remoteParticipants.values()) {
       const id = voiceOf(who.identity)
@@ -460,6 +511,7 @@ export class VoiceEngine {
   }
 
   async leave() {
+    this.sitting++
     this.joined = false
     this.viaServer = false
     const room = this.room
@@ -472,14 +524,43 @@ export class VoiceEngine {
     if (this.local) { for (const t of this.local.getTracks()) t.stop(); this.local = null }
     this.detector = null
     this.talking = false
+    this.silencedSelf = false
+    this.silencedPeers.clear()
     // With push to talk on, nothing is sent until the key is held, from the first moment of the next call.
     this.sending = !this.push
     this.events.speaking(null, false)
   }
 
+  // ---- Not being heard: no right to speak in this channel, or muted by a moderator ------------------------------------
+  // Three things make it hold. Our own app sends nothing while we are silenced. Where voice goes through a stream
+  // server, that server takes no microphone from someone silenced, whatever their app does. And every app plays
+  // nothing from someone the server marks as silenced, which is what holds it in app-to-app calls.
+
+  private silencedSelf = false
+  private silencedPeers = new Set<string>()
+
+  /** Whether we ourselves can be heard in this call. When not, nothing is sent, whatever the mute button says. */
+  setSilenced(silenced: boolean) {
+    if (this.silencedSelf === silenced) return
+    this.silencedSelf = silenced
+    if (this.local) for (const t of this.local.getAudioTracks()) t.enabled = !this.muted && !silenced
+    if (silenced) { this.roomTrack = null; if (!this.push) this.setTalking(false); return }
+    // Heard again. Through a stream server the microphone has to be offered afresh; if the server there has not
+    // caught up yet, it is offered when it has (see ParticipantPermissionsChanged).
+    const microphone = this.local?.getAudioTracks()[0]
+    if (this.room && !this.roomTrack && microphone) void this.sendMicrophone(this.room, microphone).catch(() => {})
+  }
+
+  /** Whether someone else in the call can be heard. When not, nothing of theirs is played here. */
+  setPeerSilenced(connectionId: string, silenced: boolean) {
+    if (silenced) this.silencedPeers.add(connectionId); else this.silencedPeers.delete(connectionId)
+    const peer = this.peers.get(connectionId)
+    if (peer) this.applyAudio(connectionId, peer)
+  }
+
   setMuted(muted: boolean) {
     this.muted = muted
-    if (this.local) for (const t of this.local.getAudioTracks()) t.enabled = !muted
+    if (this.local) for (const t of this.local.getAudioTracks()) t.enabled = !muted && !this.silencedSelf
     if (muted) { if (this.push) this.setPushToTalk(true, false); else this.setTalking(false) }
   }
 
@@ -494,7 +575,7 @@ export class VoiceEngine {
 
   private applyAudio(connectionId: string, peer: Peer) {
     const chosen = this.wanted.get(connectionId) ?? { volume: 1, muted: false }
-    const want = { volume: chosen.volume * this.master, muted: chosen.muted || this.deafened }
+    const want = { volume: chosen.volume * this.master, muted: chosen.muted || this.deafened || this.silencedPeers.has(connectionId) }
     const meter = peer.meter
     // An iPhone ignores the element's volume altogether (see volume.ts), so there quieter goes the same way as louder,
     // as long as the context is allowed to make a sound; if it is not, full volume beats silence.
@@ -520,12 +601,16 @@ export class VoiceEngine {
 
   async removePeer(connectionId: string) {
     this.wanted.delete(connectionId)
+    this.silencedPeers.delete(connectionId)
     this.dropPeer(connectionId)
   }
 
   async handleSignal(s: VoiceSignalDto) {
     // Through a stream server no app sets anything up with another.
     if (!this.joined || this.viaServer) return
+    // We may have only just joined, with our own microphone still opening. The connection is made once it is open, so
+    // that it carries our voice as well as theirs. (Messages that wait here are handled in the order they came.)
+    if (this.opening) { await this.opening; if (!this.joined || this.viaServer) return }
     try {
       if (s.kind === 'offer') {
         const peer = this.getOrCreatePeer(s.fromConnectionId)

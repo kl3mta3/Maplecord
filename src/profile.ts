@@ -98,6 +98,23 @@ const DECORATION_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/
 export const decorationUrl = (serverUrl: string, kind: 'avatar' | 'effect', id: string | null | undefined) =>
   id && DECORATION_ID.test(id) ? `${serverUrl.replace(/\/$/, '')}/api/decorations/${kind}/${id}.json` : null
 
+/**
+ * One of the server's animations can be worn in colors of your own. Its id then says which: the animation's id,
+ * "--", and one color for each of its own ("9000ff"), with "x" where one is left as it is.
+ */
+export function animationColors(id: string | null | undefined): { base: string; colors: (string | null)[] } | null {
+  if (!id) return null
+  const m = /^(.+?)--((?:[0-9a-f]{6}|x)(?:-(?:[0-9a-f]{6}|x))*)$/.exec(id)
+  return m ? { base: m[1]!, colors: m[2]!.split('-').map(c => (c === 'x' ? null : c)) } : { base: id, colors: [] }
+}
+
+/** The id of an animation with some of its colors swapped. With none swapped it is just the animation's own id. */
+export function withAnimationColors(base: string, colors: (string | null)[]): string {
+  const kept = [...colors]
+  while (kept.length > 0 && kept[kept.length - 1] === null) kept.pop()
+  return kept.length === 0 ? base : base + '--' + kept.map(c => c ?? 'x').join('-')
+}
+
 export function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]!.toUpperCase()).join('') || '?'
 }

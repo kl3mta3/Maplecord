@@ -21,6 +21,10 @@ export type MenuEntry =
  *
  * A row can open a second menu beside the first (to the right, or to the left where there is no room). It opens when
  * the pointer rests on the row or the row is pressed, and closes with the main menu or when another row takes over.
+ *
+ * From the keyboard: up and down move through the rows (Home and End jump to the ends), Enter or Space picks one,
+ * right opens a row's side menu and left comes back out of it, Escape or Tab closes the menu. When it closes the
+ * keyboard goes back to whatever had it before.
  */
 export function ContextMenu({ x, y, entries, onClose }: { x: number; y: number; entries: MenuEntry[]; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null)
@@ -49,11 +53,47 @@ export function ContextMenu({ x, y, entries, onClose }: { x: number; y: number; 
     setSidePos({ left, top: Math.max(4, Math.min(side.top - 6, window.innerHeight - mine.height - 4)) })
   }, [side, sideEntries?.length])
 
+  /** Set when a side menu was opened from the keyboard, so the keyboard follows into it once it is on screen. */
+  const intoSide = useRef(false)
+  const rowsOf = (menu: HTMLElement | null) => (menu ? [...menu.querySelectorAll<HTMLElement>('button.item:not(:disabled), input[type="range"]')] : [])
+
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { onClose(); return }
+      if (e.key === 'Tab') { e.preventDefault(); onClose(); return }
+      const at = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      const inSide = !!at && !!sideRef.current?.contains(at)
+      const rows = rowsOf(inSide ? sideRef.current : ref.current)
+      const i = at ? rows.indexOf(at) : -1
+      const go = (to: number) => { e.preventDefault(); rows[(to + rows.length) % rows.length]?.focus() }
+      if (rows.length === 0) return
+      if (e.key === 'ArrowDown') go(i + 1)
+      else if (e.key === 'ArrowUp') go(i < 0 ? rows.length - 1 : i - 1)
+      else if (e.key === 'Home') go(0)
+      else if (e.key === 'End') go(rows.length - 1)
+      else if (e.key === 'ArrowRight' && !inSide && at?.getAttribute('aria-haspopup') === 'menu') { e.preventDefault(); intoSide.current = true; at.click() }
+      else if (e.key === 'ArrowLeft' && inSide && at?.tagName !== 'INPUT') {
+        e.preventDefault()
+        const opener = ref.current?.querySelector<HTMLElement>('[aria-expanded="true"]')
+        setSide(null)
+        opener?.focus()
+      }
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  // The menu takes the keyboard as it opens, and hands it back as it closes.
+  useEffect(() => {
+    const before = document.activeElement
+    ref.current?.focus()
+    return () => { if (before instanceof HTMLElement && before.isConnected) before.focus() }
+  }, [])
+  useEffect(() => {
+    if (!intoSide.current || !sidePos) return
+    intoSide.current = false
+    rowsOf(sideRef.current)[0]?.focus()
+  }, [sidePos])
 
   const row = (entry: MenuEntry, i: number, inSide: boolean) => {
     // Resting on any other row of the main menu puts the side menu away.
@@ -64,15 +104,17 @@ export function ContextMenu({ x, y, entries, onClose }: { x: number; y: number; 
       return (
         <div key={i} className="sliderrow" onMouseEnter={leave}>
           <div className="row"><span className="grow">{entry.label}</span><span className="muted">{entry.format(entry.value)}</span></div>
-          <input type="range" min={entry.min} max={entry.max} step={entry.step} value={entry.value} onChange={e => entry.onChange(Number(e.target.value))} />
+          <input type="range" aria-label={entry.label} aria-valuetext={entry.format(entry.value)} min={entry.min} max={entry.max} step={entry.step} value={entry.value} onChange={e => entry.onChange(Number(e.target.value))} />
         </div>
       )
     }
     if (entry.kind === 'submenu') {
       const openHere = side?.label === entry.label
       const show = (e: React.SyntheticEvent<HTMLElement>) => setSide({ label: entry.label, top: e.currentTarget.getBoundingClientRect().top })
+      // Pressed from the keyboard (a click with no pointer behind it), the keyboard goes into the side menu.
+      const press = (e: React.MouseEvent<HTMLElement>) => { if (e.detail === 0) intoSide.current = true; show(e) }
       return (
-        <button key={i} role="menuitem" aria-haspopup="menu" aria-expanded={openHere} className={'item' + (openHere ? ' opened' : '')} onMouseEnter={show} onClick={show}>
+        <button key={i} role="menuitem" aria-haspopup="menu" aria-expanded={openHere} className={'item' + (openHere ? ' opened' : '')} onMouseEnter={show} onClick={press}>
           <span>{entry.label}</span>
           <span className="ico">▸</span>
         </button>
@@ -91,7 +133,7 @@ export function ContextMenu({ x, y, entries, onClose }: { x: number; y: number; 
   return (
     <>
       <div className="menubackdrop" onClick={onClose} onContextMenu={e => { e.preventDefault(); onClose() }} />
-      <div ref={ref} className="menu contextmenu" role="menu" style={pos} onContextMenu={e => e.preventDefault()}>
+      <div ref={ref} className="menu contextmenu" role="menu" tabIndex={-1} style={pos} onContextMenu={e => e.preventDefault()}>
         {entries.map((entry, i) => row(entry, i, false))}
       </div>
       {side && sideEntries && (

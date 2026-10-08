@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
 // The "light" player draws to SVG only and has no expression support, so an animation file cannot run script.
 import lottie, { type AnimationItem } from 'lottie-web/build/player/lottie_light'
-import { NAME_FONTS, assetUrl, decorationUrl, initials, nameStyle, shownName, type Appearance } from '../profile'
+import { NAME_FONTS, animationColors, assetUrl, decorationUrl, initials, nameStyle, shownName, withAnimationColors, type Appearance } from '../profile'
 import type { Store } from '../store'
 import { type DecorationDto, type RoleDto, type UserProfileDto } from '../types'
 import { Dialog } from './Dialogs'
@@ -206,6 +206,18 @@ function ColorRow({ label, value, onChange, hint }: { label: string; value: stri
   )
 }
 
+/** One color of an animation, to swap for another. The choice is passed on once the picker has settled, not for every shade dragged through. */
+function SwapColor({ value, label, onPick }: { value: string; label: string; onPick: (hex: string) => void }) {
+  const [shown, setShown] = useState(value)
+  const timer = useRef(0)
+  useEffect(() => { setShown(value) }, [value])
+  useEffect(() => () => window.clearTimeout(timer.current), [])
+  return (
+    <input type="color" title="Change this color" aria-label={label} value={shown}
+      onChange={e => { const v = e.target.value; setShown(v); window.clearTimeout(timer.current); timer.current = window.setTimeout(() => onPick(v), 300) }} />
+  )
+}
+
 export function ProfileEditor({ store, onClose }: { store: Store; onClose: () => void }) {
   const me = store.me()
   const serverUrl = store.settings.serverUrl
@@ -215,6 +227,8 @@ export function ProfileEditor({ store, onClose }: { store: Store; onClose: () =>
   const [note, setNote] = useState('')
   const avatarInput = useRef<HTMLInputElement>(null)
   const bannerInput = useRef<HTMLInputElement>(null)
+  const decorationInput = useRef<HTMLInputElement>(null)
+  const effectInput = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!me) return
@@ -254,14 +268,62 @@ export function ProfileEditor({ store, onClose }: { store: Store; onClose: () =>
     finally { setBusy(false) }
   }
 
+  // An animation of your own (around your picture, or over your profile card) is stored, and worn, the moment it is
+  // chosen, like a picture. Taking it away only changes what you wear if you were wearing it.
+  const animation = async (kind: 'avatar' | 'effect', file: File | null) => {
+    setBusy(true); setNote('')
+    try {
+      const was = kind === 'avatar' ? draft.ownDecoration : draft.ownEffect
+      const p = await store.setProfileAnimation(kind, file)
+      const own = { ownDecoration: p.ownDecoration ?? null, ownEffect: p.ownEffect ?? null }
+      setSaved(v => (v ? { ...v, ...own, decoration: p.decoration, effect: p.effect } : v))
+      if (kind === 'avatar') setDraft(d => (d ? { ...d, ...own, decoration: file ? p.decoration : d.decoration === was ? null : d.decoration } : d))
+      else setDraft(d => (d ? { ...d, ...own, effect: file ? p.effect : d.effect === was ? null : d.effect } : d))
+    } catch (e) { setNote(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+
   const avatarDecorations = store.decorations.filter(d => d.kind === 'avatar')
   const effects = store.decorations.filter(d => d.kind === 'effect')
+  // One of the server's is chosen whatever colors it is worn in.
+  const chosenDecoration = animationColors(draft.decoration)?.base ?? null
   const choice = (d: DecorationDto | null) => (
-    <button key={d?.id ?? 'none'} className={'decochoice' + ((draft.decoration ?? null) === (d?.id ?? null) ? ' sel' : '')} title={d?.name ?? 'None'} onClick={() => set({ decoration: d?.id ?? null })}>
+    <button key={d?.id ?? 'none'} className={'decochoice' + (chosenDecoration === (d?.id ?? null) ? ' sel' : '')} title={d?.name ?? 'None'} aria-pressed={chosenDecoration === (d?.id ?? null)} onClick={() => set({ decoration: d?.id ?? null })}>
       <Avatar who={{ avatarUrl: draft.avatarUrl, decoration: d?.id ?? null }} name={shown} serverUrl={serverUrl} size={44} animate="hover" />
       <span>{d?.name ?? 'None'}</span>
     </button>
   )
+  /** The colors of the server's animation that is chosen, each of which can be swapped for another. Nothing for one of your own. */
+  const colorsOf = (kind: 'avatar' | 'effect') => {
+    const chosen = animationColors(kind === 'avatar' ? draft.decoration : draft.effect)
+    const from = chosen ? store.decorations.find(d => d.kind === kind && d.id === chosen.base) : undefined
+    if (!chosen || !from?.colors?.length) return null
+    const own = from.colors.map((_, i) => chosen.colors[i] ?? null)
+    const put = (colors: (string | null)[]) => { const id = withAnimationColors(from.id, colors); set(kind === 'avatar' ? { decoration: id } : { effect: id }) }
+    return (
+      <div className="animcolors">
+        <span className="muted">Its colors</span>
+        {from.colors.map((c, i) => (
+          <SwapColor key={from.id + i} value={'#' + (own[i] ?? c)} label={`Color ${i + 1} of ${from.name}`}
+            onPick={hex => put(own.map((o, j) => (j === i ? hex.slice(1).toLowerCase() : o)))} />
+        ))}
+        {own.some(Boolean) && <button className="subtle" onClick={() => put([])}>Back to its own colors</button>}
+      </div>
+    )
+  }
+  const ownRow = (kind: 'avatar' | 'effect') => {
+    const mine = kind === 'avatar' ? draft.ownDecoration : draft.ownEffect
+    const input = kind === 'avatar' ? decorationInput : effectInput
+    if (draft.ownAnimationsOff) return <div className="muted">Uploading your own animations has been turned off for this account.</div>
+    return (
+      <div className="row" style={{ flexWrap: 'wrap' }}>
+        <button disabled={busy} onClick={() => input.current?.click()}>{mine ? 'Replace your own' : 'Upload your own'}</button>
+        {mine && <button className="subtle" disabled={busy} onClick={() => animation(kind, null)}>Remove yours</button>}
+        <span className="muted">A Lottie file (.lottie or .json), {kind === 'avatar' ? 'square' : '300 × 420 or that shape'}, up to 50 KB, drawn shapes only.</span>
+        <input ref={input} type="file" accept=".lottie,.json,application/json" hidden onChange={e => { const f = e.target.files?.[0]; if (f) void animation(kind, f); e.target.value = '' }} />
+      </div>
+    )
+  }
 
   return (
     <Dialog title="Edit profile" onClose={onClose} wide>
@@ -304,14 +366,26 @@ export function ProfileEditor({ store, onClose }: { store: Store; onClose: () =>
           {draft.nameColor && <ColorRow label="Second color" value={draft.nameColor2} onChange={v => set({ nameColor2: v })} hint="makes a gradient" />}
 
           <div className="muted">Avatar decoration <span>— animated; hover to preview</span></div>
-          <div className="decogrid">{choice(null)}{avatarDecorations.map(choice)}</div>
-          {avatarDecorations.length === 0 && <div className="muted">This server has no decorations installed yet.</div>}
+          <div className="decogrid">
+            {choice(null)}{avatarDecorations.map(choice)}
+            {draft.ownDecoration && (
+              <button className={'decochoice' + (draft.decoration === draft.ownDecoration ? ' sel' : '')} title="The one you uploaded" aria-pressed={draft.decoration === draft.ownDecoration} onClick={() => set({ decoration: draft.ownDecoration ?? null })}>
+                <Avatar who={{ avatarUrl: draft.avatarUrl, decoration: draft.ownDecoration }} name={shown} serverUrl={serverUrl} size={44} animate="hover" />
+                <span>Yours</span>
+              </button>
+            )}
+          </div>
+          {colorsOf('avatar')}
+          {ownRow('avatar')}
 
           <div className="muted">Profile effect <span>— plays over your profile card</span></div>
-          <select value={draft.effect ?? ''} onChange={e => set({ effect: e.target.value || null })}>
+          <select aria-label="Profile effect" value={animationColors(draft.effect)?.base ?? ''} onChange={e => set({ effect: e.target.value || null })}>
             <option value="">None</option>
             {effects.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+            {draft.ownEffect && <option value={draft.ownEffect}>Yours</option>}
           </select>
+          {colorsOf('effect')}
+          {ownRow('effect')}
         </div>
 
         <div className="preview">

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { ChannelType, RollKind, RollRange, type ChannelDto, type RollItemDto } from '../types'
 import type { CatalogHit } from '../store'
 
@@ -21,11 +21,13 @@ export function P2PInfo() {
  * Stands between a person and a P2P voice channel. "warn" is the once-per-channel warning; "blocked" is what they
  * see when their account does not allow P2P at all. Neither joins anything by itself.
  */
-export function DirectChannelDialog({ kind, channelName, onJoin, onSettings, onClose }: {
+export function DirectChannelDialog({ kind, channelName, onJoin, onSettings, onClose, text = false }: {
   kind: 'warn' | 'blocked'; channelName: string; onJoin: () => void; onSettings: () => void; onClose: () => void
+  /** This is about connecting to a P2P text channel, not joining a voice one. */
+  text?: boolean
 }) {
   return (
-    <Dialog title={kind === 'warn' ? `Join ${channelName}? It is a P2P channel` : `${channelName} is a P2P channel`} onClose={onClose}>
+    <Dialog title={kind === 'warn' ? `${text ? 'Connect to' : 'Join'} ${channelName}? It is a P2P channel` : `${channelName} is a P2P channel`} onClose={onClose}>
       <div>
         In a P2P channel your app connects straight to everyone else's, not through the relay. <b>Everyone in it can find your IP address</b>,
         and so can anyone who joins while you are there. <P2PInfo />
@@ -36,7 +38,7 @@ export function DirectChannelDialog({ kind, channelName, onJoin, onSettings, onC
           <div className="buttons">
             <button className="subtle" style={{ marginRight: 'auto' }} onClick={() => { onClose(); onSettings() }}>Settings</button>
             <button onClick={onClose}>Cancel</button>
-            <button className="accent" onClick={onJoin}>Join anyway</button>
+            <button className="accent" onClick={onJoin}>{text ? 'Connect anyway' : 'Join anyway'}</button>
           </div>
         </>
       ) : (
@@ -119,16 +121,66 @@ export function AllowDirectDialog({ providers, username, onSignIn, onClose }: {
   )
 }
 
+/** What Tab stops at inside a dialog. */
+const TAB_STOPS = 'button:not(:disabled), [href], input:not(:disabled):not([type="hidden"]), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+
+/**
+ * Every dialog in the app. To a screen reader it is a dialog with its title as its name. While it is open the
+ * keyboard stays inside it (Tab goes round its controls, Escape closes it), and when it closes the keyboard goes
+ * back to whatever had it before.
+ */
 export function Dialog({ title, children, onClose, wide }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean }) {
+  const box = useRef<HTMLDivElement>(null)
+  const titleId = useId()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+  useEffect(() => {
+    const before = document.activeElement
+    // A field that asks for the keyboard as the dialog opens keeps it; otherwise the dialog itself takes it.
+    if (box.current && !box.current.contains(document.activeElement)) box.current.focus()
+    return () => { if (before instanceof HTMLElement && before.isConnected) before.focus() }
+  }, [])
+  const keepInside = (e: ReactKeyboardEvent) => {
+    if (e.key !== 'Tab' || !box.current) return
+    const stops = [...box.current.querySelectorAll<HTMLElement>(TAB_STOPS)].filter(el => el.offsetParent !== null)
+    const at = document.activeElement
+    if (stops.length === 0) { e.preventDefault(); return }
+    const first = stops[0]!, last = stops[stops.length - 1]!
+    if (e.shiftKey && (at === first || at === box.current)) { e.preventDefault(); last.focus() }
+    else if (!e.shiftKey && at === last) { e.preventDefault(); first.focus() }
+  }
   return (
     <div className="backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div className={'dialog' + (wide ? ' wide' : '')}><h3>{title}</h3>{children}</div>
+      <div ref={box} className={'dialog' + (wide ? ' wide' : '')} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onKeyDown={keepInside}>
+        <h3 id={titleId}>{title}</h3>{children}
+      </div>
     </div>
+  )
+}
+
+/** Banning someone from a server, with the choice to also delete what they wrote there. */
+export function BanDialog({ name, onBan, onClose }: { name: string; onBan: (deleteDays: number | null) => void; onClose: () => void }) {
+  const [wrote, setWrote] = useState('')
+  return (
+    <Dialog title={`Ban ${name}?`} onClose={onClose}>
+      <div>They will not be able to rejoin.</div>
+      <label className="muted" htmlFor="ban-delete">Also delete what they wrote in this server</label>
+      <select id="ban-delete" value={wrote} onChange={e => setWrote(e.target.value)}>
+        <option value="">Nothing</option>
+        <option value="1">The last day</option>
+        <option value="3">The last 3 days</option>
+        <option value="7">The last 7 days</option>
+        <option value="0">Everything they ever wrote here</option>
+      </select>
+      {wrote !== '' && <div className="muted">Deleted messages are gone for everyone and cannot be brought back. Messages in P2P channels are on people's own devices and are not affected.</div>}
+      <div className="buttons">
+        <button onClick={onClose}>Cancel</button>
+        <button className="accent" style={{ background: 'var(--red)' }} onClick={() => { onBan(wrote === '' ? null : Number(wrote)); onClose() }}>Ban</button>
+      </div>
+    </Dialog>
   )
 }
 
@@ -196,14 +248,18 @@ export function DeleteGroupDialog({ name, channels, onConfirm, onClose }: { name
 
 export function CreateChannelDialog({ categories, onSubmit, onClose, initialType = ChannelType.Text, canDirect = false }: {
   categories: ChannelDto[]; onSubmit: (name: string, type: number, parentId: string | null, direct: boolean) => void; onClose: () => void; initialType?: number
-  /** This person may create P2P voice channels. */
+  /** This person may create P2P channels. */
   canDirect?: boolean
 }) {
+  // A P2P group only takes P2P channels, so someone who may not make those is not offered it.
+  const groups = categories.filter(c => canDirect || !c.directSince)
   const [name, setName] = useState('')
   const [type, setType] = useState<number>(initialType)
-  const [parent, setParent] = useState<string>(categories[0]?.id ?? '')
+  const [parent, setParent] = useState<string>(groups[0]?.id ?? '')
   const [direct, setDirect] = useState(false)
-  const submit = () => { if (name.trim()) { onSubmit(name.trim(), type, type === ChannelType.Category ? null : parent || null, type === ChannelType.Voice && direct); onClose() } }
+  const group = type === ChannelType.Category ? false : !!groups.find(c => c.id === parent)?.directSince
+  const p2p = direct || group
+  const submit = () => { if (name.trim()) { onSubmit(name.trim(), type, type === ChannelType.Category ? null : parent || null, p2p); onClose() } }
   return (
     <Dialog title={type === ChannelType.Category ? 'Create category' : 'Create channel'} onClose={onClose}>
       <div className="row">
@@ -218,17 +274,20 @@ export function CreateChannelDialog({ categories, onSubmit, onClose, initialType
           <div className="muted">Category</div>
           <select value={parent} onChange={e => setParent(e.target.value)}>
             <option value="">(none)</option>
-            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {groups.map(c => <option key={c.id} value={c.id}>{c.name}{c.directSince ? '  ·  P2P' : ''}</option>)}
           </select>
         </>
       )}
-      {type === ChannelType.Voice && canDirect && (
+      {canDirect && (
         <>
           <div className="row">
-            <label className="row"><input type="checkbox" checked={direct} onChange={e => setDirect(e.target.checked)} /> <span>P2P channel</span></label>
+            <label className="row"><input type="checkbox" checked={p2p} disabled={group} onChange={e => setDirect(e.target.checked)} /> <span>{type === ChannelType.Category ? 'P2P group' : 'P2P channel'}</span></label>
             <P2PInfo />
           </div>
-          {direct && <div className="muted">People in it connect straight to each other and can find each other's IP address. Only people who allow P2P can join, and each is warned first.</div>}
+          {group && <div className="muted">This group is a P2P one, so every channel in it is a P2P channel.</div>}
+          {p2p && type === ChannelType.Category && <div className="muted">Every channel made in this group is a P2P channel, and only P2P channels can be moved into it. A group cannot be switched between P2P and ordinary afterwards.</div>}
+          {p2p && type === ChannelType.Voice && <div className="muted">People in it connect straight to each other and can find each other's IP address. Only people who allow P2P can join, and each is warned first.</div>}
+          {p2p && type === ChannelType.Text && <div className="muted">What is typed in it goes straight between people's apps and is kept only on their own devices; the server keeps none of it. People connected to it can find each other's IP address, and each is warned first. A text channel cannot be switched between P2P and ordinary afterwards.</div>}
         </>
       )}
       <div className="buttons"><button onClick={onClose}>Cancel</button><button className="accent" onClick={submit}>Create</button></div>

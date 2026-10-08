@@ -39,10 +39,12 @@ export interface UserProfileDto {
   id: string; username: string; displayName: string | null; avatarUrl: string | null; bannerUrl: string | null; accentColor: string | null
   bio: string | null; pronouns: string | null; nameFont: string | null; nameColor: string | null; nameColor2: string | null
   decoration: string | null; effect: string | null; createdAt: string; isBot: boolean
+  /** Only on your own profile: the ids of the animations you uploaded, and whether uploading has been closed to this account. */
+  ownDecoration?: string | null; ownEffect?: string | null; ownAnimationsOff?: boolean
 }
 /** Each field: undefined leaves it alone, '' clears it. */
 export type UpdateProfileRequest = Partial<Record<'displayName' | 'bio' | 'pronouns' | 'accentColor' | 'nameFont' | 'nameColor' | 'nameColor2' | 'decoration' | 'effect', string>>
-export interface DecorationDto { id: string; name: string; kind: 'avatar' | 'effect'; url: string }
+export interface DecorationDto { id: string; name: string; kind: 'avatar' | 'effect'; url: string; /** The colors it is drawn in ("9000ff"), each of which can be swapped for your own. */ colors?: string[] | null }
 /** What a server says about itself before sign-in: the protocol it speaks and the oldest client protocol it accepts. */
 export interface ServerMetaDto { protocol: number; minClientProtocol: number; version: string; /** What an invite link starts with on this server; the code follows. */ inviteBase?: string | null }
 /** What an invite leads to, shown before joining. */
@@ -57,7 +59,12 @@ export interface ChannelDto { id: string; guildId: string | null; parentId: stri
 /** An address other tools can post messages to. `token` and `url` only come back when it is made or renewed. */
 export interface WebhookDto { id: string; channelId: string; guildId: string; name: string; avatarUrl: string | null; createdById: string; createdAt: string; token?: string | null; url?: string | null }
 /** A bot. `token` and `interactionsSecret` only come back when it is made or its token is renewed. */
-export interface ApplicationDto { id: string; name: string; description: string | null; ownerId: string; botUserId: string; botUsername: string; interactionsUrl: string | null; createdAt: string; token?: string | null; interactionsSecret?: string | null }
+export interface ApplicationDto { id: string; name: string; description: string | null; ownerId: string; botUserId: string; botUsername: string; interactionsUrl: string | null; createdAt: string; token?: string | null; interactionsSecret?: string | null
+  /** A P2P bot: it connects straight to people's apps in the P2P channels it was let into, and does nothing else. Fixed when the bot is made. */
+  direct?: boolean
+}
+/** A P2P bot added to the server, and whether it has been let into one P2P channel. */
+export interface ChannelBotDto { applicationId: string; botUserId: string; name: string; granted: boolean }
 /** What deleting your account would take with it. */
 export interface AccountDeletionDto { ownedServers: string[]; bots: number }
 /** Whether this account allows P2P connections. Kept on the server; off unless the person turns it on. */
@@ -73,9 +80,19 @@ export interface MemberDto {
   displayName?: string | null; nameFont?: string | null; nameColor?: string | null; nameColor2?: string | null; decoration?: string | null
   /** Only on whole-server listings; changes arrive as PresenceStatus. */
   dnd?: boolean
+  /** Muted in this server's voice channels by someone who may mute members. */
+  voiceMuted?: boolean
 }
 /** A short-lived pass to a voice channel's room on a stream server: where it is, and who the holder is there. */
-export interface SfuPassDto { url: string; token: string }
+export interface SfuPassDto {
+  url: string; token: string
+  /** The key this room's sound and picture are encrypted with by the apps in it (base64). The stream server never has it. */
+  key?: string | null
+  /** On a pass to watch: the most this stream's sharer may send. The app stops watching a stream that arrives at more. */
+  limit?: StreamRateDto | null
+}
+/** A quality a stream can be sent at, and the most kilobits a second it may use. Set by the server's owner. */
+export interface StreamRateDto { height: number; fps: number; kbps: number }
 export interface GuildSummaryDto { guild: GuildDto; channels: ChannelDto[]; members: MemberDto[]; roles?: RoleDto[] | null; myPermissions: number; voice?: Record<string, VoiceParticipantDto[]> | null }
 export interface ItemIconDto { path: string }
 /** contentType is what the server found the file to be: image/* and video/* can be shown in place, anything else is a download. */
@@ -110,13 +127,21 @@ export interface MessageDto {
   embeds?: EmbedDto[] | null; authorAvatarUrl?: string | null; webhookId?: string | null; ephemeral?: boolean; rps?: RpsResultDto | null
   dice?: DiceDto | null; call?: CallLogDto | null
   fileOffer?: FileOfferDto | null
+  /** Files on a message from a P2P channel. They are not on the server: their contents come from other people's apps. */
+  p2pFiles?: import('./p2pText').P2PFile[]
 }
 export interface InviteDto { code: string; guildId: string; createdAt: string; expiresAt: string | null; maxUses: number | null; uses: number }
 export interface IceServerDto { urls: string[]; username: string | null; credential: string | null }
 /** A message from whoever runs the Maplecord server, to everyone online or just to you. */
 export interface SystemMessageDto { id: string; message: string; at: string }
 /** stream: what they are sharing with the channel, if anything ("screen", "window" or "camera"). */
-export interface VoiceParticipantDto { userId: string; username: string; connectionId: string; muted: boolean; stream?: string | null }
+export interface VoiceParticipantDto {
+  userId: string; username: string; connectionId: string; muted: boolean; stream?: string | null
+  /** In a P2P call only: the signing key of their app, and its one-off key for sealing set-up messages to them. */
+  publicKey?: string | null; seal?: string | null
+  /** They cannot be heard here: they may not speak in this channel, or a moderator muted them. */
+  silenced?: boolean
+}
 /** The server's rules for sharing video. Minutes of 0 mean never. */
 export interface StreamSettingsDto {
   enabled: boolean; maxStreamsPerChannel: number; maxViewersDirect: number; maxViewersRelayed: number
@@ -127,6 +152,10 @@ export interface StreamSettingsDto {
   streamServer?: boolean
   /** With a stream server: the most people who may watch one stream there. 0 = everyone in the channel. */
   maxViewersStreamServer?: number
+  /** We were picked, on the server, to share above its usual limits: the limits above are the full range. */
+  unrestricted?: boolean
+  /** What each quality is sent at on this server. An app from before this was sent uses rates of its own, held to maxKbps. */
+  rates?: StreamRateDto[] | null
 }
 export interface VoiceSignalDto { fromUserId: string; fromConnectionId: string; kind: 'offer' | 'answer' | 'ice'; payload: string }
 
