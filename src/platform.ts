@@ -133,6 +133,9 @@ export const CLIENT_PROTOCOL = 1
 export const bridge = (): MaplecordBridge | undefined => window.maplecord
 export const isElectron = () => !!window.maplecord
 
+/** A phone or tablet's browser: where a page in the background is slowed down or stopped, and comes back later. */
+export const isHandheld = () => !isElectron() && (appleTouch() || /Android/i.test(navigator.userAgent))
+
 /** An iPhone or iPad, in any browser (they are all Safari underneath). An iPad says it is a Mac; a real Mac has no touch screen. */
 export const appleTouch = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1)
 

@@ -103,7 +103,20 @@ export class VoiceEngine {
     this.gateOn = on
     this.gateThreshold = threshold
     this.detector?.node.port.postMessage({ threshold })
-    if (!this.push) this.setSending(this.talking || !on)
+    if (!this.push) this.setSending(this.talking || !on || this.background)
+  }
+
+  private background = false
+
+  /**
+   * A phone's browser went to the background, or came back. In the background whatever listens for speech may be
+   * stopped at any moment, and would leave our voice switched off at whatever it last decided: so there the voice is
+   * simply sent, from the moment the page is hidden until it is in front again. (Muting still mutes, and push to talk
+   * still goes by its key.)
+   */
+  setBackground(hidden: boolean) {
+    this.background = hidden
+    if (!this.push) this.setSending(this.talking || !this.gateOn || hidden)
   }
 
   private push = false
@@ -115,7 +128,7 @@ export class VoiceEngine {
    */
   setPushToTalk(on: boolean, held: boolean) {
     this.push = on
-    if (!on) { this.setSending(this.talking || !this.gateOn); return }
+    if (!on) { this.setSending(this.talking || !this.gateOn || this.background); return }
     const talking = held && !this.muted && !!this.local
     if (talking !== this.talking) { this.talking = talking; this.events.speaking(null, talking) }
     this.setSending(talking)
@@ -124,7 +137,7 @@ export class VoiceEngine {
   private setTalking(talking: boolean, keepSending = false) {
     if (this.push) return // the key decides, not the sound
     if (talking !== this.talking) { this.talking = talking; this.events.speaking(null, talking) }
-    this.setSending(talking || !this.gateOn || keepSending)
+    this.setSending(talking || !this.gateOn || keepSending || this.background)
   }
 
   private setSending(sending: boolean) {

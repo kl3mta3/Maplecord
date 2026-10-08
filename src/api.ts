@@ -187,9 +187,11 @@ export class Api {
   deleteBanner() { return this.request<UserProfileDto>('DELETE', '/api/me/banner') }
   decorations() { return this.request<DecorationDto[]>('GET', '/api/decorations') }
   /** An animation of your own: 'avatar' goes around your picture, 'effect' plays over your profile card. It is worn as soon as it is stored. */
-  uploadAnimation(kind: 'avatar' | 'effect', file: File) {
+  /** crop: a profile effect that is not the shape of a profile card is taken anyway, to fill the card with the overhang cut off. */
+  uploadAnimation(kind: 'avatar' | 'effect', file: File, crop = false) {
     const form = new FormData()
     form.append('file', file, file.name)
+    if (crop) form.append('crop', 'true')
     return this.request<UserProfileDto>('POST', `/api/me/animations/${kind}`, undefined, form)
   }
   deleteAnimation(kind: 'avatar' | 'effect') { return this.request<UserProfileDto>('DELETE', `/api/me/animations/${kind}`) }

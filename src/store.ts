@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Api, ApiError } from './api'
 import { ChatHub } from './hub'
-import { bridge, type OverlayAction } from './platform'
+import { bridge, isHandheld, type OverlayAction } from './platform'
 import { DEFAULT_GATE_LEVEL, DEFAULT_NOTIFY, defaultPluginSettings, gateThreshold, loadSettings, saveSettings, type GuildPrefs, type PluginSettings, type Settings, type UserPrefs } from './settings'
 import { pluginIconUrl, type PluginDrop, type PluginInfo, type PluginItem } from './pluginTypes'
 import { serverIconUrl, shareIcon, withTimeout } from './itemIcons'
@@ -1529,7 +1529,11 @@ export function useMaplecord() {
 
   // Back in front after being in the background (a phone's browser minimised, mostly): see VoiceEngine.recover.
   useEffect(() => {
-    const onBack = () => { if (!document.hidden) void voiceEngine.recover() }
+    const onBack = () => {
+      // Said as the page is hidden, while it can still do something about it (see VoiceEngine.setBackground).
+      if (isHandheld()) voiceEngine.setBackground(document.hidden)
+      if (!document.hidden) void voiceEngine.recover()
+    }
     document.addEventListener('visibilitychange', onBack)
     window.addEventListener('pageshow', onBack)
     return () => { document.removeEventListener('visibilitychange', onBack); window.removeEventListener('pageshow', onBack) }
@@ -1768,8 +1772,8 @@ export function useMaplecord() {
   }, [api, applyOwnProfile])
 
   /** Stores an animation of our own (around the picture, or over the profile card) and wears it, or with null takes ours away. */
-  const setProfileAnimation = useCallback(async (kind: 'avatar' | 'effect', file: File | null) => {
-    const p = file ? await api.uploadAnimation(kind, file) : await api.deleteAnimation(kind)
+  const setProfileAnimation = useCallback(async (kind: 'avatar' | 'effect', file: File | null, crop = false) => {
+    const p = file ? await api.uploadAnimation(kind, file, crop) : await api.deleteAnimation(kind)
     applyOwnProfile(p)
     return p
   }, [api, applyOwnProfile])

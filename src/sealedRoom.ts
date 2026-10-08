@@ -30,8 +30,12 @@ const bytesOf = (base64: string) => Uint8Array.from(atob(base64), c => c.charCod
  * A room ready to connect to, encrypting with the key that came with the pass. `undecryptable` is called if
  * something that arrives cannot be decrypted (which with the right key does not happen).
  */
-export async function openRoom(options: RoomOptions, pass: SfuPassDto, undecryptable?: (why: string) => void): Promise<Room> {
+export async function openRoom(given: RoomOptions, pass: SfuPassDto, undecryptable?: (why: string) => void): Promise<Room> {
   const { Room, RoomEvent, ExternalE2EEKeyProvider } = await import('livekit-client')
+  // Left to itself the library disconnects, and stops whatever we were sending (our microphone included), the moment
+  // the browser says the page is being hidden. A phone says that whenever its browser goes to the background, where
+  // a call is supposed to carry on. A page that is really closed takes its connections with it anyway.
+  const options: RoomOptions = { ...given, disconnectOnPageLeave: false }
   // A server from before this was built hands out no key, and its rooms are as they were.
   if (!pass.key) return new Room(options)
   const { default: CryptoWorker } = await import('livekit-client/e2ee-worker?worker')

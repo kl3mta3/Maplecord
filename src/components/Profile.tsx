@@ -225,6 +225,8 @@ export function ProfileEditor({ store, onClose }: { store: Store; onClose: () =>
   const [draft, setDraft] = useState<UserProfileDto | null>(null)
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
+  // "Fill and crop": a profile effect of any shape is taken, and fills the card with what overhangs cut off.
+  const [cropEffect, setCropEffect] = useState(false)
   const avatarInput = useRef<HTMLInputElement>(null)
   const bannerInput = useRef<HTMLInputElement>(null)
   const decorationInput = useRef<HTMLInputElement>(null)
@@ -274,7 +276,7 @@ export function ProfileEditor({ store, onClose }: { store: Store; onClose: () =>
     setBusy(true); setNote('')
     try {
       const was = kind === 'avatar' ? draft.ownDecoration : draft.ownEffect
-      const p = await store.setProfileAnimation(kind, file)
+      const p = await store.setProfileAnimation(kind, file, kind === 'effect' && cropEffect)
       const own = { ownDecoration: p.ownDecoration ?? null, ownEffect: p.ownEffect ?? null }
       setSaved(v => (v ? { ...v, ...own, decoration: p.decoration, effect: p.effect } : v))
       if (kind === 'avatar') setDraft(d => (d ? { ...d, ...own, decoration: file ? p.decoration : d.decoration === was ? null : d.decoration } : d))
@@ -319,7 +321,13 @@ export function ProfileEditor({ store, onClose }: { store: Store; onClose: () =>
       <div className="row" style={{ flexWrap: 'wrap' }}>
         <button disabled={busy} onClick={() => input.current?.click()}>{mine ? 'Replace your own' : 'Upload your own'}</button>
         {mine && <button className="subtle" disabled={busy} onClick={() => animation(kind, null)}>Remove yours</button>}
-        <span className="muted">A Lottie file (.lottie or .json), {kind === 'avatar' ? 'square' : '300 × 420 or that shape'}, up to 50 KB, drawn shapes only.</span>
+        {kind === 'effect' && (
+          <label className="row" title="Use an animation of any shape: it fills the card, and what does not fit is cut off.">
+            <input type="checkbox" checked={cropEffect} onChange={e => setCropEffect(e.target.checked)} />
+            <span>Fill and crop</span>
+          </label>
+        )}
+        <span className="muted">A Lottie file (.lottie or .json), {kind === 'avatar' ? 'square' : cropEffect ? 'any shape (it fills the card, cropped)' : '300 × 420 or that shape'}, up to 50 KB, drawn shapes only.</span>
         <input ref={input} type="file" accept=".lottie,.json,application/json" hidden onChange={e => { const f = e.target.files?.[0]; if (f) void animation(kind, f); e.target.value = '' }} />
       </div>
     )
