@@ -1,3 +1,4 @@
+import { connectionIdOf, hubOptions } from './hubConnect'
 import { HubConnection, HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/signalr'
 import type { DirectTextPeer } from './p2pText'
 import { makeSealer, seal, unseal, type Sealer } from './p2pIdentity'
@@ -63,7 +64,8 @@ export class ChatHub {
   readonly state = { status: 'disconnected' as 'disconnected' | 'connecting' | 'connected' | 'reconnecting' }
   onStatus: ((s: string) => void) | null = null
   /** How the server knows this app on the chat hub; file transfers are arranged between two of these. */
-  get connectionId() { return this.conn?.connectionId ?? null }
+  get connectionId() { return this.ownId ?? this.conn?.connectionId ?? null }
+  private ownId: string | null = null
   private serverUrl: () => string
   private token: () => string | null
 
@@ -98,9 +100,9 @@ export class ChatHub {
         made.catch(() => { if (this.sealer === made) this.sealer = null })
       }
       const sealer = this.sealerNow = await this.sealer
-      if (this.presentedOn !== this.c.connectionId) {
+      if (this.presentedOn !== this.connectionId) {
         await this.c.invoke('SealWith', mine.keyId, sealer.hello)
-        this.presentedOn = this.c.connectionId
+        this.presentedOn = this.connectionId
       }
       return sealer
     } catch { return null }
@@ -128,7 +130,7 @@ export class ChatHub {
     await this.disconnect()
     const conn = new HubConnectionBuilder()
       // withCredentials=false: we authenticate with the bearer token, which lets the server use a permissive CORS policy.
-      .withUrl(this.serverUrl().replace(/\/$/, '') + '/hubs/chat?app=' + encodeURIComponent(__APP_VERSION__), { accessTokenFactory: () => this.token() ?? '', withCredentials: false })
+      .withUrl(this.serverUrl().replace(/\/$/, '') + '/hubs/chat?app=' + encodeURIComponent(__APP_VERSION__), await hubOptions(this.serverUrl(), { accessTokenFactory: () => this.token() ?? '', withCredentials: false }))
       .withAutomaticReconnect()
       .configureLogging(LogLevel.Warning)
       .build()
@@ -152,14 +154,16 @@ export class ChatHub {
       if (this.sealerNow) this.fileKeys.set(`${offerId}|${requester}`, this.sealerNow.keyWith(theirSeal, publicKey, offerId).catch(() => null))
     })
     const forget = () => { this.presentedOn = null; this.fileKeys.clear(); this.outbox.clear(); this.inbox.clear() }
-    conn.onreconnecting(() => this.setStatus('reconnecting'))
-    conn.onreconnected(() => { forget(); this.setStatus('connected') })
+    conn.onreconnecting(() => { this.ownId = null; this.setStatus('reconnecting') })
+    // A connection that came back is a new one to the server, with a new id; it is known before anyone is told we are back.
+    conn.onreconnected(() => { forget(); void connectionIdOf(conn).then(id => { this.ownId = id; this.setStatus('connected') }) })
     conn.onclose(() => this.setStatus('disconnected'))
     this.setStatus('connecting')
     await conn.start()
     // start() resolves at the handshake, before the server has subscribed this connection to our channels.
     // A hub call is only answered after that, so this closes the window where an incoming message would be missed.
     await conn.invoke('Ready')
+    this.ownId = await connectionIdOf(conn)
     this.conn = conn
     this.setStatus('connected')
   }
@@ -167,6 +171,7 @@ export class ChatHub {
   async disconnect() {
     const c = this.conn
     this.conn = null
+    this.ownId = null
     if (c) { try { await c.stop() } catch { /* gone */ } }
   }
 

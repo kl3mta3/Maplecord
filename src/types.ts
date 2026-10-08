@@ -46,7 +46,7 @@ export interface UserProfileDto {
 export type UpdateProfileRequest = Partial<Record<'displayName' | 'bio' | 'pronouns' | 'accentColor' | 'nameFont' | 'nameColor' | 'nameColor2' | 'decoration' | 'effect', string>>
 export interface DecorationDto { id: string; name: string; kind: 'avatar' | 'effect'; url: string; /** The colors it is drawn in ("9000ff"), each of which can be swapped for your own. */ colors?: string[] | null }
 /** What a server says about itself before sign-in: the protocol it speaks and the oldest client protocol it accepts. */
-export interface ServerMetaDto { protocol: number; minClientProtocol: number; version: string; /** What an invite link starts with on this server; the code follows. */ inviteBase?: string | null }
+export interface ServerMetaDto { protocol: number; minClientProtocol: number; version: string; /** The server runs as several copies: see hubConnect.ts. */ webSocketsOnly?: boolean; /** What an invite link starts with on this server; the code follows. */ inviteBase?: string | null }
 /** What an invite leads to, shown before joining. */
 export interface InvitePreviewDto { code: string; guild: GuildDto; memberCount: number }
 export interface TokenResponse { accessToken: string; expiresAt: string; user: UserDto }

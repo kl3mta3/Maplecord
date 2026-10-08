@@ -1,3 +1,4 @@
+import { connectionIdOf, hubOptions } from './hubConnect'
 import { HubConnection, HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/signalr'
 import type { CallDto, VoiceParticipantDto, VoiceSignalDto } from './types'
 import type { SfuPassDto } from './types'
@@ -45,7 +46,8 @@ export class VoiceHub {
   private token: () => string | null
   constructor(serverUrl: () => string, token: () => string | null) { this.serverUrl = serverUrl; this.token = token }
 
-  get connectionId() { return this.conn?.connectionId ?? null }
+  get connectionId() { return this.ownId ?? this.conn?.connectionId ?? null }
+  private ownId: string | null = null
 
   // ---- Sealing (see SealedRoom) ---------------------------------------------------------------------------------------
 
@@ -74,9 +76,9 @@ export class VoiceHub {
       made.catch(() => { if (this.sealer === made) this.sealer = null })
     }
     const sealer = this.sealerNow = await this.sealer
-    if (this.presentedOn !== this.c.connectionId) {
+    if (this.presentedOn !== this.connectionId) {
       await this.c.invoke('SealWith', mine.keyId, sealer.hello)
-      this.presentedOn = this.c.connectionId
+      this.presentedOn = this.connectionId
     }
     return sealer
   }
@@ -154,7 +156,7 @@ export class VoiceHub {
   private async connectCore(handlers: VoiceEvents) {
     await this.disconnect()
     const conn = new HubConnectionBuilder()
-      .withUrl(this.serverUrl().replace(/\/$/, '') + `/hubs/voice?app=${encodeURIComponent(__APP_VERSION__)}&e2ee=${canEncryptMedia() ? 1 : 0}`, { accessTokenFactory: () => this.token() ?? '', withCredentials: false })
+      .withUrl(this.serverUrl().replace(/\/$/, '') + `/hubs/voice?app=${encodeURIComponent(__APP_VERSION__)}&e2ee=${canEncryptMedia() ? 1 : 0}`, await hubOptions(this.serverUrl(), { accessTokenFactory: () => this.token() ?? '', withCredentials: false }))
       .withAutomaticReconnect()
       .configureLogging(LogLevel.Warning)
       .build()
@@ -182,15 +184,19 @@ export class VoiceHub {
     }
     for (const [name, handler] of Object.entries(wired)) conn.on(name, handler as (...args: unknown[]) => void)
     // After a drop the server has forgotten both the call we were in and the key we presented.
-    conn.onreconnected(() => { this.shut(); this.presentedOn = null; this.onReconnected?.() })
+    conn.onreconnecting(() => { this.ownId = null })
+    // A connection that came back is a new one to the server, with a new id; it is known before the app rejoins anything with it.
+    conn.onreconnected(() => { this.shut(); this.presentedOn = null; void connectionIdOf(conn).then(id => { this.ownId = id; this.onReconnected?.() }) })
     conn.onclose(() => { this.shut(); this.presentedOn = null; if (this.conn === conn) this.onClosed?.() })
     await conn.start()
+    this.ownId = await connectionIdOf(conn)
     this.conn = conn
   }
 
   async disconnect() {
     const c = this.conn
     this.conn = null
+    this.ownId = null
     if (c) { try { await c.stop() } catch { /* gone */ } }
   }
 
