@@ -644,7 +644,7 @@ export function useMaplecord() {
       GuildDeleted: guildId => setGuilds(gs => gs.filter(g => g.guild.id !== guildId)),
       ChannelCreated: c => { if (c.guildId) patchGuild(c.guildId, g => (g.channels.some(x => x.id === c.id) ? g : { ...g, channels: [...g.channels, c] })) },
       ChannelUpdated: c => {
-        if (c.guildId) patchGuild(c.guildId, g => ({ ...g, channels: g.channels.map(x => (x.id === c.id ? c : x)) }))
+        if (c.guildId) patchGuild(c.guildId, g => ({ ...g, channels: g.channels.map(x => (x.id === c.id ? { ...c, bots: c.bots ?? x.bots } : x)) }))
         const cur = voiceRef.current
         if (cur && cur.channelId === c.id && (c.directSince ?? null) !== cur.directSince) dropForKindChange(c.directSince ?? null)
       },

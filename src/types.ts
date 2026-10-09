@@ -65,7 +65,7 @@ export interface GuildDto { id: string; name: string; iconUrl: string | null; ow
 export interface DiscoverGuildDto { id: string; name: string; iconUrl: string | null; description: string | null; topics: string[]; memberCount: number; joined: boolean }
 export interface ChannelOverrideDto { id: string; channelId: string; roleId: string | null; userId: string | null; allow: number; deny: number }
 /** directSince is set on a P2P voice channel: people in it connect straight to each other and can see each other's IP address. */
-export interface ChannelDto { id: string; guildId: string | null; parentId: string | null; name: string; type: ChannelType; position: number; overrides?: ChannelOverrideDto[] | null; directSince?: string | null }
+export interface ChannelDto { id: string; guildId: string | null; parentId: string | null; name: string; type: ChannelType; position: number; overrides?: ChannelOverrideDto[] | null; directSince?: string | null; /** The P2P bots (their accounts) let into this channel. Missing when what sent it was not about them. */ bots?: string[] | null }
 /** An address other tools can post messages to. `token` and `url` only come back when it is made or renewed. */
 export interface WebhookDto { id: string; channelId: string; guildId: string; name: string; avatarUrl: string | null; createdById: string; createdAt: string; token?: string | null; url?: string | null }
 /** A bot. `token` and `interactionsSecret` only come back when it is made or its token is renewed. */
@@ -86,7 +86,7 @@ export type UserStatus = (typeof UserStatus)[keyof typeof UserStatus]
 export interface PreferencesDto { status: UserStatus; ignoreFriendRequests: boolean; friendRequestsSharedOnly: boolean }
 export interface RoleDto { id: string; guildId: string; name: string; color: string | null; position: number; permissions: number; isEveryone: boolean }
 export interface MemberDto {
-  userId: string; username: string; avatarUrl: string | null; nickname: string | null; role: number; online: boolean; roleIds?: string[] | null; isBot?: boolean
+  userId: string; username: string; avatarUrl: string | null; nickname: string | null; role: number; online: boolean; roleIds?: string[] | null; isBot?: boolean; /** A P2P bot: only in the P2P channels it was let into. */ directBot?: boolean
   displayName?: string | null; nameFont?: string | null; nameColor?: string | null; nameColor2?: string | null; decoration?: string | null; tag?: TagDto | null
   /** Only on whole-server listings; changes arrive as PresenceStatus. */
   dnd?: boolean

@@ -49,6 +49,7 @@ import { appleTouch } from '../platform'
 import { DropBanner, PluginsDialog } from './Plugins'
 import { SharePicker, StreamStage } from './Streams'
 import { CHAT_LEAST, COLUMNS, ColumnGrip, clampColumn, type Column } from './ColumnGrip'
+import { channelMembers } from '../channelViewers'
 
 type DialogState =
   | { kind: 'createGuild' } | { kind: 'joinGuild' } | { kind: 'addGuild' } | { kind: 'discover' } | { kind: 'channelAccess'; channelId: string } | { kind: 'deleteGroup'; channelId: string; name: string } | { kind: 'createChannel'; category?: boolean } | { kind: 'startRoll'; rollKind: RollKind }
@@ -388,6 +389,10 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   }
   const dmUnreadTotal = Object.values(store.dmUnread).reduce((a, b) => a + b, 0) + requests.length
   const s = store.stats
+  // The member list shows the people of the channel being read: those who can see it. With no channel open, everyone
+  // but the P2P bots, which are only ever in particular channels.
+  const inChannel = g && store.selectedChannel?.guildId === g.guild.id ? g.channels.find(c => c.id === store.selectedChannel?.id) ?? null : null
+  const listed = useMemo(() => (!g ? [] : inChannel ? channelMembers(g, inChannel) : g.members.filter(m => !m.directBot)), [g, inChannel])
 
   /** Voice channel click: join (if not already there) and open its chat. */
   const openVoice = (channelId: string) => {
@@ -670,14 +675,17 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           </>
         ) : (
           <>
-            <div className="header">Members <span className="muted">{g?.members.filter(m => m.online).length ?? 0} online</span></div>
+            <div className="header" title={inChannel ? `The people who can see ${inChannel.name}` : undefined}>Members <span className="muted">{listed.filter(m => m.online).length} online</span></div>
             <div className="list">
-              {g && [...g.members].sort((a, b) => Number(b.online) - Number(a.online) || a.username.localeCompare(b.username)).map(m => (
+              {g && [...listed].sort((a, b) => Number(b.online) - Number(a.online) || a.username.localeCompare(b.username)).map(m => (
                 <div key={m.userId} className={'member' + (m.online ? ' online' : ' offline') + (m.online && store.dndUsers.has(m.userId) ? ' dnd' : '') + (ignored(m.userId) ? ' ignoredmember' : '')} title={'@' + m.username + ' — click for profile, right-click for options'}
                   onClick={e => openCard(e, m.userId, memberName(m))} onContextMenu={e => openUserMenu(e, m.userId, memberName(m))}>
                   <div className="row" style={{ gap: 0 }}><Avatar who={m} name={memberName(m)} serverUrl={serverUrl} size={28} /><div className="presence" /></div>
                   <div className="grow" style={{ overflow: 'hidden' }}>
-                    <div className="nameline" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><UserName who={store.appearanceOf(m.userId)} label={memberName(m)} roleColor={roleColor(m.userId, g)} /> {m.isBot && <span className="tag" style={{ fontSize: 10, background: 'var(--accent)', borderRadius: 3, padding: '0 4px', color: '#fff' }}>BOT</span>}</div>
+                    <div className="nameline" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><UserName who={store.appearanceOf(m.userId)} label={memberName(m)} roleColor={roleColor(m.userId, g)} /> {m.isBot && (m.directBot
+                      // A P2P bot wears the colour P2P channels do.
+                      ? <span className="p2ptag" title="A P2P bot: it is only in the P2P channels it was let into">BOT</span>
+                      : <span className="tag" style={{ fontSize: 10, background: 'var(--accent)', borderRadius: 3, padding: '0 4px', color: '#fff' }}>BOT</span>)}</div>
                     <div className="role">{roleLabel(m, g)}</div>
                   </div>
                 </div>

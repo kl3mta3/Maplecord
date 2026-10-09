@@ -23,7 +23,7 @@
     "lint": "oxlint .",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json",
-    "test": "node electron/plugins.test.ts && node electron/soundPacks.test.ts && node electron/fileCache.test.ts && node electron/saveStreams.test.ts && node electron/offeredFiles.test.ts && node electron/updateRules.test.ts && node src/invites.test.ts && node src/streamLimit.test.ts && node src/effectRules.test.ts",
+    "test": "node electron/plugins.test.ts && node electron/soundPacks.test.ts && node electron/fileCache.test.ts && node electron/saveStreams.test.ts && node electron/offeredFiles.test.ts && node electron/updateRules.test.ts && node src/invites.test.ts && node src/streamLimit.test.ts && node src/effectRules.test.ts && node src/channelViewers.test.ts",
     "sounds": "node tools/make-sounds.mjs"
   },
   "dependencies": {
