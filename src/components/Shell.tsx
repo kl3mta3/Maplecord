@@ -39,7 +39,7 @@ import type { GuildFolder } from '../settings'
 import { Avatar, ProfileEditor, ProfilePopout, UserName } from './Profile'
 import { assetUrl, initials, shownName, type Appearance } from '../profile'
 import { STATUSES, UserSettingsDialog } from './UserSettings'
-import { ArrowLeftRight, AudioLines, ChevronDown, ChevronRight, HeadphoneOff, Headphones, LoaderCircle, Menu, Mic, MicOff, MonitorUp, Paperclip, Phone, PhoneOff, Plus, Settings as SettingsIcon, Signal, Users, Video } from 'lucide-react'
+import { ArrowLeftRight, AudioLines, ChartBarDecreasing, ChevronDown, ChevronRight, HeadphoneOff, Headphones, Images, LoaderCircle, Menu, Mic, MicOff, MonitorUp, Paperclip, Phone, PhoneOff, Pin, Plus, Search, Settings as SettingsIcon, Signal, Users, Video } from 'lucide-react'
 import { AddServerDialog, CreateServerDialog, DiscoverDialog, JoinServerDialog } from './Servers'
 import { ChannelAccessDialog } from './ChannelAccess'
 import { DeleteAccountDialog } from './DeleteAccount'
@@ -1105,9 +1105,9 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
         <span className="muted">{channel?.type === ChannelType.Voice ? '🔊' : channel?.type === ChannelType.DirectMessage ? '@' : channel?.type === ChannelType.Forum ? '☰' : channel?.type === ChannelType.Gallery ? '🖼' : '#'}</span><span>{channel?.name ?? 'Pick a channel'}</span>
         {(kept || p2pChat) && channel && (
           <span className="chattools">
-            {(mayMedia || mediaOnly) && <button className="subtle" aria-pressed={mediaOnly} title={mediaOnly ? 'Show the whole conversation again' : 'Show only the pictures and videos'} aria-label="Only pictures and videos" onClick={() => setMediaOnly(on => !on)}>🖼</button>}
-            <button className="subtle" title="Pinned messages" aria-label="Pinned messages" onClick={() => setPanel('pins')}>📌</button>
-            <button className="subtle" title={p2pChat ? 'Search what this device has kept of this channel' : 'Search this channel'} aria-label="Search this channel" onClick={() => setPanel('search')}>🔍</button>
+            {(mayMedia || mediaOnly) && <button className="subtle" aria-pressed={mediaOnly} title={mediaOnly ? 'Show the whole conversation again' : 'Show only the pictures and videos'} aria-label="Only pictures and videos" onClick={() => setMediaOnly(on => !on)}><Images size={16} /></button>}
+            <button className="subtle" title="Pinned messages" aria-label="Pinned messages" onClick={() => setPanel('pins')}><Pin size={16} /></button>
+            <button className="subtle" title={p2pChat ? 'Search what this device has kept of this channel' : 'Search this channel'} aria-label="Search this channel" onClick={() => setPanel('search')}><Search size={16} /></button>
           </span>
         )}
         {channel?.type === ChannelType.DirectMessage && <span style={{ width: 8, height: 8, borderRadius: 4, background: !store.selectedDm?.online ? '#555566' : store.dndUsers.has(store.selectedDm.other.id) ? 'var(--red)' : 'var(--green)', display: 'inline-block' }} title={!store.selectedDm?.online ? 'Offline' : store.dndUsers.has(store.selectedDm.other.id) ? 'Do not disturb' : 'Online'} />}
@@ -1319,7 +1319,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
               onClick={() => void startVoiceMessage()} disabled={!channel || !!store.uploading || voiceBusy}><AudioLines size={17} /></button>
           )}
           {canSendDirect && <button title={directSendTitle} aria-label="Send a file straight from your computer" onClick={() => directRef.current?.click()} disabled={!channel}><ArrowLeftRight size={17} /></button>}
-          {((kept && !thread && channel?.type !== ChannelType.Gallery) || (p2p?.state === 'on' && (p2pTalk ? !p2pRoot : P2P_GALLERY_POLLS && !!p2pRoot))) && <button title={p2pGallery ? 'Ask a poll about this post' : 'Start a poll'} aria-label="Start a poll" onClick={() => setPanel('poll')} disabled={!channel}>📊</button>}
+          {((kept && !thread && channel?.type !== ChannelType.Gallery) || (p2p?.state === 'on' && (p2pTalk ? !p2pRoot : P2P_GALLERY_POLLS && !!p2pRoot))) && <button title={p2pGallery ? 'Ask a poll about this post' : 'Start a poll'} aria-label="Start a poll" onClick={() => setPanel('poll')} disabled={!channel}><ChartBarDecreasing size={17} /></button>}
           <textarea
             placeholder={!channel ? '' : p2pRoot ? (p2pGallery ? 'Say something about this post  ·  P2P' : 'Reply in this thread  ·  P2P') : thread ? (isPostsChannel(channel) ? 'Say something about this post' : 'Reply in this thread') : p2pChat ? `Message #${channel.name}  ·  P2P` : `Message ${channel.type === ChannelType.DirectMessage ? '@' : '#'}${channel.name}`}
             value={text} disabled={!channel || (p2pChat && p2p?.state !== 'on')} rows={1}

@@ -750,7 +750,7 @@ button.chip { cursor: pointer; }
 .replybar { display: flex; align-items: center; gap: 8px; margin: 0 12px; padding: 4px 10px; background: var(--bg1); border: 1px solid var(--border); border-bottom: 0; border-radius: 8px 8px 0 0; font-size: 13px; min-width: 0; }
 .replybar .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chattools { display: inline-flex; gap: 2px; }
-.chattools button { padding: 2px 6px; }
+.chattools button { padding: 4px 6px; display: inline-flex; align-items: center; }
 .messageeditor { display: grid; gap: 4px; max-width: 640px; margin: 2px 0; }
 .messageeditor textarea { width: 100%; resize: vertical; }
 .poll { display: grid; gap: 4px; margin-top: 6px; max-width: 440px; }
@@ -799,4 +799,4 @@ button.chip { cursor: pointer; }
 .mediatile .video { display: grid; gap: 6px; justify-items: center; padding: 8px; min-width: 0; max-width: 100%; }
 .mediatile .video .play { font-size: 26px; line-height: 1; }
 .mediatile .video .name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chattools button[aria-pressed="true"] { border-color: var(--accent); background: var(--bg0); }
+.chattools button[aria-pressed="true"] { border-color: var(--accent); background: var(--bg0); color: var(--accent); }

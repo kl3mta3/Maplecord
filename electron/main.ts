@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, net, powerMonitor, protocol, screen, session, shell } from 'electron'
+import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, net, powerMonitor, protocol, screen, session, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
@@ -19,6 +19,41 @@ const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 
 let win: BrowserWindow | null = null
 let overlay: BrowserWindow | null = null
+
+// ---- Only the app's own page, in the app's own windows ---------------------------------
+// Nothing in the app should ever be able to put another page in these windows, or run script in them that is not the
+// app's. These are the second line if something ever does: the windows refuse to go anywhere else, and the main
+// process (which can read and write files) answers only the app's own page in one of its two windows.
+
+/** Whether an address is the app's own page: the dev server's while running from source, the built index.html otherwise. */
+function isAppPage(url: string): boolean {
+  try {
+    const at = new URL(url)
+    if (VITE_DEV_SERVER_URL) return at.origin === new URL(VITE_DEV_SERVER_URL).origin
+    return at.protocol === 'file:' && path.normalize(fileURLToPath(at)).toLowerCase() === path.normalize(path.join(RENDERER_DIST, 'index.html')).toLowerCase()
+  } catch { return false }
+}
+
+/** Keeps a window on the app's own page: it may load it again, and go nowhere else. */
+function stayOnApp(window: BrowserWindow) {
+  window.webContents.on('will-navigate', (event, url) => { if (!isAppPage(url)) event.preventDefault() })
+}
+
+/** Whether a request to the main process comes from the app's own page, in the top frame of the main window or the overlay. */
+function fromApp(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
+  const frame = event.senderFrame
+  if (!frame || frame !== event.sender.mainFrame || !isAppPage(frame.url)) return false
+  return (!!win && event.sender === win.webContents) || (!!overlay && event.sender === overlay.webContents)
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- each handler says what it takes
+const handle = (channel: string, listener: (event: IpcMainInvokeEvent, ...args: any[]) => unknown) =>
+  ipcMain.handle(channel, (event, ...args) => {
+    if (!fromApp(event)) throw new Error('Refused: this did not come from the app.')
+    return listener(event, ...args)
+  })
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- each handler says what it takes
+const on = (channel: string, listener: (event: IpcMainEvent, ...args: any[]) => void) =>
+  ipcMain.on(channel, (event, ...args) => { if (fromApp(event)) listener(event, ...args) })
 let overlayState: unknown = null
 let overlayEnabled = true
 let overlayTopmostTimer: NodeJS.Timeout | undefined
@@ -60,6 +95,7 @@ function createWindow() {
     child.webContents.on('will-navigate', event => event.preventDefault())
   })
 
+  stayOnApp(win)
   if (VITE_DEV_SERVER_URL) win.loadURL(VITE_DEV_SERVER_URL)
   else win.loadFile(path.join(RENDERER_DIST, 'index.html'))
   win.on('closed', () => {
@@ -105,6 +141,8 @@ function ensureOverlay(): BrowserWindow {
   })
   overlay.setAlwaysOnTop(true, 'screen-saver')
   overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  stayOnApp(overlay)
+  overlay.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   if (VITE_DEV_SERVER_URL) overlay.loadURL(VITE_DEV_SERVER_URL + '?overlay=1')
   else overlay.loadFile(path.join(RENDERER_DIST, 'index.html'), { query: { overlay: '1' } })
   overlay.on('moved', () => { const [x, y] = overlay!.getPosition(); saveOverlayPrefs({ x, y }) })
@@ -114,7 +152,7 @@ function ensureOverlay(): BrowserWindow {
   return overlay
 }
 
-ipcMain.on('overlay-state', (_event, state: unknown) => {
+on('overlay-state', (_event, state: unknown) => {
   overlayState = state
   if (state && overlayEnabled) {
     const w = ensureOverlay()
@@ -124,11 +162,11 @@ ipcMain.on('overlay-state', (_event, state: unknown) => {
     overlay?.hide()
   }
 })
-ipcMain.on('overlay-enabled', (_event, enabled: boolean) => { overlayEnabled = enabled; if (!enabled) overlay?.hide() })
-ipcMain.on('overlay-ready', event => event.sender.send('overlay-state', overlayState))
-ipcMain.on('overlay-action', (_event, action: string) => win?.webContents.send('overlay-action', action))
+on('overlay-enabled', (_event, enabled: boolean) => { overlayEnabled = enabled; if (!enabled) overlay?.hide() })
+on('overlay-ready', event => event.sender.send('overlay-state', overlayState))
+on('overlay-action', (_event, action: string) => win?.webContents.send('overlay-action', action))
 // The overlay page asks for the size its current mode needs (pill / launcher / live card); keep the top-left anchored.
-ipcMain.on('overlay-resize', (_event, size: { width: number; height: number }) => {
+on('overlay-resize', (_event, size: { width: number; height: number }) => {
   if (!overlay) return
   const [w, h] = overlay.getContentSize()
   if (w !== size.width || h !== size.height) overlay.setContentSize(Math.round(size.width), Math.round(size.height))
@@ -139,7 +177,7 @@ ipcMain.on('overlay-resize', (_event, size: { width: number; height: number }) =
  * server's login URL, and resolve with the one-time code the server redirects back with.
  * The renderer then exchanges the code for a JWT over HTTPS; no provider secret is ever in the app.
  */
-ipcMain.handle('oauth-login', (_event, serverUrl: string, provider: string) =>
+handle('oauth-login', (_event, serverUrl: string, provider: string) =>
   new Promise<string>((resolve, reject) => {
     const server = http.createServer((req, res) => {
       const url = new URL(req.url ?? '/', 'http://127.0.0.1')
@@ -206,14 +244,14 @@ function registerPluginProtocol() {
 
 // Sound packs the user added: <userData>/sounds/<Pack>/<event>.wav. Maplecord itself ships only generated sounds.
 const soundsDirectory = () => path.join(app.getPath('userData'), 'sounds')
-ipcMain.handle('sound-packs', () => listSoundPacks(soundsDirectory()))
-ipcMain.handle('sounds-open-folder', () => { fs.mkdirSync(soundsDirectory(), { recursive: true }); return shell.openPath(soundsDirectory()) })
+handle('sound-packs', () => listSoundPacks(soundsDirectory()))
+handle('sounds-open-folder', () => { fs.mkdirSync(soundsDirectory(), { recursive: true }); return shell.openPath(soundsDirectory()) })
 
-ipcMain.handle('plugins-list', () => plugins.list())
-ipcMain.handle('plugins-reload', () => plugins.reload())
-ipcMain.on('plugins-configure', (_event, config: Record<string, PluginRuntimeConfig>) => plugins.configure(config ?? {}))
-ipcMain.handle('plugins-open-folder', () => shell.openPath(plugins.directory))
-ipcMain.handle('plugins-install', async () => {
+handle('plugins-list', () => plugins.list())
+handle('plugins-reload', () => plugins.reload())
+on('plugins-configure', (_event, config: Record<string, PluginRuntimeConfig>) => plugins.configure(config ?? {}))
+handle('plugins-open-folder', () => shell.openPath(plugins.directory))
+handle('plugins-install', async () => {
   if (!win) return { installed: false, error: null }
   const picked = await dialog.showOpenDialog(win, { title: 'Choose a plugin folder (the one containing manifest.json)', properties: ['openDirectory'] })
   if (picked.canceled || !picked.filePaths[0]) return { installed: false, error: null }
@@ -221,7 +259,7 @@ ipcMain.handle('plugins-install', async () => {
   catch (e) { plugins.reload(); return { installed: false, error: e instanceof Error ? e.message : String(e) } }
   finally { win.webContents.send('plugins-changed', plugins.list()) }
 })
-ipcMain.handle('plugins-pick-log', async () => {
+handle('plugins-pick-log', async () => {
   if (!win) return null
   const picked = await dialog.showOpenDialog(win, { title: 'Choose the log file the game writes', properties: ['openFile'] })
   return picked.canceled ? null : picked.filePaths[0] ?? null
@@ -231,7 +269,7 @@ ipcMain.handle('plugins-pick-log', async () => {
 // The page shows its own picker (like Discord's) from this list, tells us which one was chosen, and then asks the
 // browser engine for a display capture; the handler below answers that request with the chosen source and nothing else.
 let chosenSource: string | null = null
-ipcMain.handle('share-sources', async () => {
+handle('share-sources', async () => {
   const sources = await desktopCapturer.getSources({ types: ['window', 'screen'], thumbnailSize: { width: 320, height: 180 }, fetchWindowIcons: true })
   return sources
     // Our own overlay is not something to share.
@@ -244,8 +282,8 @@ ipcMain.handle('share-sources', async () => {
       icon: s.appIcon && !s.appIcon.isEmpty() ? s.appIcon.toDataURL() : null,
     }))
 })
-ipcMain.handle('share-choose', (_event, id: string | null) => { chosenSource = typeof id === 'string' ? id : null })
-ipcMain.handle('system-idle-seconds', () => powerMonitor.getSystemIdleTime())
+handle('share-choose', (_event, id: string | null) => { chosenSource = typeof id === 'string' ? id : null })
+handle('system-idle-seconds', () => powerMonitor.getSystemIdleTime())
 
 function registerDisplayCapture() {
   session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
@@ -267,26 +305,26 @@ function registerDisplayCapture() {
 
 // Files received from other people are written to disk as they arrive (see electron/saveStreams.ts).
 const saves = new SaveStreams()
-ipcMain.handle('save-begin', async (_event, name: string) => {
+handle('save-begin', async (_event, name: string) => {
   if (!win) return null
   // Only the name: whatever folders the sender's file name claims are not followed.
   const safe = path.basename(String(name)).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_') || 'file'
   const picked = await dialog.showSaveDialog(win, { title: 'Save file', defaultPath: path.join(app.getPath('downloads'), safe) })
   return picked.canceled || !picked.filePath ? null : saves.begin(picked.filePath)
 })
-ipcMain.handle('save-write', (_event, id: string, data: Uint8Array) => saves.write(id, data))
-ipcMain.handle('save-end', async (_event, id: string) => { await saves.end(id) })
-ipcMain.handle('save-abort', (_event, id: string) => saves.abort(id))
+handle('save-write', (_event, id: string, data: Uint8Array) => saves.write(id, data))
+handle('save-end', async (_event, id: string) => { await saves.end(id) })
+handle('save-abort', (_event, id: string) => saves.abort(id))
 
 // Files offered to other people are remembered, so the offers come back after a restart (see electron/offeredFiles.ts).
 // The window names an offer, never a path: the path only ever comes from a file the person picked (see preload).
 const offered = new OfferedFiles(path.join(app.getPath('userData'), 'offered-files.json'))
-ipcMain.handle('offer-remember', (_event, offerId: string, filePath: string, scope: string) => offered.remember(offerId, filePath, scope))
-ipcMain.handle('offer-list', (_event, scope: string) => offered.list(String(scope)))
-ipcMain.handle('offer-read', (_event, offerId: string, offset: number, length: number) => offered.read(offerId, offset, length))
-ipcMain.handle('offer-forget', (_event, offerId: string) => offered.forget(offerId))
+handle('offer-remember', (_event, offerId: string, filePath: string, scope: string) => offered.remember(offerId, filePath, scope))
+handle('offer-list', (_event, scope: string) => offered.list(String(scope)))
+handle('offer-read', (_event, offerId: string, offset: number, length: number) => offered.read(offerId, offset, length))
+handle('offer-forget', (_event, offerId: string) => offered.forget(offerId))
 
-ipcMain.handle('open-external', (_event, url: string) => { if (/^https?:/.test(url)) shell.openExternal(url) })
+handle('open-external', (_event, url: string) => { if (/^https?:/.test(url)) shell.openExternal(url) })
 
 // Global roll hotkeys work while a game has focus; the renderer decides what they mean for the active roll.
 // ---- Invite links ---------------------------------------------------------------
@@ -313,7 +351,7 @@ else if (app.isPackaged) {
 }
 // macOS hands links over this way instead.
 app.on('open-url', (event, url) => { if (url.toLowerCase().startsWith(INVITE_LINK)) { event.preventDefault(); followInviteLink(url) } })
-ipcMain.handle('take-invite-link', () => { const link = waitingInviteLink; waitingInviteLink = null; return link })
+handle('take-invite-link', () => { const link = waitingInviteLink; waitingInviteLink = null; return link })
 
 function registerHotkeys() {
   const send = (key: string) => () => win?.webContents.send('hotkey', key)
@@ -323,7 +361,7 @@ function registerHotkeys() {
 }
 
 // Push to talk: the window says which key to watch while it is in voice, and is told when that key goes down and up.
-ipcMain.handle('push-key-watch', (_event, key: unknown) => {
+handle('push-key-watch', (_event, key: unknown) => {
   const wanted = key && typeof key === 'object' && ((key as { kind?: unknown }).kind === 'key' || (key as { kind?: unknown }).kind === 'mouse') && typeof (key as { code?: unknown }).code === 'string'
     ? { kind: (key as { kind: 'key' | 'mouse' }).kind, code: (key as { code: string }).code.slice(0, 32), label: '' }
     : null
@@ -332,7 +370,7 @@ ipcMain.handle('push-key-watch', (_event, key: unknown) => {
 
 /** A newer version that could not be put in place by itself, for the window to mention once. */
 let updateNotice: UpdateNotice | null = null
-ipcMain.handle('take-update-notice', () => { const notice = updateNotice; updateNotice = null; return notice })
+handle('take-update-notice', () => { const notice = updateNotice; updateNotice = null; return notice })
 
 app.whenReady().then(async () => {
   if (!onlyCopy) return

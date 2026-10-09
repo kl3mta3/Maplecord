@@ -89,7 +89,10 @@ you connect to that way can, with the know how, find your IP address**.
   you join one. They never mix with ordinary channels: a channel is one or the other, and changing which empties
   it first. Making one takes its own permission.
 - **P2P text channels and galleries.** What is posted in one goes straight between people's apps and is kept only on
-  their own devices. The server keeps none of it.
+  their own devices. The server keeps none of it. Replies, reactions, threads, edits, pins and search work there
+  too, and polls in text channels. Search looks through what your own device has kept.
+- **Editing in a P2P channel** changes what everyone's app shows. It cannot take back the copies people already
+  received, which stay on their devices.
 - **P2P calls** are a separate button in a conversation with a friend. It only shows if you allow P2P, it asks
   first, and it only rings if your friend allows P2P too.
 - **Files of any size** between friends who both allow P2P, straight from one computer to the other (the ⇄ button).
