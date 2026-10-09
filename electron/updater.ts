@@ -149,6 +149,7 @@ if ($rest.Count -gt 0) { Start-Process -FilePath (Join-Path $Dir $Exe) -Argument
  * could not be put in place by itself.
  */
 export async function updateAtStartup(options: { server: string; repo: string; logo: string }): Promise<{ quitting: boolean; notice: UpdateNotice | null; done: () => void }> {
+  if (app.isPackaged && process.platform === 'win32' && !options.server) log(`this is ${app.getVersion()}; it was built without a server address, so it cannot look for updates`)
   if (!app.isPackaged || process.platform !== 'win32' || !options.server) return { quitting: false, notice: null, done: () => {} }
 
   const screen = splash(options.logo)
@@ -157,7 +158,11 @@ export async function updateAtStartup(options: { server: string; repo: string; l
   try {
     const latest = await latestFrom(options.server)
     const current = app.getVersion()
-    if (!latest?.version || !isNewer(latest.version, current)) return stay()
+    if (!latest?.version || !isNewer(latest.version, current)) {
+      // Written down too: when an update does not come, this says whether the server was asked and what it said.
+      log(`this is ${current}; ${latest === null ? 'the server did not say what the newest release is' : latest.version ? `the server says the newest release is ${latest.version}` : 'the server knows of no release'}`)
+      return stay()
+    }
     log(`this is ${current}; the newest release is ${latest.version}`)
 
     const appDir = path.dirname(process.execPath)
