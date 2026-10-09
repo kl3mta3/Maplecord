@@ -1,3 +1,4 @@
+import { TagCardDialog, onTagOpened } from './Tags'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Store } from '../store'
 import type { TransferView } from '../transfer'
@@ -56,6 +57,9 @@ type DialogState =
 
 export default function Shell({ store, onSignedOut }: { store: Store; onSignedOut: () => void }) {
   const [dialog, setDialog] = useState<DialogState>(null)
+  // A server tag beside someone's name was clicked: whose it is.
+  const [tagOpen, setTagOpen] = useState<string | null>(null)
+  useEffect(() => onTagOpened(setTagOpen), [])
   /**
    * On a phone there is room for one thing at a time: the channel list, the conversation, or the people in it.
    * Wide windows show all three and ignore this.
@@ -653,6 +657,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
         )}
       </div>
 
+      {tagOpen && <TagCardDialog guildId={tagOpen} serverUrl={store.settings.serverUrl} load={store.tagCard} onJoin={store.joinPublicGuild} onClose={() => setTagOpen(null)} />}
       {dialog?.kind === 'createGuild' && <CreateServerDialog onCreate={(name, isPublic, kind) => void store.createGuild(name, isPublic, kind)} onClose={() => setDialog(null)} />}
       {store.deleteStep && <DeleteAccountDialog store={store} />}
       {store.pendingInvite && (
@@ -768,7 +773,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       )}
       {dialog?.kind === 'server' && g && (
         <ServerSettingsDialog api={store.api} channels={g.channels} guild={g.guild} roles={g.roles ?? []} members={g.members} myPermissions={myPerms} meId={me?.id ?? ''}
-          onRename={store.renameGuild} onIcon={store.setGuildIcon} onListing={store.setGuildListing} onCreateRole={store.createRole} onUpdateRole={store.updateRole} onDeleteRole={store.deleteRole} onSetMemberRoles={store.setMemberRoles}
+          onRename={store.renameGuild} onIcon={store.setGuildIcon} onListing={store.setGuildListing} tagSymbols={store.tagSymbols} onSetTag={store.setGuildTag} onRemoveTag={store.removeGuildTag} onCreateRole={store.createRole} onUpdateRole={store.updateRole} onDeleteRole={store.deleteRole} onSetMemberRoles={store.setMemberRoles}
           onClose={() => setDialog(null)} />
       )}
       {store.directPrompt && (

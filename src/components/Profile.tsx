@@ -1,3 +1,4 @@
+import { TagPill } from './Tags'
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
 // The "light" player draws to SVG only and has no expression support, so an animation file cannot run script.
 import lottie, { type AnimationItem } from 'lottie-web/build/player/lottie_light'
@@ -91,8 +92,11 @@ export function UserName({ who, label, roleColor, className, style, onClick, onC
   onClick?: (e: MouseEvent) => void; onContextMenu?: (e: MouseEvent) => void
 }) {
   return (
-    <span className={'uname' + (onClick ? ' clickable' : '') + (className ? ' ' + className : '')} style={{ ...nameStyle(who, roleColor), ...style }}
-      onClick={onClick} onContextMenu={onContextMenu}>{label}</span>
+    <>
+      <span className={'uname' + (onClick ? ' clickable' : '') + (className ? ' ' + className : '')} style={{ ...nameStyle(who, roleColor), ...style }}
+        onClick={onClick} onContextMenu={onContextMenu}>{label}</span>
+      {who?.tag && <TagPill tag={who.tag} />}
+    </>
   )
 }
 
@@ -106,7 +110,7 @@ export function ProfileCardBody({ profile, serverUrl, roles, nickname, serverNam
   const effect = decorationUrl(serverUrl, 'effect', profile.effect)
   const since = new Date(profile.createdAt)
   const who: Appearance = { userId: profile.id, username: profile.username, displayName: profile.displayName, avatarUrl: profile.avatarUrl,
-    nameFont: profile.nameFont, nameColor: profile.nameColor, nameColor2: profile.nameColor2, decoration: profile.decoration }
+    nameFont: profile.nameFont, nameColor: profile.nameColor, nameColor2: profile.nameColor2, decoration: profile.decoration, tag: profile.tag ?? null }
   return (
     <div className="profilecard">
       <div className="banner" style={banner ? { backgroundImage: `url("${banner}")` } : { background: profile.accentColor ?? undefined }} />
@@ -285,6 +289,18 @@ export function ProfileEditor({ store, onClose }: { store: Store; onClose: () =>
     finally { setBusy(false) }
   }
 
+  // A tag is worn, like a picture, the moment it is chosen.
+  const wear = async (guildId: string | null) => {
+    setBusy(true); setNote('')
+    try {
+      await store.wearTag(guildId)
+      const from = guildId ? store.guilds.find(g => g.guild.id === guildId)?.guild : null
+      const tag = from?.tagText ? { guildId: from.id, text: from.tagText, symbol: from.tagSymbol ?? null } : null
+      setSaved(v => (v ? { ...v, tag } : v)); setDraft(d => (d ? { ...d, tag } : d))
+    } catch (e) { setNote(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+
   const avatarDecorations = store.decorations.filter(d => d.kind === 'avatar')
   const effects = store.decorations.filter(d => d.kind === 'effect')
   // One of the server's is chosen whatever colors it is worn in.
@@ -385,6 +401,12 @@ export function ProfileEditor({ store, onClose }: { store: Store; onClose: () =>
           </div>
           {colorsOf('avatar')}
           {ownRow('avatar')}
+
+          <div className="muted">Server tag <span>— shown beside your name everywhere, and tells people you are in that server</span></div>
+          <select aria-label="Server tag" value={draft.tag?.guildId ?? ''} disabled={busy} onChange={e => void wear(e.target.value || null)}>
+            <option value="">None</option>
+            {store.guilds.filter(g => g.guild.tagText && !g.guild.noTag).map(g => <option key={g.guild.id} value={g.guild.id}>{(g.guild.tagSymbol ? g.guild.tagSymbol + ' ' : '') + g.guild.tagText} — {g.guild.name}</option>)}
+          </select>
 
           <div className="muted">Profile effect <span>— plays over your profile card</span></div>
           <select aria-label="Profile effect" value={animationColors(draft.effect)?.base ?? ''} onChange={e => set({ effect: e.target.value || null })}>

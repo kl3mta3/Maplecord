@@ -1,5 +1,5 @@
 import type {
-  AccountDeletionDto, ApplicationDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto,
+  AccountDeletionDto, ApplicationDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto,
 } from './types'
 
 export class ApiError extends Error {
@@ -73,6 +73,14 @@ export class Api {
   /** Public servers, by name and/or exact topic. */
   discover(q: string, topic: string) { return this.request<DiscoverGuildDto[]>('GET', `/api/discover?q=${encodeURIComponent(q)}&topic=${encodeURIComponent(topic)}`) }
   discoverTopics() { return this.request<string[]>('GET', '/api/discover/topics') }
+  /** The symbols a server tag can carry. */
+  tagSymbols() { return this.request<string[]>('GET', '/api/tags/symbols') }
+  setGuildTag(guildId: string, text: string, symbol: string | null) { return this.request<GuildDto>('PUT', `/api/guilds/${guildId}/tag`, { text, symbol }) }
+  removeGuildTag(guildId: string) { return this.request<GuildDto>('DELETE', `/api/guilds/${guildId}/tag`) }
+  /** Wears the tag of one of our servers beside our name, or with null none. */
+  wearTag(guildId: string | null) { return this.request<UserDto>('PUT', '/api/me/tag', { guildId }) }
+  /** Whose tag is that? */
+  tagCard(guildId: string) { return this.request<TagCardDto>('GET', `/api/tags/${guildId}`) }
   joinPublic(guildId: string) { return this.request<GuildSummaryDto>('POST', `/api/discover/${guildId}/join`) }
   /** What one role or one person is allowed and denied in one channel, beyond what their roles say. */
   setChannelOverride(channelId: string, kind: 'role' | 'user', id: string, allow: number, deny: number) { return this.request<ChannelOverrideDto>('PUT', `/api/channels/${channelId}/overrides/${kind}/${id}`, { allow, deny }) }

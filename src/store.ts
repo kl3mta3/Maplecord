@@ -340,7 +340,9 @@ export function useMaplecord() {
   const [systemMessages, setSystemMessages] = useState<SystemMessageDto[]>([])
   /** signOut is defined further down; the connection's status handler needs to reach it. */
   const signOutRef = useRef<() => Promise<void>>(async () => {})
-  const dismissSystemMessage = useCallback((id: string) => setSystemMessages(list => list.filter(m => m.id !== id)), [])
+  /** The ones closed since the app started. The log-on message comes again with every reconnect; once closed, it stays closed. */
+  const closedSystemMessages = useRef(new Set<string>())
+  const dismissSystemMessage = useCallback((id: string) => { closedSystemMessages.current.add(id); setSystemMessages(list => list.filter(m => m.id !== id)) }, [])
   const [status, setStatus] = useState('Connecting…')
   const [commands, setCommands] = useState<CommandDto[]>([])
   const [stats, setStats] = useState<Stats>(loadStats)
@@ -600,7 +602,7 @@ export function useMaplecord() {
       DmOpened: dm => setDms(ds => (ds.some(d => d.channelId === dm.channelId) ? ds : [dm, ...ds])),
       // Someone changed how they appear: update every place we hold a copy of them.
       UserUpdated: (u: UserDto) => {
-        const look = { avatarUrl: u.avatarUrl, displayName: u.displayName ?? null, nameFont: u.nameFont ?? null, nameColor: u.nameColor ?? null, nameColor2: u.nameColor2 ?? null, decoration: u.decoration ?? null }
+        const look = { avatarUrl: u.avatarUrl, displayName: u.displayName ?? null, nameFont: u.nameFont ?? null, nameColor: u.nameColor ?? null, nameColor2: u.nameColor2 ?? null, decoration: u.decoration ?? null, tag: u.tag ?? null }
         setGuilds(gs => gs.map(g => (g.members.some(m => m.userId === u.id) ? { ...g, members: g.members.map(m => (m.userId === u.id ? { ...m, ...look } : m)) } : g)))
         const swap = <T extends { user: UserDto }>(f: T): T => (f.user.id === u.id ? { ...f, user: u } : f)
         setFriends(fr => ({ friends: fr.friends.map(swap), incoming: fr.incoming.map(swap), outgoing: fr.outgoing.map(swap) }))
@@ -674,7 +676,7 @@ export function useMaplecord() {
         setMessages(ms => ms.map(m => (m.fileOffer?.id === offerId ? { ...m, fileOffer: { ...m.fileOffer, available: false, withdrawn: withdrawn || m.fileOffer.withdrawn } } : m)))
       },
       FileOfferResumed: (_channelId, offerId) => setMessages(ms => ms.map(m => (m.fileOffer?.id === offerId ? { ...m, fileOffer: { ...m.fileOffer, available: true } } : m))),
-      SystemMessage: m => setSystemMessages(list => [...list.filter(x => x.id !== m.id), m].slice(-4)),
+      SystemMessage: m => { if (!closedSystemMessages.current.has(m.id)) setSystemMessages(list => [...list.filter(x => x.id !== m.id), m].slice(-4)) },
     })
 
     // The server knows voice membership per connection. After a reconnect (network blip, server restart) it has forgotten
@@ -1214,6 +1216,16 @@ export function useMaplecord() {
   }), [api, selectGuild])
 
   /** Joins a public server straight from the list of them. Throws what went wrong, for that list to show. */
+  // ---- Server tags
+  const tagSymbolsRef = useRef<Promise<string[]> | null>(null)
+  /** The symbols a tag can carry: asked for once. */
+  const tagSymbols = useCallback(() => (tagSymbolsRef.current ??= api.tagSymbols().catch(e => { tagSymbolsRef.current = null; throw e })), [api])
+  const setGuildTag = useCallback(async (guildId: string, text: string, symbol: string | null) => { const guild = await api.setGuildTag(guildId, text, symbol); patchGuild(guildId, x => ({ ...x, guild })) }, [api, patchGuild])
+  const removeGuildTag = useCallback(async (guildId: string) => { const guild = await api.removeGuildTag(guildId); patchGuild(guildId, x => ({ ...x, guild })) }, [api, patchGuild])
+  /** Which of our servers' tags we wear, or none. Everyone who can see us is told by the server, ourselves included. */
+  const wearTag = useCallback(async (guildId: string | null) => { const user = await api.wearTag(guildId); updateSettings({ user }) }, [api, updateSettings])
+  const tagCard = useCallback((guildId: string) => api.tagCard(guildId), [api])
+
   const joinPublicGuild = useCallback(async (guildId: string) => {
     const g = await api.joinPublic(guildId)
     const state: GuildState = { ...g, unread: 0, channelUnread: {} }
@@ -1976,6 +1988,8 @@ export function useMaplecord() {
     await hub.disconnect()
     // What was picked while signed in is let go of. What the desktop app remembers stays, for this account's next sign-in.
     transferEngine.dropOffers()
+    // Whoever signs in next is shown the log-on message, whatever the last person closed.
+    closedSystemMessages.current.clear(); setSystemMessages([])
     updateSettings({ accessToken: null, tokenExpires: null, user: null })
     setGuilds([]); setSelectedGuildId(null); setSelectedChannelId(null); setHome(false); setFriends(EMPTY_FRIENDS); setDms([]); setReady(false)
   }, [hub, leaveVoice, transferEngine, updateSettings, voiceHub])
@@ -2370,7 +2384,7 @@ export function useMaplecord() {
     soundPacks, reloadSoundPacks, openSoundsFolder,
     startRoll, quickRoll, roll, voteEnd, dismissRoll, coinFlip, invokeCommand,
     activeRps, startRps, rpsPick, rpsThrow, dismissRps,
-    createGuild, joinGuild, joinPublicGuild, setGuildListing, deleteMessage, disconnectMember, setVoiceMuted, moveChannel, inviteToServer, openInvite, createInvite, pendingInvite, acceptInvite, dismissInvite: () => setPendingInvite(null), createChannel, leaveGuild, kickMember, banMember, signOut,
+    createGuild, joinGuild, joinPublicGuild, tagSymbols, setGuildTag, removeGuildTag, wearTag, tagCard, setGuildListing, deleteMessage, disconnectMember, setVoiceMuted, moveChannel, inviteToServer, openInvite, createInvite, pendingInvite, acceptInvite, dismissInvite: () => setPendingInvite(null), createChannel, leaveGuild, kickMember, banMember, signOut,
     sharing, shareQuality: streamEngine.quality, localStream: streamEngine.localStream, shareViewers: streamEngine.viaServer ? { total: viewerCounts[voiceHub.connectionId ?? ''] ?? 0, relayed: 0 } : streamEngine.viewerCounts(), watching: streamEngine.watching(),
     streamOf: (streamer: string) => streamEngine.streamOf(streamer), viewerCounts, streamRules, loadStreamRules,
     startShare, stopShare, watchStream, unwatchStream, setStreamLimit: (streamer: string, kbps: number) => streamEngine.requestLimit(streamer, kbps),

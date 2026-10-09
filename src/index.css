@@ -670,3 +670,18 @@ button.chip { cursor: pointer; }
 .p2pbar { display: flex; align-items: center; gap: 12px; padding: 2px 16px; font-size: 12px; }
 .p2pbar.wide { margin: 6px 12px; padding: 10px 12px; font-size: 13px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg1); }
 .p2pbar .bad { color: var(--red); }
+
+/* Server tags: a small label beside a name. Always the same height; four letters and a symbol at most. */
+.tagpill { display: inline-flex; align-items: center; gap: 3px; height: 16px; padding: 0 5px; margin-left: 6px; border-radius: 4px; background: var(--bg3); border: 1px solid var(--border);
+  color: var(--text); font: 700 10px/1 ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: 0.4px; vertical-align: middle; white-space: nowrap; -webkit-text-fill-color: currentColor; }
+.tagpill .sym { font-size: 11px; line-height: 1; }
+.tagpill.clickable { cursor: pointer; }
+.tagpill.clickable:hover, .tagpill.clickable:focus-visible { border-color: var(--accent2); outline: none; }
+.tagcard { display: grid; gap: 10px; }
+.tagcard .icon { width: 44px; height: 44px; border-radius: 12px; object-fit: cover; }
+.tagcard .name { font-weight: 700; font-size: 16px; }
+.tagcard .facts { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.tagsettings { display: grid; gap: 6px; margin-top: 14px; }
+.tagsettings .symbols { display: grid; grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)); gap: 4px; max-height: 180px; overflow: auto; padding: 6px; background: var(--bg1); border: 1px solid var(--border); border-radius: 8px; }
+.tagsettings .symbols button { padding: 4px 0; font-size: 16px; }
+.tagsettings .symbols button.sel { border-color: var(--accent2); }

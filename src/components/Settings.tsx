@@ -1,3 +1,4 @@
+import { TagSettings } from './Tags'
 import { useEffect, useRef, useState } from 'react'
 import { isElectron } from '../platform'
 import { Permission, hasPermission, type ChannelDto, type GuildDto, type MemberDto, type RoleDto } from '../types'
@@ -71,12 +72,16 @@ export const PERMISSION_LABELS: { bit: number; name: string; hint: string }[] = 
 
 const ROLE_SWATCHES = ['#9000ff', '#00ddff', '#ff008c', '#2cfc00', '#f19511', '#ff3b3b', '#ffd700', '#1abc9c', '#e91e63', '#3498db', '#95a5a6', '#ffffff']
 
-export function ServerSettingsDialog({ api, channels, guild, roles, members, myPermissions, meId, onRename, onIcon, onListing, onCreateRole, onUpdateRole, onDeleteRole, onSetMemberRoles, onClose }: {
+export function ServerSettingsDialog({ api, channels, guild, roles, members, myPermissions, meId, onRename, onIcon, onListing, tagSymbols, onSetTag, onRemoveTag, onCreateRole, onUpdateRole, onDeleteRole, onSetMemberRoles, onClose }: {
   api: Api; channels: ChannelDto[]
   guild: GuildDto; roles: RoleDto[]; members: MemberDto[]; myPermissions: number; meId: string
   onRename: (name: string) => Promise<void>
   onIcon: (file: File | null) => Promise<void>
   onListing: (patch: { isPublic: boolean; description: string; topics: string[] }) => Promise<void>
+  /** The server's tag: the symbols one can carry, setting it, and taking it away. */
+  tagSymbols: () => Promise<string[]>
+  onSetTag: (guildId: string, text: string, symbol: string | null) => Promise<void>
+  onRemoveTag: (guildId: string) => Promise<void>
   onCreateRole: (name: string, color: string | null, permissions: number) => Promise<void>
   onUpdateRole: (roleId: string, patch: { name?: string; color?: string | null; permissions?: number }) => Promise<void>
   onDeleteRole: (roleId: string) => Promise<void>
@@ -133,6 +138,8 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, myP
             <button className="accent" disabled={!name.trim() || name.trim() === guild.name} onClick={() => onRename(name.trim())}>Save</button>
           </div>
           <ListingSettings key={`${guild.isPublic}|${guild.description ?? ''}|${(guild.topics ?? []).join(',')}`} isPublic={!!guild.isPublic} description={guild.description ?? ''} topics={guild.topics ?? []} onSave={onListing} />
+          <TagSettings guild={guild} people={members.filter(m => !m.isBot).length} symbols={tagSymbols}
+            onSave={(text, symbol) => onSetTag(guild.id, text, symbol)} onRemove={() => onRemoveTag(guild.id)} />
         </>
       )}
 

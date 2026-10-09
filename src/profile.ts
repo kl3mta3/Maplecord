@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import type { MemberDto, UserDto } from './types'
+import type { MemberDto, UserDto, TagDto } from './types'
 
 // Name fonts are bundled with the app (open-licensed, via @fontsource) rather than fetched from a font service:
 // a request to someone else's server for a font would tell them who is using Maplecord and when.
@@ -43,16 +43,18 @@ export interface Appearance {
   nameColor: string | null
   nameColor2: string | null
   decoration: string | null
+  /** The server tag they wear beside their name, if any. */
+  tag?: TagDto | null
 }
 
 export const appearanceOfUser = (u: UserDto): Appearance => ({
   userId: u.id, username: u.username, displayName: u.displayName ?? null, avatarUrl: u.avatarUrl ?? null,
-  nameFont: u.nameFont ?? null, nameColor: u.nameColor ?? null, nameColor2: u.nameColor2 ?? null, decoration: u.decoration ?? null,
+  nameFont: u.nameFont ?? null, nameColor: u.nameColor ?? null, nameColor2: u.nameColor2 ?? null, decoration: u.decoration ?? null, tag: u.tag ?? null,
 })
 
 export const appearanceOfMember = (m: MemberDto): Appearance => ({
   userId: m.userId, username: m.username, displayName: m.displayName ?? null, avatarUrl: m.avatarUrl ?? null,
-  nameFont: m.nameFont ?? null, nameColor: m.nameColor ?? null, nameColor2: m.nameColor2 ?? null, decoration: m.decoration ?? null,
+  nameFont: m.nameFont ?? null, nameColor: m.nameColor ?? null, nameColor2: m.nameColor2 ?? null, decoration: m.decoration ?? null, tag: m.tag ?? null,
 })
 
 /** The name to show for someone: what they chose, or else what they registered with. */

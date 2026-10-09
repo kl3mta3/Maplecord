@@ -31,16 +31,26 @@ export const hasPermission = (held: number, required: number) =>
   (held & Permission.Administrator) !== 0 || (held & required) === required
 
 /** username = the fixed name they registered with; displayName = what they chose to be called (null = username). */
+/** A server's tag as someone wears it: which server it is from, up to four letters or digits, and a symbol if it has one. */
+export interface TagDto { guildId: string; text: string; symbol?: string | null }
+/** What anyone is told about the server a tag belongs to. Of a private server, someone outside it gets only the start of each word of its name. */
+export interface TagCardDto {
+  guildId: string; text: string; symbol: string | null; name: string; private: boolean; iconUrl: string | null; description: string | null
+  members: number; online: number; createdAt: string; joined: boolean; canJoin: boolean
+}
+
 export interface UserDto {
   id: string; username: string; avatarUrl: string | null; displayName?: string | null
   nameFont?: string | null; nameColor?: string | null; nameColor2?: string | null; decoration?: string | null
+  /** The server tag they wear beside their name. */
+  tag?: TagDto | null
 }
 export interface UserProfileDto {
   id: string; username: string; displayName: string | null; avatarUrl: string | null; bannerUrl: string | null; accentColor: string | null
   bio: string | null; pronouns: string | null; nameFont: string | null; nameColor: string | null; nameColor2: string | null
   decoration: string | null; effect: string | null; createdAt: string; isBot: boolean
   /** Only on your own profile: the ids of the animations you uploaded, and whether uploading has been closed to this account. */
-  ownDecoration?: string | null; ownEffect?: string | null; ownAnimationsOff?: boolean
+  ownDecoration?: string | null; ownEffect?: string | null; ownAnimationsOff?: boolean; tag?: TagDto | null
 }
 /** Each field: undefined leaves it alone, '' clears it. */
 export type UpdateProfileRequest = Partial<Record<'displayName' | 'bio' | 'pronouns' | 'accentColor' | 'nameFont' | 'nameColor' | 'nameColor2' | 'decoration' | 'effect', string>>
@@ -50,7 +60,7 @@ export interface ServerMetaDto { protocol: number; minClientProtocol: number; ve
 /** What an invite leads to, shown before joining. */
 export interface InvitePreviewDto { code: string; guild: GuildDto; memberCount: number }
 export interface TokenResponse { accessToken: string; expiresAt: string; user: UserDto }
-export interface GuildDto { id: string; name: string; iconUrl: string | null; ownerId: string; createdAt: string; /** Listed for anyone to find and join. */ isPublic?: boolean; description?: string | null; topics?: string[] | null }
+export interface GuildDto { id: string; name: string; iconUrl: string | null; ownerId: string; createdAt: string; /** Listed for anyone to find and join. */ isPublic?: boolean; description?: string | null; topics?: string[] | null; /** The tag its members may wear, and whether tags are turned off for it. */ tagText?: string | null; tagSymbol?: string | null; noTag?: boolean }
 /** A public server as the list of them shows it. */
 export interface DiscoverGuildDto { id: string; name: string; iconUrl: string | null; description: string | null; topics: string[]; memberCount: number; joined: boolean }
 export interface ChannelOverrideDto { id: string; channelId: string; roleId: string | null; userId: string | null; allow: number; deny: number }
@@ -77,7 +87,7 @@ export interface PreferencesDto { status: UserStatus; ignoreFriendRequests: bool
 export interface RoleDto { id: string; guildId: string; name: string; color: string | null; position: number; permissions: number; isEveryone: boolean }
 export interface MemberDto {
   userId: string; username: string; avatarUrl: string | null; nickname: string | null; role: number; online: boolean; roleIds?: string[] | null; isBot?: boolean
-  displayName?: string | null; nameFont?: string | null; nameColor?: string | null; nameColor2?: string | null; decoration?: string | null
+  displayName?: string | null; nameFont?: string | null; nameColor?: string | null; nameColor2?: string | null; decoration?: string | null; tag?: TagDto | null
   /** Only on whole-server listings; changes arrive as PresenceStatus. */
   dnd?: boolean
   /** Muted in this server's voice channels by someone who may mute members. */
