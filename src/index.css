@@ -671,10 +671,15 @@ button.chip { cursor: pointer; }
 .p2pbar.wide { margin: 6px 12px; padding: 10px 12px; font-size: 13px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg1); }
 .p2pbar .bad { color: var(--red); }
 
-/* Server tags: a small label beside a name. Always the same height; four letters and a symbol at most. */
+/* Server tags: a small label beside a name. Always the same height; five letters and a symbol at most. */
 .tagpill { display: inline-flex; align-items: center; gap: 3px; height: 16px; padding: 0 5px; margin-left: 6px; border-radius: 4px; background: var(--bg3); border: 1px solid var(--border);
   color: var(--text); font: 700 10px/1 ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: 0.4px; vertical-align: middle; white-space: nowrap; -webkit-text-fill-color: currentColor; }
 .tagpill .sym { font-size: 11px; line-height: 1; }
+/* A name in a narrow list: the name gives way and is cut short, and the tag after it always stays in view. */
+.nameline { display: flex; align-items: center; min-width: 0; }
+.nameline > .uname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nameline > :not(.uname) { flex-shrink: 0; }
+.nameline > :not(.uname):not(.tagpill) { margin-left: 4px; }
 .tagpill.clickable { cursor: pointer; }
 .tagpill.clickable:hover, .tagpill.clickable:focus-visible { border-color: var(--accent2); outline: none; }
 .tagcard { display: grid; gap: 10px; }

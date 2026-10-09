@@ -457,7 +457,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
                 <div key={d.channelId} className={'dm' + (d.channelId === store.selectedChannel?.id ? ' active' : '')} onClick={() => store.selectChannel(d.channelId)} onContextMenu={e => openUserMenu(e, d.other.id, shownName(d.other))}>
                   <Avatar who={d.other} name={shownName(d.other)} serverUrl={serverUrl} size={24} />
                   <span className={'presence' + (d.online ? ' online' : '')} />
-                  <span className="grow" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: (store.dmUnread[d.channelId] ?? 0) > 0 ? 600 : undefined }}><UserName who={store.appearanceOf(d.other.id)} label={shownName(d.other)} /></span>
+                  <span className="grow nameline" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: (store.dmUnread[d.channelId] ?? 0) > 0 ? 600 : undefined }}><UserName who={store.appearanceOf(d.other.id)} label={shownName(d.other)} /></span>
                   {(store.dmUnread[d.channelId] ?? 0) > 0 && <span className="badge">{store.dmUnread[d.channelId]}</span>}
                 </div>
               ))}
@@ -633,7 +633,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
               {[...store.friends.friends].sort((a, b) => Number(b.online) - Number(a.online) || a.user.username.localeCompare(b.user.username)).map(f => (
                 <div key={f.user.id} className={'member' + (f.online ? ' online' : ' offline') + (f.online && store.dndUsers.has(f.user.id) ? ' dnd' : '')} title="Click to message · right-click for options" onClick={() => store.openDm(f.user.id)} onContextMenu={e => openUserMenu(e, f.user.id, shownName(f.user))}>
                   <div className="row" style={{ gap: 0 }}><Avatar who={f.user} name={shownName(f.user)} serverUrl={serverUrl} size={28} /><div className="presence" /></div>
-                  <div className="grow" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><UserName who={store.appearanceOf(f.user.id)} label={shownName(f.user)} /></div>
+                  <div className="grow nameline" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><UserName who={store.appearanceOf(f.user.id)} label={shownName(f.user)} /></div>
                 </div>
               ))}
             </div>
@@ -647,7 +647,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
                   onClick={e => openCard(e, m.userId, memberName(m))} onContextMenu={e => openUserMenu(e, m.userId, memberName(m))}>
                   <div className="row" style={{ gap: 0 }}><Avatar who={m} name={memberName(m)} serverUrl={serverUrl} size={28} /><div className="presence" /></div>
                   <div className="grow" style={{ overflow: 'hidden' }}>
-                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><UserName who={store.appearanceOf(m.userId)} label={memberName(m)} roleColor={roleColor(m.userId, g)} /> {m.isBot && <span className="tag" style={{ fontSize: 10, background: 'var(--accent)', borderRadius: 3, padding: '0 4px', color: '#fff' }}>BOT</span>}</div>
+                    <div className="nameline" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><UserName who={store.appearanceOf(m.userId)} label={memberName(m)} roleColor={roleColor(m.userId, g)} /> {m.isBot && <span className="tag" style={{ fontSize: 10, background: 'var(--accent)', borderRadius: 3, padding: '0 4px', color: '#fff' }}>BOT</span>}</div>
                     <div className="role">{roleLabel(m, g)}</div>
                   </div>
                 </div>

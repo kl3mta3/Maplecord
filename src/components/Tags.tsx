@@ -3,7 +3,7 @@ import type { GuildDto, TagCardDto, TagDto } from '../types'
 import { assetUrl } from '../profile'
 import { Dialog } from './Dialogs'
 
-// Server tags. A server can set one (a symbol and up to four letters or digits); a member can wear the tag of one of
+// Server tags. A server can set one (a symbol and up to five letters or digits); a member can wear the tag of one of
 // their servers, and it shows beside their name wherever their name does. Clicking one says whose it is.
 
 /** Asks for the card of the server a tag belongs to. Whoever shows the card (the shell) listens here. */
@@ -11,7 +11,7 @@ const listeners = new Set<(guildId: string) => void>()
 export const onTagOpened = (listener: (guildId: string) => void) => { listeners.add(listener); return () => { listeners.delete(listener) } }
 const openTag = (guildId: string) => { for (const listener of listeners) listener(guildId) }
 
-/** The tag as it sits beside a name: always the same height, and never wider than four letters and a symbol. */
+/** The tag as it sits beside a name: always the same height, and never wider than five letters and a symbol. */
 export function TagPill({ tag, still }: { tag: Pick<TagDto, 'text' | 'symbol'> & { guildId?: string }; still?: boolean }) {
   const open = still || !tag.guildId ? undefined : (e: { stopPropagation(): void }) => { e.stopPropagation(); openTag(tag.guildId!) }
   return (
@@ -84,16 +84,16 @@ export function TagSettings({ guild, people, symbols, onSave, onRemove }: {
     setBusy(true); setNote('')
     try { await work() } catch (e) { setNote(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
   }
-  const clean = text.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4)
+  const clean = text.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5)
   const changed = clean !== (guild.tagText ?? '') || symbol !== (guild.tagSymbol ?? null)
   if (guild.noTag) return <div className="tagsettings"><div className="muted">Server tag</div><div className="muted">Tags have been turned off for this server.</div></div>
   return (
     <div className="tagsettings">
-      <div className="muted">Server tag <span>— members can wear it beside their name, everywhere. Up to 4 letters or digits, and a symbol if you like.</span></div>
+      <div className="muted">Server tag <span>— members can wear it beside their name, everywhere. Up to 5 letters or digits, and a symbol if you like.</span></div>
       {people < 3 && !guild.tagText && <div className="muted">A server needs at least 3 members before it can have a tag.</div>}
       <div className="row" style={{ flexWrap: 'wrap' }}>
         <button onClick={() => void pick()} aria-label="Choose a symbol" title="Choose a symbol">{symbol ?? '＋'}</button>
-        <input value={clean} maxLength={4} placeholder="TAG" aria-label="Server tag" style={{ width: '7ch', textTransform: 'uppercase' }} onChange={e => setText(e.target.value)} />
+        <input value={clean} maxLength={5} placeholder="TAG" aria-label="Server tag" style={{ width: '8ch', textTransform: 'uppercase' }} onChange={e => setText(e.target.value)} />
         {clean && <TagPill tag={{ text: clean, symbol }} still />}
         <button className="accent" disabled={busy || !clean || !changed} onClick={() => void act(() => onSave(clean, symbol))}>Save tag</button>
         {guild.tagText && <button className="subtle" disabled={busy} onClick={() => void act(onRemove)}>Remove tag</button>}

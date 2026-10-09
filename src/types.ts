@@ -31,7 +31,7 @@ export const hasPermission = (held: number, required: number) =>
   (held & Permission.Administrator) !== 0 || (held & required) === required
 
 /** username = the fixed name they registered with; displayName = what they chose to be called (null = username). */
-/** A server's tag as someone wears it: which server it is from, up to four letters or digits, and a symbol if it has one. */
+/** A server's tag as someone wears it: which server it is from, up to five letters or digits, and a symbol if it has one. */
 export interface TagDto { guildId: string; text: string; symbol?: string | null }
 /** What anyone is told about the server a tag belongs to. Of a private server, someone outside it gets only the start of each word of its name. */
 export interface TagCardDto {
