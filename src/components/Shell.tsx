@@ -700,6 +700,11 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       {tagOpen && <TagCardDialog guildId={tagOpen} serverUrl={store.settings.serverUrl} load={store.tagCard} onJoin={store.joinPublicGuild} onClose={() => setTagOpen(null)} />}
       {dialog?.kind === 'createGuild' && <CreateServerDialog onCreate={(name, isPublic, kind) => void store.createGuild(name, isPublic, kind)} onClose={() => setDialog(null)} />}
       {store.deleteStep && <DeleteAccountDialog store={store} />}
+      {store.pendingFriendLink && (
+        <ConfirmDialog title={`Ask ${store.pendingFriendLink.user.displayName ?? store.pendingFriendLink.user.username} to be friends?`}
+          message={`You followed the friend link of ${store.pendingFriendLink.user.displayName ?? store.pendingFriendLink.user.username} (@${store.pendingFriendLink.user.username}). They will get a friend request from you.`}
+          onConfirm={() => void store.acceptFriendLink()} onClose={store.dismissFriendLink} />
+      )}
       {store.pendingInvite && (
         <ConfirmDialog title={`Join ${store.pendingInvite.name}?`}
           message={`You followed an invite to ${store.pendingInvite.name} (${store.pendingInvite.members} ${store.pendingInvite.members === 1 ? 'member' : 'members'}).`}
@@ -1342,19 +1347,19 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
 }
 
 /** An invite link somewhere in a message: this server's invite page, or the app's own kind of link. */
-const INVITE_LINK = /(https?:\/\/[^\s<>"']+\/invite\/[A-Za-z0-9]{4,32}(?:\?[^\s<>"']*)?|maplecord:\/\/invite\/[^\s<>"']+)/g
+const INVITE_LINK = /(https?:\/\/[^\s<>"']+\/(?:invite|add)\/[A-Za-z0-9]{4,32}(?:\?[^\s<>"']*)?|maplecord:\/\/(?:invite|add)\/[^\s<>"']+)/g
 
 /**
  * A message's text, with any invite link in it made into something to press: it opens the same "join this server?"
  * prompt as an invite opened from outside the app. Nothing else in a message is a link, and nothing is fetched.
  */
 function withInviteLinks(text: string, open?: (link: string) => void): React.ReactNode {
-  if (!open || !text.includes('invite/')) return text
+  if (!open || !(text.includes('invite/') || text.includes('add/'))) return text
   const parts = text.split(INVITE_LINK)
   if (parts.length === 1) return text
   // split() with one capturing group puts the links at the odd places.
   return parts.map((part, i) => (i % 2 === 1
-    ? <button key={i} className="invitelink" title="Open this invite" onClick={() => open(part)}>{part}</button>
+    ? <button key={i} className="invitelink" title={/\/add\//.test(part) ? 'Open this friend link' : 'Open this invite'} onClick={() => open(part)}>{part}</button>
     : part))
 }
 

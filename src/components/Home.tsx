@@ -3,6 +3,8 @@ import type { Store } from '../store'
 import type { UserDto } from '../types'
 import { shownName } from '../profile'
 import { Avatar, UserName } from './Profile'
+import { FriendLinkPanel, friendsCsv, saveAs } from './FriendLink'
+import { friendCodeFrom } from '../invites'
 
 /** The chat column at Home when no DM is open: find people, answer requests, and message friends. */
 export default function Friends({ store }: { store: Store }) {
@@ -16,6 +18,8 @@ export default function Friends({ store }: { store: Store }) {
 
   useEffect(() => {
     const q = query.trim()
+    // A friend link pasted where a name is typed is followed, not searched for.
+    if (friendCodeFrom(q)) { setResults([]); setQuery(''); void store.openFriendLink(q); return }
     if (q.length < 2) { setResults([]); return }
     let cancelled = false
     const id = window.setTimeout(() => store.searchUsers(q).then(r => { if (!cancelled) setResults(r) }).catch(() => setResults([])), 250)
@@ -28,7 +32,7 @@ export default function Friends({ store }: { store: Store }) {
       <div className="friends">
         <div>
           <h4>Add a friend</h4>
-          <input placeholder="Search by username…" value={query} onChange={e => setQuery(e.target.value)} style={{ width: '100%', marginTop: 6 }} />
+          <input placeholder="Search by username, or paste a friend link…" value={query} onChange={e => setQuery(e.target.value)} style={{ width: '100%', marginTop: 6 }} />
           {results.length > 0 && (
             <div className="results" style={{ marginTop: 6 }}>
               {results.map(u => (
@@ -44,6 +48,8 @@ export default function Friends({ store }: { store: Store }) {
             </div>
           )}
         </div>
+
+        <FriendLinkPanel store={store} />
 
         {incoming.length > 0 && (
           <div>
@@ -75,7 +81,10 @@ export default function Friends({ store }: { store: Store }) {
         )}
 
         <div>
-          <h4>All friends — {friends.length}</h4>
+          <div className="row" style={{ alignItems: 'center' }}>
+            <h4 className="grow">All friends — {friends.length}</h4>
+            {friends.length > 0 && <button className="subtle" title="Save your friends list as a file a spreadsheet opens (usernames and the names they show)" onClick={() => saveAs(new Blob(['\ufeff' + friendsCsv(friends)], { type: 'text/csv;charset=utf-8' }), 'maplecord-friends.csv')}>Export</button>}
+          </div>
           {friends.length === 0 && <div className="muted" style={{ marginTop: 6 }}>No friends yet. Search for someone above, or right-click a member in a server.</div>}
           {[...friends].sort((a, b) => Number(b.online) - Number(a.online) || a.user.username.localeCompare(b.user.username)).map(f => (
             <div key={f.user.id} className="f" style={{ opacity: f.online ? 1 : 0.55 }}>
@@ -90,6 +99,8 @@ export default function Friends({ store }: { store: Store }) {
           ))}
         </div>
       </div>
+      {/* What went wrong, or what a followed link turned out to be: this screen has no chat below it to say so. */}
+      {store.error && <div className="error"><span className="grow">{store.error}</span><button className="subtle" onClick={() => store.setError(null)}>×</button></div>}
     </div>
   )
 }

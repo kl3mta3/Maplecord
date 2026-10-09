@@ -15,6 +15,9 @@ one.
 - Private channels: only the roles and people you let in can see that they exist
 - The member list shows the people who can see the channel you are in
 - Friends and direct messages
+- Your own friend link, and a QR code of it, to hand out anywhere: whoever opens it can ask to be your friend
+- Save your friends list as a file
+- Connections: link an account on another service (where the server offers it) to show its name on your profile
 - Reply to a message, react to it, edit what you sent, and pin the ones worth keeping
 - Threads, to keep a side conversation out of the channel
 - Search a channel's messages, and polls
@@ -198,6 +201,9 @@ than holding on to it.
   support, and nobody else is shown it.
 - **That you signed in with Google or GitHub.** They know you use Maplecord because you chose them to sign in with.
   They give the server your name, picture and email, never your password.
+- **Accounts you link, if you link any.** Linking an account on another service (in Settings, under Connections)
+  keeps that account's name and ID there, encrypted, so the name can show on your profile. Nothing else is asked for,
+  the server keeps no access to that account, and unlinking removes both.
 - **Your profile, friends, servers, settings, and the messages and files you post.** These are the things you and
   the people you talk to will ask for again, so they are kept: for every device you use, and for anyone who was
   offline when something was sent. They travel encrypted. Uploaded files are cleared out after 30 days.

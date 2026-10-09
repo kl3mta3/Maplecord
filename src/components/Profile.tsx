@@ -1,4 +1,5 @@
 import { TagPill } from './Tags'
+import { ProfileConnections } from './Connections'
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
 // The "light" player draws to SVG only and has no expression support, so an animation file cannot run script.
 import lottie, { type AnimationItem } from 'lottie-web/build/player/lottie_light'
@@ -125,6 +126,7 @@ export function ProfileCardBody({ profile, serverUrl, roles, nickname, serverNam
         </div>
         {nickname && <div className="muted handle">Goes by <b>{nickname}</b>{serverName ? ` on ${serverName}` : ''}</div>}
         {profile.bio && (<><h5>About me</h5><div className="bio">{profile.bio}</div></>)}
+        {profile.connections && profile.connections.length > 0 && (<><h5>Connections</h5><ProfileConnections connections={profile.connections} /></>)}
         {roles && roles.length > 0 && (
           <><h5>Roles</h5><div className="rolechips">{roles.map(r => <span key={r.id} className="chip"><span className="swatch" style={{ background: r.color ?? 'var(--muted)' }} />{r.name}</span>)}</div></>
         )}

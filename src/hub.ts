@@ -52,6 +52,7 @@ export interface ChatEvents {
   RpsEnded: (result: RpsResultDto) => void
   ServerNotice: (message: string) => void
   SystemMessage: (message: SystemMessageDto) => void
+  ConnectionsChanged: () => void
   FileRequested: (offerId: string, requesterConnectionId: string, requesterUserId: string, requesterName: string) => void
   FileSignalReceived: (offerId: string, fromConnectionId: string, kind: string, payload: string) => void
   FileOfferEnded: (channelId: string, offerId: string, withdrawn: boolean) => void

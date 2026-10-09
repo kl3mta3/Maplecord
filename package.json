@@ -4,7 +4,7 @@
   "private": true,
   "license": "GPL-3.0-or-later",
   "author": "Kenny Lasyone",
-  "version": "0.3.3",
+  "version": "0.3.5",
   "description": "Loot rolling, chat and voice for your party",
   "repository": "github:kl3mta3/Maplecord",
   "type": "module",
@@ -23,7 +23,7 @@
     "lint": "oxlint .",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json",
-    "test": "node electron/plugins.test.ts && node electron/soundPacks.test.ts && node electron/fileCache.test.ts && node electron/saveStreams.test.ts && node electron/offeredFiles.test.ts && node electron/updateRules.test.ts && node src/invites.test.ts && node src/streamLimit.test.ts && node src/effectRules.test.ts && node src/channelViewers.test.ts && node src/p2pPosts.test.ts",
+    "test": "node electron/plugins.test.ts && node electron/soundPacks.test.ts && node electron/fileCache.test.ts && node electron/saveStreams.test.ts && node electron/offeredFiles.test.ts && node electron/updateRules.test.ts && node src/invites.test.ts && node src/streamLimit.test.ts && node src/effectRules.test.ts && node src/channelViewers.test.ts && node src/p2pPosts.test.ts && node src/leafQr.test.ts",
     "sounds": "node tools/make-sounds.mjs"
   },
   "dependencies": {

@@ -53,7 +53,15 @@ export interface UserProfileDto {
   decoration: string | null; effect: string | null; createdAt: string; isBot: boolean
   /** Only on your own profile: the ids of the animations you uploaded, and whether uploading has been closed to this account. */
   ownDecoration?: string | null; ownEffect?: string | null; ownAnimationsOff?: boolean; tag?: TagDto | null
+  /** The accounts on other services they have linked and chosen to show. */
+  connections?: ProfileConnectionDto[] | null
 }
+/** A service an account can be linked on ("discord", "twitch", "steam", "battlenet"), and what it is called. */
+export interface ConnectionServiceDto { key: string; name: string }
+/** One of one's own linked accounts. */
+export interface ConnectionDto { id: string; service: string; serviceName: string; name: string; url: string | null; shown: boolean; linkedAt: string }
+/** A linked account as a profile shows it. */
+export interface ProfileConnectionDto { service: string; serviceName: string; name: string; url: string | null }
 /** Each field: undefined leaves it alone, '' clears it. */
 export type UpdateProfileRequest = Partial<Record<'displayName' | 'bio' | 'pronouns' | 'accentColor' | 'nameFont' | 'nameColor' | 'nameColor2' | 'decoration' | 'effect', string>>
 export interface DecorationDto { id: string; name: string; kind: 'avatar' | 'effect'; url: string; /** The colors it is drawn in ("9000ff"), each of which can be swapped for your own. */ colors?: string[] | null }
@@ -216,4 +224,10 @@ export const FriendStatus = { Pending: 0, Accepted: 1 } as const
 export type FriendStatus = (typeof FriendStatus)[keyof typeof FriendStatus]
 export interface FriendDto { user: UserDto; online: boolean; status: FriendStatus; incoming: boolean; dnd?: boolean }
 export interface FriendsDto { friends: FriendDto[]; incoming: FriendDto[]; outgoing: FriendDto[] }
+/** A QR code as its squares: `size` rows of `size`, '1' for a dark one, with no margin around it. */
+export interface QrDto { size: number; modules: string }
+/** One's own friend link: its code, the address to hand out, and that address as a QR code. */
+export interface FriendLinkDto { code: string; url: string; qr: QrDto }
+/** Whose friend link a code is, and how things stand with them. */
+export interface FriendLinkOwnerDto { user: UserDto; state: 'self' | 'friends' | 'asked' | 'open' }
 export interface DmChannelDto { channelId: string; other: UserDto; online: boolean; createdAt: string; dnd?: boolean }

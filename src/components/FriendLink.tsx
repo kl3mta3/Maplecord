@@ -1,0 +1,143 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { Store } from '../store'
+import type { FriendDto, FriendLinkDto, QrDto } from '../types'
+import { leafPath, leafQr, LEAF_CODE, LEAF_DOT, LEAF_EDGE, LEAF_PAPER } from '../leafQr'
+import { ConfirmDialog } from './Dialogs'
+
+/** The empty margin a QR code needs around it to be read, in squares. */
+const MARGIN = 3
+
+/** One path that draws every dark square of a QR code, each one unit across, starting `at` units in from the corner. */
+export function qrPath(qr: QrDto, at = 0): string {
+  let d = ''
+  for (let y = 0; y < qr.size; y++) {
+    for (let x = 0; x < qr.size; x++) {
+      if (qr.modules[y * qr.size + x] !== '1') continue
+      // Runs of dark squares in a row are drawn as one bar.
+      let run = 1
+      while (x + run < qr.size && qr.modules[y * qr.size + x + run] === '1') run++
+      d += `M${x + at} ${y + at}h${run}v1h-${run}z`
+      x += run - 1
+    }
+  }
+  return d
+}
+
+/** A QR code as a picture: dark squares on white, with the margin it needs. */
+export function QrCode({ qr, size = 200, innerRef }: { qr: QrDto; size?: number; innerRef?: React.Ref<SVGSVGElement> }) {
+  const across = qr.size + MARGIN * 2
+  return (
+    <svg ref={innerRef} xmlns="http://www.w3.org/2000/svg" className="qrcode" width={size} height={size} viewBox={`0 0 ${across} ${across}`} shapeRendering="crispEdges" role="img" aria-label="QR code of your friend link">
+      <rect width={across} height={across} rx={1.5} fill="#ffffff" />
+      <path d={qrPath(qr, MARGIN)} fill="#14141c" />
+    </svg>
+  )
+}
+
+/**
+ * The same QR code in the shape of the app's maple leaf (see leafQr.ts): the real code in the middle, and the rest of
+ * the leaf filled with dots in the logo's colours. Nothing is drawn outside the leaf, so it sits on any background.
+ */
+export function LeafQrCode({ qr, seed, size = 300, innerRef }: { qr: QrDto; seed: string; size?: number; innerRef?: React.Ref<SVGSVGElement> }) {
+  const leaf = useMemo(() => leafQr(qr, seed), [qr, seed])
+  const paths = useMemo(() => ({
+    paper: leafPath(leaf, LEAF_PAPER + LEAF_DOT + LEAF_CODE + LEAF_EDGE),
+    dots: leafPath(leaf, LEAF_DOT + LEAF_EDGE),
+    code: leafPath(leaf, LEAF_CODE),
+  }), [leaf])
+  return (
+    <svg ref={innerRef} xmlns="http://www.w3.org/2000/svg" className="qrcode leaf" width={size} height={size} viewBox={`-1 -1 ${leaf.size + 2} ${leaf.size + 2}`} shapeRendering="crispEdges" role="img" aria-label="QR code of your friend link, in the shape of a maple leaf">
+      <defs>
+        <linearGradient id="leafqr-ink" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2={leaf.size} y2="0">
+          <stop offset="0" stopColor="#2f6bff" /><stop offset="1" stopColor="#a020f0" />
+        </linearGradient>
+      </defs>
+      <path d={paths.paper} fill="#ffffff" />
+      <path d={paths.dots} fill="url(#leafqr-ink)" />
+      <path d={paths.code} fill="#14141c" />
+    </svg>
+  )
+}
+
+/** Saves something made in the app as a file, the way a download is saved. */
+export function saveAs(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
+}
+
+/** The friends list as a file a spreadsheet opens: one friend a line, username and the name they show. */
+export function friendsCsv(friends: FriendDto[]): string {
+  const cell = (v: string) => (/[",\r\n]/.test(v) || /^[=+\-@]/.test(v) ? `"${(/^[=+\-@]/.test(v) ? "'" + v : v).replace(/"/g, '""')}"` : v)
+  const rows = [...friends].sort((a, b) => a.user.username.localeCompare(b.user.username)).map(f => [f.user.username, f.user.displayName ?? ''].map(cell).join(','))
+  return ['username,display name', ...rows].join('\r\n') + '\r\n'
+}
+
+/**
+ * One's own friend link, on the Friends screen: the address to hand out, the same thing as a QR code, and a way to
+ * take it back by making a new one.
+ */
+export function FriendLinkPanel({ store }: { store: Store }) {
+  const [link, setLink] = useState<FriendLinkDto | null>(null)
+  const [showQr, setShowQr] = useState(false)
+  // The leaf is the one shown first; the plain square is there for anything that has trouble reading the leaf.
+  const [plain, setPlain] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [asking, setAsking] = useState(false)
+  const svg = useRef<SVGSVGElement>(null)
+  const { loadFriendLink, resetFriendLink } = store
+  useEffect(() => { let alive = true; void loadFriendLink().then(l => { if (alive) setLink(l) }); return () => { alive = false } }, [loadFriendLink])
+  if (!link) return null
+
+  const copy = () => { void navigator.clipboard.writeText(link.url).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1500) }, () => store.setError('Could not copy. Select the link and copy it yourself.')) }
+  // The picture is drawn large, so that it is still sharp printed or shown on a stream.
+  const savePicture = () => {
+    const el = svg.current
+    if (!el) return
+    const side = 1024
+    const source = new XMLSerializer().serializeToString(el)
+    const img = new Image()
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = side; canvas.height = side
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      ctx.imageSmoothingEnabled = false
+      ctx.drawImage(img, 0, 0, side, side)
+      canvas.toBlob(blob => { if (blob) saveAs(blob, plain ? 'maplecord-friend-link.png' : 'maplecord-friend-link-leaf.png') }, 'image/png')
+    }
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(source)
+  }
+
+  return (
+    <div className="friendlink">
+      <h4>Your friend link</h4>
+      <div className="muted">Anyone who opens it can ask to be your friend. You still say yes or no.</div>
+      <div className="row">
+        <input readOnly value={link.url} onFocus={e => e.target.select()} aria-label="Your friend link" />
+        <button className="accent" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button>
+        <button onClick={() => setShowQr(on => !on)} aria-expanded={showQr}>{showQr ? 'Hide QR code' : 'QR code'}</button>
+      </div>
+      {showQr && (
+        <div className="qr">
+          {plain ? <QrCode qr={link.qr} size={300} innerRef={svg} /> : <LeafQrCode qr={link.qr} seed={link.code} innerRef={svg} />}
+          <div className="actions">
+            <button onClick={savePicture}>Save as a picture</button>
+            <button onClick={() => setPlain(on => !on)} title={plain ? 'The same code in the shape of a maple leaf' : 'The same code as an ordinary square, for anything that has trouble reading the leaf'}>{plain ? 'Leaf shape' : 'Plain square'}</button>
+            <button className="subtle" onClick={() => setAsking(true)} title="The link you have handed out so far stops working">Make a new link</button>
+          </div>
+        </div>
+      )}
+      {!showQr && <button className="subtle" style={{ alignSelf: 'flex-start' }} onClick={() => setAsking(true)} title="The link you have handed out so far stops working">Make a new link</button>}
+      {asking && (
+        <ConfirmDialog title="Make a new friend link?" message="The link and QR code you have handed out so far stop working. Friends you already have stay."
+          onConfirm={() => void resetFriendLink().then(l => { if (l) setLink(l) })} onClose={() => setAsking(false)} />
+      )}
+    </div>
+  )
+}

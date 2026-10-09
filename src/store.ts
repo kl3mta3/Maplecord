@@ -13,7 +13,7 @@ import { type DirectTextPeer, P2PTextEngine, P2PFileUnavailable, describeFile, M
 import { foldP2p, foldP2pChat, isP2pNoteText, p2pShape, packP2p, searchP2pChat, searchP2pGallery, type P2PMeta } from './p2pPosts'
 import { mayManageMessagesIn } from './channelViewers'
 import { forgetFile, holds, keep, keepFile, kept, keptBefore, keptFile, keyPrint, knownKeys, loadIdentity, p2pTextSupported, rememberKey, sha256Hex } from './p2pIdentity'
-import { inviteCodeFrom, inviteIsForAnotherServer, takeRememberedInvite } from './invites'
+import { friendCodeFrom, inviteCodeFrom, inviteIsForAnotherServer, takeRememberedFriendLink, takeRememberedInvite } from './invites'
 import { DEFAULT_PUSH_KEY, PUSH_RELEASE_MS, isChoosingPushKey, isPushKey, type PushKey } from './pushToTalk'
 import { VoiceHub } from './voiceHub'
 import { TransferEngine, fileSource, rememberedSource, openSink, type TransferView } from './transfer'
@@ -23,7 +23,7 @@ import {
   ChannelType, MessageKind, RollChoice, RollKind, UserStatus, type PreferencesDto, type TransferSettingsDto,
   type ChannelDto, type CommandDto, type GuildSummaryDto, type MemberDto, type MessageDto, type RollItemDto, type RollResultDto, type RollSessionDto,
   type VoiceParticipantDto, type RpsSessionDto, type RpsResultDto, RpsChoice, type FriendsDto, type DmChannelDto, type RoleDto,
-  type DecorationDto, type UpdateProfileRequest, type UserDto, type UserProfileDto, type SystemMessageDto, type MediaItem, type SearchResultDto, type NewPollDto, isPostsChannel, type RollStatsDto, type FileOfferDto, type TokenResponse, type StreamSettingsDto,
+  type DecorationDto, type UpdateProfileRequest, type UserDto, type UserProfileDto, type SystemMessageDto, type ConnectionDto, type ConnectionServiceDto, type FriendLinkDto, type MediaItem, type SearchResultDto, type NewPollDto, isPostsChannel, type RollStatsDto, type FileOfferDto, type TokenResponse, type StreamSettingsDto,
   type SfuPassDto,
 } from './types'
 
@@ -724,6 +724,7 @@ export function useMaplecord() {
         setMessages(ms => ms.map(m => (m.fileOffer?.id === offerId ? { ...m, fileOffer: { ...m.fileOffer, available: false, withdrawn: withdrawn || m.fileOffer.withdrawn } } : m)))
       },
       FileOfferResumed: (_channelId, offerId) => setMessages(ms => ms.map(m => (m.fileOffer?.id === offerId ? { ...m, fileOffer: { ...m.fileOffer, available: true } } : m))),
+      ConnectionsChanged: () => setConnectionsEpoch(n => n + 1),
       SystemMessage: m => { if (!closedSystemMessages.current.has(m.id)) setSystemMessages(list => [...list.filter(x => x.id !== m.id), m].slice(-4)) },
     })
 
@@ -1590,8 +1591,56 @@ export function useMaplecord() {
   /** A server someone has followed an invite link to, waiting for their yes. */
   const [pendingInvite, setPendingInvite] = useState<{ code: string; name: string; members: number } | null>(null)
 
-  /** Follows an invite link: straight to the server when already a member, otherwise it asks first. */
+  // ---- Linked accounts on other services (Settings, Connections) ----
+  /** Goes up each time the server says a link made in the browser is done, so the list on screen is asked for again. */
+  const [connectionsEpoch, setConnectionsEpoch] = useState(0)
+  const loadConnections = useCallback(async (): Promise<{ services: ConnectionServiceDto[]; mine: ConnectionDto[] } | null> => {
+    try { const [services, mine] = await Promise.all([api.connectionServices(), api.connections()]); return { services, mine } }
+    catch (e) { fail(e); return null }
+  }, [api])
+  /** The address to open, in a browser, to link an account on that service. Null if it could not be had. */
+  const startConnection = useCallback(async (service: string): Promise<string | null> => { let url: string | null = null; await run(async () => { url = (await api.startConnection(service)).url }); return url }, [api])
+  const setConnectionShown = useCallback(async (id: string, shown: boolean): Promise<ConnectionDto | null> => { let saved: ConnectionDto | null = null; await run(async () => { saved = await api.setConnectionShown(id, shown) }); return saved }, [api])
+  const removeConnection = useCallback(async (id: string): Promise<boolean> => { let done = false; await run(async () => { await api.removeConnection(id); done = true }); return done }, [api])
+
+  // ---- Friend links: someone's own address, which asks them to be friends ----
+  const [pendingFriendLink, setPendingFriendLink] = useState<{ code: string; user: UserDto } | null>(null)
+  /** Follows a friend link: says how things already stand, or asks before a request is sent. */
+  const openFriendLink = useCallback(async (link: string) => {
+    if (inviteIsForAnotherServer(link, settingsRef.current.serverUrl)) { setError('That friend link is for a different Maplecord server than the one this app is connected to.'); return }
+    const code = friendCodeFrom(link)
+    if (!code) { setError('That is not a friend link.'); return }
+    try {
+      const owner = await api.friendLinkOwner(code)
+      const name = owner.user.displayName ?? owner.user.username
+      if (owner.state === 'self') setError('That is your own friend link. Send it to someone else.')
+      else if (owner.state === 'friends') setError(`You and ${name} are already friends.`)
+      else if (owner.state === 'asked') setError(`You have already asked ${name}. They have not answered yet.`)
+      else setPendingFriendLink({ code, user: owner.user })
+    } catch (e) {
+      setError(e instanceof ApiError && e.status === 404 ? 'That friend link is no longer valid.' : e instanceof Error ? e.message : String(e))
+    }
+  }, [api])
+  const acceptFriendLink = useCallback(async () => {
+    const asked = pendingFriendLink
+    setPendingFriendLink(null)
+    if (!asked) return
+    await run(async () => {
+      const f = await api.useFriendLink(asked.code)
+      const id = asked.user.id
+      setFriends(fr => f.status === 1
+        ? { friends: [...fr.friends.filter(x => x.user.id !== id), f], incoming: fr.incoming.filter(x => x.user.id !== id), outgoing: fr.outgoing.filter(x => x.user.id !== id) }
+        : { ...fr, outgoing: [...fr.outgoing.filter(x => x.user.id !== id), f] })
+    })
+  }, [api, pendingFriendLink])
+  const dismissFriendLink = useCallback(() => setPendingFriendLink(null), [])
+  /** One's own friend link, or null if the server could not give one. */
+  const loadFriendLink = useCallback(async (): Promise<FriendLinkDto | null> => { try { return await api.friendLink() } catch { return null } }, [api])
+  const resetFriendLink = useCallback(async (): Promise<FriendLinkDto | null> => { let made: FriendLinkDto | null = null; await run(async () => { made = await api.resetFriendLink() }); return made }, [api])
+
+  /** Follows an invite link: straight to the server when already a member, otherwise it asks first. A friend link goes its own way. */
   const openInvite = useCallback(async (link: string) => {
+    if (friendCodeFrom(link)) { await openFriendLink(link); return }
     if (inviteIsForAnotherServer(link, settingsRef.current.serverUrl)) { setError('That invite is for a different Maplecord server than the one this app is connected to.'); return }
     const code = inviteCodeFrom(link)
     if (!code) { setError('That is not an invite link.'); return }
@@ -1602,7 +1651,7 @@ export function useMaplecord() {
     } catch (e) {
       setError(e instanceof ApiError && e.status === 404 ? 'That invite is no longer valid.' : e instanceof Error ? e.message : String(e))
     }
-  }, [api, selectGuild])
+  }, [api, selectGuild, openFriendLink])
 
   const acceptInvite = useCallback(async () => {
     const invite = pendingInvite
@@ -1616,6 +1665,8 @@ export function useMaplecord() {
     if (!ready) return
     const remembered = takeRememberedInvite()
     if (remembered) void openInvite(remembered)
+    const rememberedFriend = takeRememberedFriendLink()
+    if (rememberedFriend) void openFriendLink(rememberedFriend)
     const desktop = bridge()
     if (!desktop) return
     void desktop.takeUpdateNotice?.().then(notice => {
@@ -1624,7 +1675,7 @@ export function useMaplecord() {
     const take = () => void desktop.takeInviteLink().then(link => { if (link) void openInvite(link) })
     take()
     return desktop.onInviteLink(take)
-  }, [ready, openInvite])
+  }, [ready, openInvite, openFriendLink])
 
   const createChannel = useCallback(async (name: string, type: number, parentId: string | null, direct = false) => {
     const g = selected.current.guild
@@ -2641,6 +2692,8 @@ export function useMaplecord() {
     guilds, selectedGuild, selectedChannel, selectedDm, home, friends, dms, dmUnread, messages, canLoadOlder, activeRoll, typing, commands, stats, setGuildCountRolls,
     thread, viewingPast, highlight, setHighlight, openThread, closeThread, loadOlderThread, createPost, editMessage, react, pinMessage, votePoll, closePoll,
     reactionChoices, loadPins, searchMessages, jumpTo, backToPresent,
+    pendingFriendLink, openFriendLink, acceptFriendLink, dismissFriendLink, loadFriendLink, resetFriendLink,
+    connectionsEpoch, loadConnections, startConnection, setConnectionShown, removeConnection,
     loadMedia, p2pPost, openP2pPost, closeP2pPost, createP2pPost, reactP2p, editP2p, pinP2p, voteP2p, closeP2pPoll, loadP2pPins, searchP2p, jumpP2p,
     connect, selectGuild, selectChannel, openHome, openDm, addFriend, removeFriend, searchUsers, sendMessage, sendFile, uploading, offerFile, withdrawFile, downloadFile, cancelTransfer, transfers, notifyTyping, loadOlder,
     renameGuild, setGuildIcon, createRole, updateRole, deleteRole, setMemberRoles,

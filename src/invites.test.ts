@@ -1,5 +1,5 @@
 // Run with: node src/invites.test.ts
-import { inviteCodeFrom, inviteIsForAnotherServer, inviteServerFrom } from './invites.ts'
+import { friendCodeFrom, inviteCodeFrom, inviteIsForAnotherServer, inviteServerFrom } from './invites.ts'
 
 let failures = 0
 function check(ok: boolean, what: string) {
@@ -21,6 +21,13 @@ check(inviteServerFrom('maplecord://invite/KFLRL7XQ') === null, 'or does not')
 check(!inviteIsForAnotherServer(link, 'https://api.maplecord.app/'), 'a link for the server the app uses is followed')
 check(inviteIsForAnotherServer(link, 'http://localhost:5080'), 'a link for another server is not')
 check(!inviteIsForAnotherServer('maplecord://invite/KFLRL7XQ', 'http://localhost:5080'), 'a link that names no server is followed')
+
+check(friendCodeFrom('https://maplecord.app/add/k7mq2xw9ab') === 'K7MQ2XW9AB' && friendCodeFrom('https://app.maplecord.app/?add=K7MQ2XW9AB') === 'K7MQ2XW9AB'
+  && friendCodeFrom('maplecord://add/K7MQ2XW9AB?server=https%3A%2F%2Fapi.maplecord.app') === 'K7MQ2XW9AB', 'a friend link gives its code in all three shapes')
+check(friendCodeFrom('K7MQ2XW9AB') === null && friendCodeFrom('https://maplecord.app/invite/KFLRL7XQ') === null && friendCodeFrom('https://maplecord.app/add/<script>') === null,
+  'a bare code, an invite link and nonsense are not friend links')
+check(inviteServerFrom('maplecord://add/K7MQ2XW9AB?server=https%3A%2F%2Fapi.maplecord.app') === 'https://api.maplecord.app' && inviteIsForAnotherServer('maplecord://add/K7MQ2XW9AB?server=https%3A%2F%2Fapi.maplecord.app', 'http://localhost:5080'),
+  'a friend link says which server it is for, like an invite')
 
 console.log(failures === 0 ? '\nALL PASSED' : `\n${failures} FAILED`)
 // This file is checked with the app's own (browser) types, which have no `process`: failing loudly does the same job.

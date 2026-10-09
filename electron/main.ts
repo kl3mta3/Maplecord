@@ -332,7 +332,10 @@ handle('open-external', (_event, url: string) => { if (/^https?:/.test(url)) she
 // Windows hands the link to a new copy of the app as an argument, so only one copy runs, and a second one passes
 // what it was given to the first and leaves. Only the installed app does this, never a development run.
 const INVITE_LINK = 'maplecord://invite/'
-const inviteLinkIn = (args: string[]) => args.find(a => a.toLowerCase().startsWith(INVITE_LINK)) ?? null
+// A friend link (maplecord://add/CODE) arrives and is handed over the same way; the window tells the two apart.
+const FRIEND_LINK = 'maplecord://add/'
+const isAppLink = (text: string) => { const link = text.toLowerCase(); return link.startsWith(INVITE_LINK) || link.startsWith(FRIEND_LINK) }
+const inviteLinkIn = (args: string[]) => args.find(isAppLink) ?? null
 /** The link the app was started or woken by, kept until the window takes it. */
 let waitingInviteLink: string | null = inviteLinkIn(process.argv)
 
@@ -350,7 +353,7 @@ else if (app.isPackaged) {
   app.on('second-instance', (_event, argv) => followInviteLink(inviteLinkIn(argv)))
 }
 // macOS hands links over this way instead.
-app.on('open-url', (event, url) => { if (url.toLowerCase().startsWith(INVITE_LINK)) { event.preventDefault(); followInviteLink(url) } })
+app.on('open-url', (event, url) => { if (isAppLink(url)) { event.preventDefault(); followInviteLink(url) } })
 handle('take-invite-link', () => { const link = waitingInviteLink; waitingInviteLink = null; return link })
 
 function registerHotkeys() {

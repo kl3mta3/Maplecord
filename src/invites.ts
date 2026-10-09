@@ -4,8 +4,17 @@
  *   https://…/invite/CODE            the page a server shows for it, offering the app or the browser
  *   https://…/?invite=CODE           how that page hands the code to the browser version
  *   maplecord://invite/CODE?server=… how it hands the code to the desktop app
+ *
+ * A friend link is the same three shapes with "add" in place of "invite", and a person's own code in it.
  */
 const PENDING = 'maplecord.pendingInvite'
+const PENDING_FRIEND = 'maplecord.pendingFriendLink'
+
+/** The code in a friend link (https://…/add/CODE, ?add=CODE or maplecord://add/CODE). Null for anything else: a bare code is taken to be an invite. */
+export function friendCodeFrom(text: string): string | null {
+  const found = /(?:\/add\/|[?&]add=)([A-Za-z0-9]{4,32})(?![A-Za-z0-9])/.exec(text.trim())
+  return found ? found[1].toUpperCase() : null
+}
 
 /** The invite code in whatever was pasted or clicked: a bare code or any of the links above. Null when there is none. */
 export function inviteCodeFrom(text: string): string | null {
@@ -35,11 +44,25 @@ export function inviteIsForAnotherServer(link: string, serverUrl: string): boole
 export function rememberInviteFromAddress() {
   const params = new URLSearchParams(window.location.search)
   const code = inviteCodeFrom(params.get('invite') ?? '')
-  if (!params.has('invite')) return
+  const friend = friendCodeFrom('?add=' + (params.get('add') ?? ''))
+  if (!params.has('invite') && !params.has('add')) return
   params.delete('invite')
+  params.delete('add')
   const rest = params.toString()
   window.history.replaceState({}, '', window.location.pathname + (rest ? '?' + rest : ''))
-  try { if (code) sessionStorage.setItem(PENDING, code) } catch { /* private browsing: the invite is simply not followed */ }
+  try {
+    if (code) sessionStorage.setItem(PENDING, code)
+    if (friend) sessionStorage.setItem(PENDING_FRIEND, friend)
+  } catch { /* private browsing: the link is simply not followed */ }
+}
+
+/** The friend link's code kept by {@link rememberInviteFromAddress}, once, as a link the app can follow. */
+export function takeRememberedFriendLink(): string | null {
+  try {
+    const code = sessionStorage.getItem(PENDING_FRIEND)
+    sessionStorage.removeItem(PENDING_FRIEND)
+    return code ? '?add=' + code : null
+  } catch { return null }
 }
 
 /** The code kept by {@link rememberInviteFromAddress}, once. */

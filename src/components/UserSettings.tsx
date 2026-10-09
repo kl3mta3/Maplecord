@@ -5,6 +5,7 @@ import { DEFAULT_THEME, THEMES } from '../theme'
 import { isElectron } from '../platform'
 import { shownName } from '../profile'
 import { Dialog } from './Dialogs'
+import { ConnectionsPane } from './Connections'
 import { askToInstall, installWay } from '../install'
 import { MyBots } from './Integrations'
 import { VoiceAudioSettings } from './VoiceAudio'
@@ -16,8 +17,8 @@ export const STATUSES: { value: UserStatus; label: string; hint: string; dot: st
   { value: UserStatus.Invisible, label: 'Invisible', hint: 'You appear offline', dot: 'invisible' },
 ]
 
-export type Section = 'account' | 'voice' | 'privacy' | 'look' | 'app' | 'bots'
-const SECTIONS: [Section, string][] = [['account', 'My account'], ['voice', 'Voice & audio'], ['privacy', 'Status & privacy'], ['look', 'Appearance'], ['app', 'App'], ['bots', 'My bots']]
+export type Section = 'account' | 'voice' | 'privacy' | 'connections' | 'look' | 'app' | 'bots'
+const SECTIONS: [Section, string][] = [['account', 'My account'], ['voice', 'Voice & audio'], ['privacy', 'Status & privacy'], ['connections', 'Connections'], ['look', 'Appearance'], ['app', 'App'], ['bots', 'My bots']]
 
 /**
  * Everything that is about the person rather than about a server, behind the cog at the bottom of the sidebar.
@@ -68,6 +69,8 @@ export function UserSettingsDialog({ store, initial, onOpen, onAllowDirect, onSi
               <div className="row"><button className="danger" onClick={() => { onClose(); store.openDeleteAccount() }}>Delete account…</button></div>
             </>
           )}
+
+          {section === 'connections' && <ConnectionsPane store={store} />}
 
           {section === 'privacy' && (
             <>

@@ -800,3 +800,22 @@ button.chip { cursor: pointer; }
 .mediatile .video .play { font-size: 26px; line-height: 1; }
 .mediatile .video .name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chattools button[aria-pressed="true"] { border-color: var(--accent); background: var(--bg0); color: var(--accent); }
+
+/* One's own friend link, on the Friends screen */
+.friendlink { display: flex; flex-direction: column; gap: 6px; }
+.friendlink .row { display: flex; gap: 6px; align-items: center; }
+.friendlink .row input { flex: 1; min-width: 0; }
+.friendlink .qr { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; margin-top: 4px; }
+.friendlink .qr .actions { display: flex; flex-direction: column; gap: 6px; }
+.qrcode { border-radius: 10px; display: block; }
+
+.qrcode.leaf { border-radius: 0; }
+
+/* Linked accounts on other services: on a profile, and in Settings */
+.connections { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
+.connections .connection { overflow-wrap: anywhere; }
+.connections a, .connectionrow a { color: var(--text); }
+.connections button { padding: 0 6px; font-size: 12px; }
+.connectionrow { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; flex-wrap: wrap; }
+.connectionrow b { min-width: 84px; }
+.connectionrow .grow { min-width: 0; overflow-wrap: anywhere; }

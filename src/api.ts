@@ -1,5 +1,5 @@
 import type {
-  AccountDeletionDto, ApplicationDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto, RollStatsDto, SearchResultDto, MediaItemDto } from './types'
+  AccountDeletionDto, ApplicationDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto, RollStatsDto, SearchResultDto, MediaItemDto, ConnectionDto, ConnectionServiceDto, FriendLinkDto, FriendLinkOwnerDto } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -227,6 +227,15 @@ export class Api {
   searchUsers(q: string) { return this.request<UserDto[]>('GET', `/api/users/search?q=${encodeURIComponent(q)}`) }
   friends() { return this.request<FriendsDto>('GET', '/api/friends') }
   addFriend(userId: string) { return this.request<FriendDto>('POST', `/api/friends/${userId}`) }
+  connectionServices() { return this.request<ConnectionServiceDto[]>('GET', '/api/connections/services') }
+  connections() { return this.request<ConnectionDto[]>('GET', '/api/me/connections') }
+  startConnection(service: string) { return this.request<{ url: string }>('POST', `/api/me/connections/${encodeURIComponent(service)}/start`) }
+  setConnectionShown(id: string, shown: boolean) { return this.request<ConnectionDto>('PUT', `/api/me/connections/${id}`, { shown }) }
+  removeConnection(id: string) { return this.request<void>('DELETE', `/api/me/connections/${id}`) }
+  friendLink() { return this.request<FriendLinkDto>('GET', '/api/me/friend-link') }
+  resetFriendLink() { return this.request<FriendLinkDto>('POST', '/api/me/friend-link/reset') }
+  friendLinkOwner(code: string) { return this.request<FriendLinkOwnerDto>('GET', `/api/friend-links/${encodeURIComponent(code)}`) }
+  useFriendLink(code: string) { return this.request<FriendDto>('POST', `/api/friend-links/${encodeURIComponent(code)}`) }
   removeFriend(userId: string) { return this.request<void>('DELETE', `/api/friends/${userId}`) }
   dms() { return this.request<DmChannelDto[]>('GET', '/api/dms') }
   openDm(userId: string) { return this.request<DmChannelDto>('POST', `/api/dms/${userId}`) }
