@@ -70,6 +70,8 @@ export interface Settings {
   guildFolders?: GuildFolder[]
   /** Per game plugin, by plugin id. Detection and auto-rolling are both off until the user turns them on. */
   plugins: Record<string, PluginSettings>
+  /** How wide this person dragged the channel list and the member list, in pixels. Unset = as the app comes. */
+  columnWidths?: { sidebar?: number; members?: number }
 }
 
 /** Servers grouped together in the rail on this device. `open` shows its servers; closed shows a small grid of their icons. */

@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import lottie, { type AnimationItem } from 'lottie-web/build/player/lottie_light'
 import { NAME_FONTS, animationColors, assetUrl, decorationUrl, initials, nameStyle, shownName, withAnimationColors, type Appearance } from '../profile'
 import type { Store } from '../store'
+import { effectFileProblem } from '../effectCheck'
 import { type DecorationDto, type RoleDto, type UserProfileDto } from '../types'
 import { Dialog } from './Dialogs'
 
@@ -279,6 +280,8 @@ export function ProfileEditor({ store, onClose }: { store: Store; onClose: () =>
   const animation = async (kind: 'avatar' | 'effect', file: File | null) => {
     setBusy(true); setNote('')
     try {
+      // An effect plays in front of the profile, so one that would hide it is turned away here, before it is sent.
+      if (kind === 'effect' && file) { const hides = await effectFileProblem(file); if (hides) { setNote(hides); return } }
       const was = kind === 'avatar' ? draft.ownDecoration : draft.ownEffect
       const p = await store.setProfileAnimation(kind, file, kind === 'effect' && cropEffect)
       const own = { ownDecoration: p.ownDecoration ?? null, ownEffect: p.ownEffect ?? null }
@@ -343,7 +346,7 @@ export function ProfileEditor({ store, onClose }: { store: Store; onClose: () =>
             <span>Fill and crop</span>
           </label>
         )}
-        <span className="muted">A Lottie file (.lottie or .json), {kind === 'avatar' ? 'square' : cropEffect ? 'any shape (it fills the card, cropped)' : '300 × 420 or that shape'}, up to 50 KB, drawn shapes only.</span>
+        <span className="muted">A Lottie file (.lottie or .json), {kind === 'avatar' ? 'square' : cropEffect ? 'any shape (it fills the card, cropped)' : '300 × 420 or that shape'}, up to 50 KB, drawn shapes only.{kind === 'effect' ? ' No background, it can hide at most 35% of the card at once, and nothing in it can stay over the picture and the name.' : ''}</span>
         <input ref={input} type="file" accept=".lottie,.json,application/json" hidden onChange={e => { const f = e.target.files?.[0]; if (f) void animation(kind, f); e.target.value = '' }} />
       </div>
     )

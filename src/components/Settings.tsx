@@ -104,7 +104,7 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, myP
   const member = members.find(m => m.userId === memberId) ?? null
 
   return (
-    <Dialog title={`Server settings — ${guild.name}`} onClose={onClose} wide>
+    <Dialog title={`Server settings — ${guild.name}`} onClose={onClose} wide scrolls>
       <div className="tabs">
         {canGuild && <button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}>Overview</button>}
         {canRoles && <button className={tab === 'roles' ? 'active' : ''} onClick={() => setTab('roles')}>Roles</button>}

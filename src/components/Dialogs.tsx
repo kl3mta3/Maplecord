@@ -129,7 +129,8 @@ const TAB_STOPS = 'button:not(:disabled), [href], input:not(:disabled):not([type
  * keyboard stays inside it (Tab goes round its controls, Escape closes it), and when it closes the keyboard goes
  * back to whatever had it before.
  */
-export function Dialog({ title, children, onClose, wide }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean }) {
+/** `scrolls`: a dialog that can hold more than the window is tall scrolls as a whole, title and all. */
+export function Dialog({ title, children, onClose, wide, scrolls }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean; scrolls?: boolean }) {
   const box = useRef<HTMLDivElement>(null)
   const titleId = useId()
   useEffect(() => {
@@ -154,7 +155,7 @@ export function Dialog({ title, children, onClose, wide }: { title: string; chil
   }
   return (
     <div className="backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div ref={box} className={'dialog' + (wide ? ' wide' : '')} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onKeyDown={keepInside}>
+      <div ref={box} className={'dialog' + (wide ? ' wide' : '') + (scrolls ? ' scrolls' : '')} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onKeyDown={keepInside}>
         <h3 id={titleId}>{title}</h3>{children}
       </div>
     </div>
@@ -210,6 +211,27 @@ export function NicknameDialog({ who, serverName, current, fallback, onSubmit, o
         {current && <button className="subtle" style={{ marginRight: 'auto' }} onClick={() => { onSubmit(null); onClose() }}>Remove nickname</button>}
         <button onClick={onClose}>Cancel</button><button className="accent" onClick={submit}>Save</button>
       </div>
+    </Dialog>
+  )
+}
+
+const fileSize = (bytes: number) => bytes >= 1048576 ? (bytes / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(bytes / 1024)) + ' KB'
+
+/** What was pasted into the message box, shown before any of it is sent. */
+export function PastedDialog({ files, where, onSend, onClose }: { files: File[]; where: string; onSend: () => void; onClose: () => void }) {
+  const picture = files.find(f => f.type.startsWith('image/')) ?? null
+  const [preview, setPreview] = useState<string | null>(null)
+  useEffect(() => {
+    if (!picture) return
+    const url = URL.createObjectURL(picture)
+    setPreview(url)
+    return () => URL.revokeObjectURL(url)
+  }, [picture])
+  return (
+    <Dialog title={`Send to ${where}?`} onClose={onClose}>
+      {preview && <img className="pastedpreview" src={preview} alt="" />}
+      <div className="pastedlist">{files.map((f, i) => <div key={i}><span className="grow">{f.name || 'Pasted file'}</span><span className="muted">{fileSize(f.size)}</span></div>)}</div>
+      <div className="buttons"><button onClick={onClose}>Cancel</button><button className="accent" autoFocus onClick={onSend}>Send</button></div>
     </Dialog>
   )
 }

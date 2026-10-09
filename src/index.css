@@ -268,6 +268,13 @@ html.overlay-mode, html.overlay-mode body, html.overlay-mode #root { background:
 
 /* ---- Server settings dialog ---- */
 .dialog.wide { width: 640px; }
+.pastedpreview { max-width: 100%; max-height: 240px; object-fit: contain; border-radius: 6px; background: var(--bg0); align-self: center; }
+.pastedlist { display: grid; gap: 2px; max-height: 140px; overflow-y: auto; }
+.pastedlist > div { display: flex; gap: 10px; }
+.pastedlist .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A dialog with more in it than the window is tall (server settings) scrolls as a whole. Narrow screens already do. */
+@media (min-width: 701px) { .dialog.scrolls { max-height: calc(100dvh - 32px); overflow-y: auto; } }
+.dialog.scrolls > * { flex-shrink: 0; }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
 .tabs button { background: transparent; border-color: transparent; color: var(--muted); padding: 4px 10px; }
 .tabs button.active { color: var(--text); background: var(--bg3); }
@@ -690,3 +697,18 @@ button.chip { cursor: pointer; }
 .tagsettings .symbols { display: grid; grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)); gap: 4px; max-height: 180px; overflow: auto; padding: 6px; background: var(--bg1); border: 1px solid var(--border); border-radius: 8px; }
 .tagsettings .symbols button { padding: 4px 0; font-size: 16px; }
 .tagsettings .symbols button.sel { border-color: var(--accent2); }
+
+/* Files being dragged over the chat: it says where they will go. */
+.chat { position: relative; }
+.chat.dropping::after { content: ''; position: absolute; inset: 6px; border: 2px dashed var(--accent2); border-radius: 10px; background: rgba(0, 0, 0, 0.35); pointer-events: none; z-index: 6; }
+.chat .dropnote { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 7; pointer-events: none; background: var(--bg1); border: 1px solid var(--accent2); border-radius: 8px; padding: 10px 16px; font-weight: 600; max-width: 80%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The channel list and the member list can be dragged wider or narrower by the edge they share with the chat. */
+@media (min-width: 901px) {
+  .shell { grid-template-columns: 72px min(var(--sidebar-w, 236px), 32vw) minmax(0, 1fr) min(var(--members-w, 220px), 28vw); }
+}
+.shell > .colgrip { grid-row: 1 / 3; justify-self: start; width: 6px; cursor: col-resize; z-index: 5; touch-action: none; }
+.shell > .colgrip.sidebar { grid-column: 3; }
+.shell > .colgrip.members { grid-column: 4; margin-left: -3px; }
+.colgrip:hover, .colgrip:active, .colgrip:focus-visible { background: var(--accent2); opacity: 0.6; outline: none; }
+@media (max-width: 900px) { .colgrip { display: none; } }

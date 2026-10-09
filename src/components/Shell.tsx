@@ -25,7 +25,7 @@ function parseRange(text: string): [number, number] | null {
   const min = parseInt(m[1], 10), max = parseInt(m[2], 10)
   return RollRange.isValid(min, max) ? [min, max] : null
 }
-import { AllowDirectDialog, BanDialog, ConfirmDialog, CreateChannelDialog, DeleteGroupDialog, DirectChannelDialog, IncomingCallDialog, P2PCallDialog, NicknameDialog, PromptDialog, StartRollDialog } from './Dialogs'
+import { PastedDialog, AllowDirectDialog, BanDialog, ConfirmDialog, CreateChannelDialog, DeleteGroupDialog, DirectChannelDialog, IncomingCallDialog, P2PCallDialog, NicknameDialog, PromptDialog, StartRollDialog } from './Dialogs'
 import { OverlaySettingsDialog, ServerSettingsDialog } from './Settings'
 import Friends from './Home'
 import { serverMediaUrl } from '../itemIcons'
@@ -48,6 +48,7 @@ import { canRecordVoiceMessage } from '../voiceMessage'
 import { appleTouch } from '../platform'
 import { DropBanner, PluginsDialog } from './Plugins'
 import { SharePicker, StreamStage } from './Streams'
+import { CHAT_LEAST, COLUMNS, ColumnGrip, clampColumn, type Column } from './ColumnGrip'
 
 type DialogState =
   | { kind: 'createGuild' } | { kind: 'joinGuild' } | { kind: 'addGuild' } | { kind: 'discover' } | { kind: 'channelAccess'; channelId: string } | { kind: 'deleteGroup'; channelId: string; name: string } | { kind: 'createChannel'; category?: boolean } | { kind: 'startRoll'; rollKind: RollKind }
@@ -65,6 +66,32 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
    * Wide windows show all three and ignore this.
    */
   const [pane, setPane] = useState<'list' | 'chat' | 'people'>('chat')
+  // The channel list and the member list can be dragged wider or narrower; the widths are remembered on this device.
+  const [columns, setColumns] = useState(() => ({
+    sidebar: clampColumn('sidebar', store.settings.columnWidths?.sidebar ?? COLUMNS.sidebar.usual),
+    members: clampColumn('members', store.settings.columnWidths?.members ?? COLUMNS.members.usual),
+  }))
+  const columnsNow = useRef(columns)
+  const columnsKept = useRef(store.settings.columnWidths ?? {})
+  const grip = (column: Column) => (
+    <ColumnGrip column={column} width={columns[column]}
+      onChange={width => {
+        // Never so wide that the chat between the two is squeezed out.
+        const room = window.innerWidth - 72 - columnsNow.current[column === 'sidebar' ? 'members' : 'sidebar'] - CHAT_LEAST
+        columnsNow.current = { ...columnsNow.current, [column]: Math.max(COLUMNS[column].least, Math.min(width, room)) }
+        setColumns(columnsNow.current)
+      }}
+      onSettle={width => {
+        columnsKept.current = { ...columnsKept.current, [column]: width === null ? undefined : columnsNow.current[column] }
+        store.updateSettings({ columnWidths: columnsKept.current })
+      }} />
+  )
+  // A file dropped anywhere but on the chat would be opened by the window, in place of the app. Nothing happens instead.
+  useEffect(() => {
+    const ignore = (e: DragEvent) => { if (e.dataTransfer?.types.includes('Files')) e.preventDefault() }
+    window.addEventListener('dragover', ignore); window.addEventListener('drop', ignore)
+    return () => { window.removeEventListener('dragover', ignore); window.removeEventListener('drop', ignore) }
+  }, [])
   const openChannelId = store.selectedChannel?.id ?? null
   const atHome = store.home
   useEffect(() => { setPane('chat') }, [openChannelId, atHome])
@@ -369,7 +396,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   }
 
   return (
-    <div className={'shell pane-' + pane}>
+    <div className={'shell pane-' + pane} style={{ '--sidebar-w': columns.sidebar + 'px', '--members-w': columns.members + 'px' } as React.CSSProperties}>
       {/* Only shown on a phone: the way between the three panes. */}
       <div className="mobilebar">
         {/* Each button opens its panel, and pressed again puts the conversation back. */}
@@ -624,6 +651,9 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
         : <Chat store={store} openRollDialog={(rollKind: RollKind) => setDialog({ kind: 'startRoll', rollKind })} canRoll={g ? can(Permission.StartRolls) : !!store.selectedDm} colorOf={colorOf}
           onCall={(userId, name, direct) => { if (direct) setDialog({ kind: 'p2pCall', userId, name }); else void store.startCall(userId, false) }} onUserMenu={openUserMenu} isIgnored={ignored} onUserCard={openCard} nameIn={nameIn} />}
 
+      {/* The edges of the chat: dragged, they resize the column on their other side. */}
+      {grip('sidebar')}{grip('members')}
+
       {/* ===== Members ===== */}
       <div className="members">
         {store.home ? (
@@ -799,6 +829,10 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
   const listRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const directRef = useRef<HTMLInputElement>(null)
+  /** Files pasted into the message box, waiting for a yes: a paste is easy to do by accident. */
+  const [pasted, setPasted] = useState<File[] | null>(null)
+  /** Files are being dragged over the chat. */
+  const [dropping, setDropping] = useState(false)
   const channel = store.selectedChannel
   // Right-click a message: copy it, or delete it if it is yours or you may manage messages here (the server decides).
   const [messageMenu, setMessageMenu] = useState<{ m: MessageDto; x: number; y: number } | null>(null)
@@ -883,13 +917,24 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
     await store.sendMessage(value)
   }
 
+  const holdsFiles = (e: React.DragEvent) => e.dataTransfer.types.includes('Files')
+  const mayTakeFiles = !!channel && !(p2pChat && p2p?.state !== 'on')
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault()
+    setDropping(false)
+    if (!mayTakeFiles) return
     for (const f of Array.from(e.dataTransfer.files)) await store.sendFile(f)
   }
 
   return (
-    <div className="chat" onDragOver={e => e.preventDefault()} onDrop={onDrop}>
+    <div className={'chat' + (dropping && mayTakeFiles ? ' dropping' : '')} onDrop={onDrop}
+      onDragOver={e => { e.preventDefault(); if (holdsFiles(e) && !dropping) setDropping(true) }}
+      onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false) }}>
+      {dropping && mayTakeFiles && <div className="dropnote" aria-hidden="true">Drop to send to {channel?.type === ChannelType.DirectMessage ? '@' : '#'}{channel?.name}</div>}
+      {pasted && channel && (
+        <PastedDialog files={pasted} where={(channel.type === ChannelType.DirectMessage ? '@' : '#') + channel.name} onClose={() => setPasted(null)}
+          onSend={async () => { const files = pasted; setPasted(null); for (const f of files) await store.sendFile(f) }} />
+      )}
       <StreamStage store={store} nameOf={nameIn} />
       <div className="header">
         <span className="muted">{channel?.type === ChannelType.Voice ? '🔊' : channel?.type === ChannelType.DirectMessage ? '@' : '#'}</span><span>{channel?.name ?? 'Pick a channel'}</span>
@@ -1024,10 +1069,17 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
           )}
           {canSendDirect && <button title={directSendTitle} aria-label="Send a file straight from your computer" onClick={() => directRef.current?.click()} disabled={!channel}><ArrowLeftRight size={17} /></button>}
           <textarea
-            placeholder={!channel ? '' : p2pChat ? `Message #${channel.name}  ·  P2P` : `Message ${channel.type === ChannelType.DirectMessage ? '@' : '#'}${channel.name}  —  type / for commands`}
+            placeholder={!channel ? '' : p2pChat ? `Message #${channel.name}  ·  P2P` : `Message ${channel.type === ChannelType.DirectMessage ? '@' : '#'}${channel.name}`}
             value={text} disabled={!channel || (p2pChat && p2p?.state !== 'on')} rows={1}
             onChange={e => { setText(e.target.value); if (e.target.value) store.notifyTyping() }}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit() } }}
+            // A screenshot, a copied picture or copied files: offered for sending. Anything with text in it pastes as text.
+            onPaste={e => {
+              const files = Array.from(e.clipboardData.files)
+              if (files.length === 0 || e.clipboardData.getData('text/plain')) return
+              e.preventDefault()
+              setPasted(files)
+            }}
           />
           <button className="accent" onClick={submit} disabled={!channel || (p2pChat && p2p?.state !== 'on')}>Send</button>
         </div>
