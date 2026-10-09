@@ -7,7 +7,7 @@ import { makeSealer, seal, unseal, type Sealer } from './p2pIdentity'
 const CARRIES_ADDRESSES = new Set(['offer', 'answer', 'ice'])
 import type {
   ChannelDto, GuildDto, InteractionDto, MemberDto, MessageDto, RoleDto, RollChoice, RollItemDto, RollKind, RollResultDto, RollSessionDto,
-  RpsChoice, RpsResultDto, RpsSessionDto, VoiceParticipantDto, FriendDto, DmChannelDto, UserDto, SystemMessageDto,
+  RpsChoice, RpsResultDto, RpsSessionDto, VoiceParticipantDto, FriendDto, DmChannelDto, UserDto, SystemMessageDto, RollStatsDto,
 } from './types'
 
 /** Server → client events, named exactly as IChatClient's methods. */
@@ -39,6 +39,7 @@ export interface ChatEvents {
   RollStarted: (session: RollSessionDto) => void
   RollUpdated: (session: RollSessionDto) => void
   RollEnded: (result: RollResultDto) => void
+  RollStats: (stats: RollStatsDto) => void
   RpsStarted: (session: RpsSessionDto) => void
   RpsUpdated: (session: RpsSessionDto) => void
   RpsEnded: (result: RpsResultDto) => void

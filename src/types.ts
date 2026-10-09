@@ -24,7 +24,7 @@ export const Permission = {
   StartRolls: 1 << 4, JoinVoice: 1 << 5, Speak: 1 << 6, Stream: 1 << 7,
   CreateInvites: 1 << 8, ManageChannels: 1 << 9, ManageRoles: 1 << 10, ManageWebhooks: 1 << 11,
   ManageGuild: 1 << 12, KickMembers: 1 << 13, BanMembers: 1 << 14, MuteMembers: 1 << 15,
-  ManageDirectChannels: 1 << 16, StreamDirect: 1 << 17, JoinDirectVoice: 1 << 18, DisconnectMembers: 1 << 19, UseRelayInDirect: 1 << 20,
+  ManageDirectChannels: 1 << 16, StreamDirect: 1 << 17, JoinDirectVoice: 1 << 18, DisconnectMembers: 1 << 19, UseRelayInDirect: 1 << 20, WearTag: 1 << 21,
   Administrator: 1 << 30,
 } as const
 export const hasPermission = (held: number, required: number) =>
@@ -60,7 +60,7 @@ export interface ServerMetaDto { protocol: number; minClientProtocol: number; ve
 /** What an invite leads to, shown before joining. */
 export interface InvitePreviewDto { code: string; guild: GuildDto; memberCount: number }
 export interface TokenResponse { accessToken: string; expiresAt: string; user: UserDto }
-export interface GuildDto { id: string; name: string; iconUrl: string | null; ownerId: string; createdAt: string; /** Listed for anyone to find and join. */ isPublic?: boolean; description?: string | null; topics?: string[] | null; /** The tag its members may wear, and whether tags are turned off for it. */ tagText?: string | null; tagSymbol?: string | null; noTag?: boolean }
+export interface GuildDto { id: string; name: string; iconUrl: string | null; ownerId: string; createdAt: string; /** Listed for anyone to find and join. */ isPublic?: boolean; description?: string | null; topics?: string[] | null; /** The tag its members may wear, and whether tags are turned off for it. */ tagText?: string | null; tagSymbol?: string | null; noTag?: boolean; /** Rolls in this server's P2P channels are not added to people's roll totals. */ noRollStats?: boolean }
 /** A public server as the list of them shows it. */
 export interface DiscoverGuildDto { id: string; name: string; iconUrl: string | null; description: string | null; topics: string[]; memberCount: number; joined: boolean }
 export interface ChannelOverrideDto { id: string; channelId: string; roleId: string | null; userId: string | null; allow: number; deny: number }
@@ -144,6 +144,8 @@ export interface InviteDto { code: string; guildId: string; createdAt: string; e
 export interface IceServerDto { urls: string[]; username: string | null; credential: string | null }
 /** A message from whoever runs the Maplecord server, to everyone online or just to you. */
 export interface SystemMessageDto { id: string; message: string; at: string }
+/** One's own running totals of loot rolls, as the server keeps them. */
+export interface RollStatsDto { rolls: number; sum: number; hundreds: number; ones: number; wins: number; losses: number }
 /** stream: what they are sharing with the channel, if anything ("screen", "window" or "camera"). */
 export interface VoiceParticipantDto {
   userId: string; username: string; connectionId: string; muted: boolean; stream?: string | null

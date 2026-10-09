@@ -67,12 +67,13 @@ export const PERMISSION_LABELS: { bit: number; name: string; hint: string }[] = 
   { bit: Permission.JoinDirectVoice, name: 'Join P2P channels', hint: 'Join a P2P voice channel (also needs Join voice, and P2P allowed on their own account)' },
   { bit: Permission.UseRelayInDirect, name: 'Use the relay in P2P channels', hint: 'Connect through the relay there when a direct connection cannot be made, or to keep their address from the others. Relayed limits apply. Without it, P2P channels are direct only' },
   { bit: Permission.StreamDirect, name: 'Stream in P2P channels', hint: 'Share screen or camera in a P2P channel (also needs Stream)' },
+  { bit: Permission.WearTag, name: 'Wear the server tag', hint: 'Pick this server\'s tag to show beside their name. Someone who loses this stops wearing it' },
   { bit: Permission.Administrator, name: 'Administrator', hint: 'Every permission, bypasses channel overrides' },
 ]
 
 const ROLE_SWATCHES = ['#9000ff', '#00ddff', '#ff008c', '#2cfc00', '#f19511', '#ff3b3b', '#ffd700', '#1abc9c', '#e91e63', '#3498db', '#95a5a6', '#ffffff']
 
-export function ServerSettingsDialog({ api, channels, guild, roles, members, myPermissions, meId, onRename, onIcon, onListing, tagSymbols, onSetTag, onRemoveTag, onCreateRole, onUpdateRole, onDeleteRole, onSetMemberRoles, onClose }: {
+export function ServerSettingsDialog({ api, channels, guild, roles, members, myPermissions, meId, onRename, onIcon, onListing, tagSymbols, onSetTag, onRemoveTag, onCountRolls, onCreateRole, onUpdateRole, onDeleteRole, onSetMemberRoles, onClose }: {
   api: Api; channels: ChannelDto[]
   guild: GuildDto; roles: RoleDto[]; members: MemberDto[]; myPermissions: number; meId: string
   onRename: (name: string) => Promise<void>
@@ -82,6 +83,8 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, myP
   tagSymbols: () => Promise<string[]>
   onSetTag: (guildId: string, text: string, symbol: string | null) => Promise<void>
   onRemoveTag: (guildId: string) => Promise<void>
+  /** Whether rolls in this server's P2P channels add to people's roll totals. */
+  onCountRolls: (guildId: string, countRolls: boolean) => Promise<void>
   onCreateRole: (name: string, color: string | null, permissions: number) => Promise<void>
   onUpdateRole: (roleId: string, patch: { name?: string; color?: string | null; permissions?: number }) => Promise<void>
   onDeleteRole: (roleId: string) => Promise<void>
@@ -140,6 +143,18 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, myP
           <ListingSettings key={`${guild.isPublic}|${guild.description ?? ''}|${(guild.topics ?? []).join(',')}`} isPublic={!!guild.isPublic} description={guild.description ?? ''} topics={guild.topics ?? []} onSave={onListing} />
           <TagSettings guild={guild} people={members.filter(m => !m.isBot).length} symbols={tagSymbols}
             onSave={(text, symbol) => onSetTag(guild.id, text, symbol)} onRemove={() => onRemoveTag(guild.id)} />
+          {/* Only a server with P2P channels has this to decide: everywhere else rolls are counted, as their results are kept. */}
+          {channels.some(c => c.directSince) && (
+            <div className="tagsettings">
+              <div className="muted">Roll stats</div>
+              <label className="row" style={{ alignItems: 'flex-start' }}>
+                <input type="checkbox" checked={!guild.noRollStats} onChange={e => void onCountRolls(guild.id, e.target.checked)} />
+                <span>Count rolls in this server's P2P channels towards people's roll stats
+                  <span className="muted" style={{ display: 'block' }}>The server keeps each person's own running totals (rolls, average, wins and losses) and nothing else about a roll here: not what it was for, who else was in it, or when.</span>
+                </span>
+              </label>
+            </div>
+          )}
         </>
       )}
 

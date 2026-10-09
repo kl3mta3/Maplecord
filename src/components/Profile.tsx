@@ -5,7 +5,7 @@ import lottie, { type AnimationItem } from 'lottie-web/build/player/lottie_light
 import { NAME_FONTS, animationColors, assetUrl, decorationUrl, initials, nameStyle, shownName, withAnimationColors, type Appearance } from '../profile'
 import type { Store } from '../store'
 import { effectFileProblem } from '../effectCheck'
-import { type DecorationDto, type RoleDto, type UserProfileDto } from '../types'
+import { Permission, hasPermission, type DecorationDto, type RoleDto, type UserProfileDto } from '../types'
 import { Dialog } from './Dialogs'
 
 // ---- Lottie ---------------------------------------------------------------------
@@ -408,7 +408,7 @@ export function ProfileEditor({ store, onClose }: { store: Store; onClose: () =>
           <div className="muted">Server tag <span>— shown beside your name everywhere, and tells people you are in that server</span></div>
           <select aria-label="Server tag" value={draft.tag?.guildId ?? ''} disabled={busy} onChange={e => void wear(e.target.value || null)}>
             <option value="">None</option>
-            {store.guilds.filter(g => g.guild.tagText && !g.guild.noTag).map(g => <option key={g.guild.id} value={g.guild.id}>{(g.guild.tagSymbol ? g.guild.tagSymbol + ' ' : '') + g.guild.tagText} — {g.guild.name}</option>)}
+            {store.guilds.filter(g => g.guild.tagText && !g.guild.noTag && (hasPermission(g.myPermissions, Permission.WearTag) || g.guild.id === draft.tag?.guildId)).map(g => <option key={g.guild.id} value={g.guild.id}>{(g.guild.tagSymbol ? g.guild.tagSymbol + ' ' : '') + g.guild.tagText} — {g.guild.name}</option>)}
           </select>
 
           <div className="muted">Profile effect <span>— plays over your profile card</span></div>

@@ -1,6 +1,5 @@
 import type {
-  AccountDeletionDto, ApplicationDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto,
-} from './types'
+  AccountDeletionDto, ApplicationDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto, RollStatsDto } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -70,6 +69,10 @@ export class Api {
   leaveGuild(id: string) { return this.request<void>('POST', `/api/guilds/${id}/leave`) }
   createInvite(guildId: string) { return this.request<InviteDto>('POST', `/api/guilds/${guildId}/invites`, { expiresInMinutes: null, maxUses: null }) }
   updateGuildListing(id: string, patch: { isPublic: boolean; description: string; topics: string[] }) { return this.request<GuildDto>('PATCH', `/api/guilds/${id}`, patch) }
+  /** Whether rolls in a server's P2P channels add to people's roll totals. */
+  setGuildCountRolls(id: string, countRolls: boolean) { return this.request<GuildDto>('PATCH', `/api/guilds/${id}`, { countRolls }) }
+  /** One's own roll totals. */
+  rollStats() { return this.request<RollStatsDto>('GET', '/api/me/roll-stats') }
   /** Public servers, by name and/or exact topic. */
   discover(q: string, topic: string) { return this.request<DiscoverGuildDto[]>('GET', `/api/discover?q=${encodeURIComponent(q)}&topic=${encodeURIComponent(topic)}`) }
   discoverTopics() { return this.request<string[]>('GET', '/api/discover/topics') }

@@ -21,7 +21,7 @@ import {
   ChannelType, MessageKind, RollChoice, RollKind, UserStatus, type PreferencesDto, type TransferSettingsDto,
   type ChannelDto, type CommandDto, type GuildSummaryDto, type MemberDto, type MessageDto, type RollItemDto, type RollResultDto, type RollSessionDto,
   type VoiceParticipantDto, type RpsSessionDto, type RpsResultDto, RpsChoice, type FriendsDto, type DmChannelDto, type RoleDto,
-  type DecorationDto, type UpdateProfileRequest, type UserDto, type UserProfileDto, type SystemMessageDto, type FileOfferDto, type TokenResponse, type StreamSettingsDto,
+  type DecorationDto, type UpdateProfileRequest, type UserDto, type UserProfileDto, type SystemMessageDto, type RollStatsDto, type FileOfferDto, type TokenResponse, type StreamSettingsDto,
   type SfuPassDto,
 } from './types'
 
@@ -88,8 +88,10 @@ export interface CatalogHit { pluginId: string; gameName: string; item: PluginIt
 
 export interface Stats { totalRolls: number; rollSum: number; perfect100s: number; ones: number; wins: number; losses: number }
 
-const STATS_KEY = 'maplecord.stats'
-const loadStats = (): Stats => { try { return { totalRolls: 0, rollSum: 0, perfect100s: 0, ones: 0, wins: 0, losses: 0, ...JSON.parse(localStorage.getItem(STATS_KEY) ?? '{}') } } catch { return { totalRolls: 0, rollSum: 0, perfect100s: 0, ones: 0, wins: 0, losses: 0 } } }
+// The totals are kept by the server, on the account, and start from nothing there. (Apps before that counted on
+// their own, in this device's storage under 'maplecord.stats'; that is neither read nor written any more.)
+const NO_STATS: Stats = { totalRolls: 0, rollSum: 0, perfect100s: 0, ones: 0, wins: 0, losses: 0 }
+const asStats = (s: RollStatsDto): Stats => ({ totalRolls: s.rolls, rollSum: s.sum, perfect100s: s.hundreds, ones: s.ones, wins: s.wins, losses: s.losses })
 
 /** All client state and actions. One instance for the app; components read what they need. */
 /** A P2P message in the shape the chat screen draws every message in. */
@@ -345,7 +347,7 @@ export function useMaplecord() {
   const dismissSystemMessage = useCallback((id: string) => { closedSystemMessages.current.add(id); setSystemMessages(list => list.filter(m => m.id !== id)) }, [])
   const [status, setStatus] = useState('Connecting…')
   const [commands, setCommands] = useState<CommandDto[]>([])
-  const [stats, setStats] = useState<Stats>(loadStats)
+  const [stats, setStats] = useState<Stats>(NO_STATS)
   const [ready, setReady] = useState(false)
   const readyRef = useRef(false)
   useEffect(() => { readyRef.current = ready }, [ready])
@@ -464,11 +466,6 @@ export function useMaplecord() {
     const s = settingsRef.current
     if (mine && mine.choice !== RollChoice.Pass) {
       const won = result.winnerId === me()
-      setStats(prev => {
-        const next = { ...prev, totalRolls: prev.totalRolls + 1, rollSum: prev.rollSum + mine.value, perfect100s: prev.perfect100s + (mine.value === 100 ? 1 : 0), ones: prev.ones + (mine.value === 1 ? 1 : 0), wins: prev.wins + (won ? 1 : 0), losses: prev.losses + (won ? 0 : 1) }
-        try { localStorage.setItem(STATS_KEY, JSON.stringify(next)) } catch { /* ignore */ }
-        return next
-      })
       if (won) playSound(mine.value === 100 ? 'you100' : 'win', s.soundProfile, s.soundEnabled)
       else if (mine.value === 1) playSound('one', s.soundProfile, s.soundEnabled)
       else if (mine.value === 69) playSound('sixtyNine', s.soundProfile, s.soundEnabled)
@@ -500,6 +497,8 @@ export function useMaplecord() {
       // changed, a friend request) never reached it. So the servers, friends and conversations are asked for again:
       // once, here, and never on a timer.
       if (s === 'connected') {
+        // One's roll totals, as the server has them: asked for as the app connects, and sent by the server after each roll.
+        void api.rollStats().then(s => setStats(asStats(s))).catch(() => { /* an older server keeps none */ })
         if (wasConnected) {
           setHubEpoch(n => n + 1)
           void loadGuilds().catch(() => { /* still what we had; the next reconnect asks again */ })
@@ -658,6 +657,7 @@ export function useMaplecord() {
       RollStarted: onRollStarted,
       RollUpdated: session => setActiveRoll(cur => (cur && cur.session.id === session.id ? { ...cur, session } : cur)),
       RollEnded: onRollEnded,
+      RollStats: s => setStats(asStats(s)),
       RpsStarted: session => { if (!inParty(session.channelId)) return; window.clearTimeout(rpsClearTimer.current); setActiveRps({ session, result: null, myPick: null }) },
       RpsUpdated: session => setActiveRps(cur => (cur && cur.session.id === session.id ? { ...cur, session } : cur)),
       RpsEnded: result => {
@@ -1233,6 +1233,12 @@ export function useMaplecord() {
     guildsRef.current = [...guildsRef.current.filter(x => x.guild.id !== g.guild.id), state]
     selectGuild(g.guild.id)
   }, [api, selectGuild])
+
+  /** Whether rolls in this server's P2P channels add to people's roll totals. */
+  const setGuildCountRolls = useCallback(async (guildId: string, countRolls: boolean) => {
+    const guild = await api.setGuildCountRolls(guildId, countRolls)
+    patchGuild(guildId, x => ({ ...x, guild }))
+  }, [api, patchGuild])
 
   const setGuildListing = useCallback(async (patch: { isPublic: boolean; description: string; topics: string[] }) => {
     const g = selected.current.guild
@@ -1990,6 +1996,7 @@ export function useMaplecord() {
     transferEngine.dropOffers()
     // Whoever signs in next is shown the log-on message, whatever the last person closed.
     closedSystemMessages.current.clear(); setSystemMessages([])
+    setStats(NO_STATS)
     updateSettings({ accessToken: null, tokenExpires: null, user: null })
     setGuilds([]); setSelectedGuildId(null); setSelectedChannelId(null); setHome(false); setFriends(EMPTY_FRIENDS); setDms([]); setReady(false)
   }, [hub, leaveVoice, transferEngine, updateSettings, voiceHub])
@@ -2373,7 +2380,7 @@ export function useMaplecord() {
 
   return {
     api, hub, settings, updateSettings, ready, status, error, setError, systemMessages, dismissSystemMessage,
-    guilds, selectedGuild, selectedChannel, selectedDm, home, friends, dms, dmUnread, messages, canLoadOlder, activeRoll, typing, commands, stats,
+    guilds, selectedGuild, selectedChannel, selectedDm, home, friends, dms, dmUnread, messages, canLoadOlder, activeRoll, typing, commands, stats, setGuildCountRolls,
     connect, selectGuild, selectChannel, openHome, openDm, addFriend, removeFriend, searchUsers, sendMessage, sendFile, uploading, offerFile, withdrawFile, downloadFile, cancelTransfer, transfers, notifyTyping, loadOlder,
     renameGuild, setGuildIcon, createRole, updateRole, deleteRole, setMemberRoles,
     partyChannel, partyLabel,

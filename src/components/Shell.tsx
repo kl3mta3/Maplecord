@@ -635,7 +635,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           <button className="iconbtn" onClick={() => setDialog({ kind: 'settings' })} title="Settings"><SettingsIcon size={17} /></button>
           </span>
         </div>
-        <div className="statsline" title="Your roll stats on this device · right-click for options"
+        <div className="statsline" title="Your roll stats · right-click for options"
           onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setMenu({ kind: 'stats', x: e.clientX, y: e.clientY }) }}>
           <span>Avg {s.totalRolls ? (s.rollSum / s.totalRolls).toFixed(1) : '0.0'}</span>
           <span>W/L {s.losses ? (s.wins / s.losses).toFixed(2) : s.wins}</span>
@@ -803,7 +803,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       )}
       {dialog?.kind === 'server' && g && (
         <ServerSettingsDialog api={store.api} channels={g.channels} guild={g.guild} roles={g.roles ?? []} members={g.members} myPermissions={myPerms} meId={me?.id ?? ''}
-          onRename={store.renameGuild} onIcon={store.setGuildIcon} onListing={store.setGuildListing} tagSymbols={store.tagSymbols} onSetTag={store.setGuildTag} onRemoveTag={store.removeGuildTag} onCreateRole={store.createRole} onUpdateRole={store.updateRole} onDeleteRole={store.deleteRole} onSetMemberRoles={store.setMemberRoles}
+          onRename={store.renameGuild} onIcon={store.setGuildIcon} onListing={store.setGuildListing} tagSymbols={store.tagSymbols} onSetTag={store.setGuildTag} onRemoveTag={store.removeGuildTag} onCountRolls={store.setGuildCountRolls} onCreateRole={store.createRole} onUpdateRole={store.updateRole} onDeleteRole={store.deleteRole} onSetMemberRoles={store.setMemberRoles}
           onClose={() => setDialog(null)} />
       )}
       {store.directPrompt && (
