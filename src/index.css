@@ -681,7 +681,10 @@ button.chip { cursor: pointer; }
 /* Server tags: a small label beside a name. Always the same height; five letters and a symbol at most. */
 .tagpill { display: inline-flex; align-items: center; gap: 3px; height: 16px; padding: 0 5px; margin-left: 6px; border-radius: 4px; background: var(--bg3); border: 1px solid var(--border);
   color: var(--text); font: 700 10px/1 ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: 0.4px; vertical-align: middle; white-space: nowrap; -webkit-text-fill-color: currentColor; }
-.tagpill .sym { font-size: 11px; line-height: 1; }
+.tagpill .sym { font-size: 11px; line-height: 1; display: inline-flex; align-items: center; }
+/* The Maplecord logo as a tag's symbol: the size of the letters beside it in a tag, of the other symbols in the picker. */
+.taglogo { width: 1.2em; height: 1.2em; object-fit: contain; vertical-align: middle; }
+.tagpill .taglogo { width: 12px; height: 12px; }
 /* A name in a narrow list: the name gives way and is cut short, and the tag after it always stays in view. */
 .nameline { display: flex; align-items: center; min-width: 0; }
 .nameline > .uname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
