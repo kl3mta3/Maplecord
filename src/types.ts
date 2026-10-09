@@ -1,6 +1,8 @@
 // Mirrors Maplecord.Shared/Contracts (System.Text.Json web defaults: camelCase, enums as numbers).
 
-export const ChannelType = { Category: 0, Text: 1, Voice: 2, DirectMessage: 3 } as const
+export const ChannelType = { Category: 0, Text: 1, Voice: 2, DirectMessage: 3, Forum: 4, Gallery: 5 } as const
+/** A forum or a gallery: a list of posts, where what is said about a post is in its thread. */
+export const isPostsChannel = (c: { type: number } | null | undefined) => c?.type === ChannelType.Forum || c?.type === ChannelType.Gallery
 export type ChannelType = (typeof ChannelType)[keyof typeof ChannelType]
 
 export const GuildRole = { Member: 0, Moderator: 1, Admin: 2, Owner: 3 } as const
@@ -137,13 +139,46 @@ export interface MessageDto {
   embeds?: EmbedDto[] | null; authorAvatarUrl?: string | null; webhookId?: string | null; ephemeral?: boolean; rps?: RpsResultDto | null
   dice?: DiceDto | null; call?: CallLogDto | null
   fileOffer?: FileOfferDto | null
+  /** The message this one answers; `gone` if it has since been deleted. */
+  replyTo?: ReplyToDto | null
+  /** Set on a message in a thread: the message the thread hangs off. */
+  threadId?: string | null
+  /** A post's title, in a forum or a gallery. */
+  title?: string | null
+  threadCount?: number; threadLastAt?: string | null
+  pinnedAt?: string | null
+  reactions?: ReactionDto[] | null
+  poll?: PollDto | null
   /** Files on a message from a P2P channel. They are not on the server: their contents come from other people's apps. */
   p2pFiles?: import('./p2pText').P2PFile[]
+  /** A P2P message that is only someone's reaction to another message (see p2pPosts.ts). It is counted, never shown. */
+  p2pReaction?: { id: string; e: string; on: boolean }
+  /** The id of the message a P2P message answers. What it shows as is worked out from the messages this device holds. */
+  p2pReplyTo?: string
+  /** A poll asked in a P2P channel: its choices, whether several may be picked, and how many hours it is open. */
+  p2pPoll?: { o: string[]; m: boolean; h: number | null }
+  /** Notes about another P2P message, counted and never shown: what it now reads, a pin, a vote, a poll closed by hand. */
+  p2pEdit?: string
+  p2pPin?: { id: string; on: boolean }
+  p2pVote?: { id: string; o: number[] }
+  p2pPollClose?: string
 }
 export interface InviteDto { code: string; guildId: string; createdAt: string; expiresAt: string | null; maxUses: number | null; uses: number }
 export interface IceServerDto { urls: string[]; username: string | null; credential: string | null }
 /** A message from whoever runs the Maplecord server, to everyone online or just to you. */
 export interface SystemMessageDto { id: string; message: string; at: string }
+export interface ReplyToDto { id: string; authorId: string; authorName: string; snippet: string; gone?: boolean }
+export interface ReactionDto { emoji: string; count: number; mine?: boolean }
+export interface PollOptionDto { text: string; votes: number; mine?: boolean }
+export interface PollDto { options: PollOptionDto[]; multi: boolean; closesAt: string | null; voters: number; closed?: boolean }
+/** A poll being started: two to ten choices, whether several may be picked, and for how many hours it stays open (null: until closed). */
+export interface NewPollDto { options: string[]; multi: boolean; hours: number | null }
+export interface PostRequest { channelId: string; content: string | null; attachmentIds?: string[] | null; replyToId?: string | null; threadId?: string | null; title?: string | null; poll?: NewPollDto | null }
+export interface SearchResultDto { messages: MessageDto[]; before: string | null; more: boolean }
+/** One picture or video of a channel, and the message it is on (and the thread that message is in, if it is in one). */
+export interface MediaItemDto { file: AttachmentDto; messageId: string; threadId: string | null; authorId: string; authorName: string; at: string }
+/** The same as the app shows it. In a P2P channel the file is one people's apps hold (`p2pFile`), not one on the server. */
+export interface MediaItem { key: string; messageId: string; threadId: string | null; authorId: string; authorName: string; at: string; file?: AttachmentDto; p2pFile?: import('./p2pText').P2PFile }
 /** One's own running totals of loot rolls, as the server keeps them. */
 export interface RollStatsDto { rolls: number; sum: number; hundreds: number; ones: number; wins: number; losses: number }
 /** stream: what they are sharing with the channel, if anything ("screen", "window" or "camera"). */

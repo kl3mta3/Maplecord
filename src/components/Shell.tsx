@@ -1,8 +1,8 @@
 import { TagCardDialog, onTagOpened } from './Tags'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Store } from '../store'
+import { p2pMedia, type Store } from '../store'
 import type { TransferView } from '../transfer'
-import { ChannelType, MessageKind, Permission, UserStatus, RollChoice, RollKind, RollRange, RpsChoice, hasPermission, type AttachmentDto, type ChannelBotDto, type FileOfferDto, type CommandDto, type MemberDto, type MessageDto, type RoleDto } from '../types'
+import { ChannelType, isPostsChannel, MessageKind, Permission, UserStatus, RollChoice, RollKind, RollRange, RpsChoice, hasPermission, type AttachmentDto, type ChannelBotDto, type FileOfferDto, type CommandDto, type MemberDto, type MediaItem, type MessageDto, type RoleDto } from '../types'
 
 const RPS_ICON: Record<number, string> = { [RpsChoice.Rock]: '✊', [RpsChoice.Paper]: '✋', [RpsChoice.Scissors]: '✌️' }
 const RPS_NAME: Record<number, string> = { [RpsChoice.Rock]: 'Rock', [RpsChoice.Paper]: 'Paper', [RpsChoice.Scissors]: 'Scissors' }
@@ -30,7 +30,8 @@ import { OverlaySettingsDialog, ServerSettingsDialog } from './Settings'
 import Friends from './Home'
 import { serverMediaUrl } from '../itemIcons'
 import { isElectron } from '../platform'
-import { P2P_PICTURE, type P2PFile } from '../p2pText'
+import { MAX_P2P_TEXT, P2P_PICTURE, type P2PFile } from '../p2pText'
+import { foldP2p, foldP2pChat, P2P_GALLERY_POLLS, P2P_META_ROOM, P2P_REACTIONS } from '../p2pPosts'
 import { soundPackNames } from '../sounds'
 import { DEFAULT_GATE_LEVEL, DEFAULT_NOTIFY, type NotifyLevel } from '../settings'
 import { ContextMenu, type MenuEntry } from './ContextMenu'
@@ -49,7 +50,8 @@ import { appleTouch } from '../platform'
 import { DropBanner, PluginsDialog } from './Plugins'
 import { SharePicker, StreamStage } from './Streams'
 import { CHAT_LEAST, COLUMNS, ColumnGrip, clampColumn, type Column } from './ColumnGrip'
-import { channelMembers } from '../channelViewers'
+import { channelMembers, mayManageMessagesIn } from '../channelViewers'
+import { ForumList, GalleryGrid, MediaGrid, NewPostDialog, PinsDialog, PollDialog, PollView, QUICK_REACTIONS, ReactionPicker, Reactions, ReplyQuote, SearchDialog } from './ChatExtras'
 
 type DialogState =
   | { kind: 'createGuild' } | { kind: 'joinGuild' } | { kind: 'addGuild' } | { kind: 'discover' } | { kind: 'channelAccess'; channelId: string } | { kind: 'deleteGroup'; channelId: string; name: string } | { kind: 'createChannel'; category?: boolean } | { kind: 'startRoll'; rollKind: RollKind }
@@ -548,13 +550,13 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
                       title={c.type !== ChannelType.Voice ? undefined : c.directSince
                         ? 'P2P voice channel: people in it connect straight to each other and can find each other\u2019s IP address. Click to join (you are asked first).'
                         : 'Click to join voice and open its chat'}
-                      onClick={() => c.type === ChannelType.Text ? store.selectChannel(c.id) : openVoice(c.id)}
+                      onClick={() => c.type === ChannelType.Voice ? openVoice(c.id) : store.selectChannel(c.id)}
                       onContextMenu={e => {
                         e.preventDefault()
                         if (c.directSince) loadChannelBots(c.id)
                         setMenu({ kind: 'channel', channelId: c.id, name: c.name, direct: !!c.directSince, voice: c.type === ChannelType.Voice, x: e.clientX, y: e.clientY })
                       }}>
-                      <span className="muted">{c.type === ChannelType.Text ? '#' : '🔊'}</span>
+                      <span className="muted">{c.type === ChannelType.Voice ? '🔊' : c.type === ChannelType.Forum ? '☰' : c.type === ChannelType.Gallery ? '🖼' : '#'}</span>
                       <span className="grow" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
                       {c.directSince && <span className="p2ptag">P2P</span>}
                       {store.settings.mutedChannels?.[c.id] && <span className="muted" title="Muted">🔕</span>}
@@ -845,6 +847,15 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
   // Right-click a message: copy it, or delete it if it is yours or you may manage messages here (the server decides).
   const [messageMenu, setMessageMenu] = useState<{ m: MessageDto; x: number; y: number } | null>(null)
   const [deleting, setDeleting] = useState<MessageDto | null>(null)
+  // What a kept channel's messages can have: an answer, an edit, reactions, a pin, a thread, a poll. A P2P channel's
+  // messages are on people's own devices, where none of this reaches.
+  const [replyingTo, setReplyingTo] = useState<MessageDto | null>(null)
+  const [editing, setEditing] = useState<string | null>(null)
+  const [picker, setPicker] = useState<{ id: string; x: number; y: number } | null>(null)
+  const [panel, setPanel] = useState<'pins' | 'search' | 'poll' | 'post' | null>(null)
+  // Only the channel's pictures and videos, as a grid, in place of the conversation.
+  const [mediaOnly, setMediaOnly] = useState(false)
+  const [media, setMedia] = useState<{ items: MediaItem[]; more: boolean; busy: boolean }>({ items: [], more: false, busy: false })
   const here = store.guilds.find(x => x.guild.id === channel?.guildId)
   const mayManageMessages = !!here && hasPermission(here.myPermissions, Permission.ManageMessages)
   // Sending straight from this computer is a P2P thing: offered in a P2P channel and in a conversation with a
@@ -853,6 +864,59 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
   // A P2P channel on a server: what is typed goes straight between apps, and only text travels that way so far.
   const p2pChat = !!channel && channel.type !== ChannelType.DirectMessage && channel.directSince != null
   const p2p = p2pChat && store.p2pText?.channelId === channel?.id ? store.p2pText : null
+  const kept = !!channel && !p2pChat
+  const thread = kept ? store.thread : null
+  // A P2P gallery: its posts, what is said about them and its likes are all P2P messages, worked out here from the
+  // ones this device holds.
+  const p2pGallery = p2pChat && channel?.type === ChannelType.Gallery
+  const myId = store.me()?.id
+  const folded = useMemo(() => (p2pGallery && channel ? foldP2p(store.messages, myId, id => !!here && mayManageMessagesIn(here, id, channel)) : null), [p2pGallery, store.messages, myId, here, channel])
+  // A P2P text channel: reactions, answers and threads are P2P messages too, worked out the same way.
+  // Whose pins count is each app's own reading of who may manage messages here.
+  const p2pTalk = useMemo(() => (p2pChat && !p2pGallery && channel ? foldP2pChat(store.messages, myId, id => !!here && mayManageMessagesIn(here, id, channel)) : null), [p2pChat, p2pGallery, store.messages, myId, here, channel])
+  /** The post that is open in a P2P gallery, or the message whose thread is open in a P2P text channel. */
+  const p2pRoot = !store.p2pPost ? null : folded ? folded.posts.find(p => p.id === store.p2pPost) ?? null : p2pTalk ? p2pTalk.main.find(m => m.id === store.p2pPost && !m.threadId) ?? null : null
+  /** A forum or gallery with no post open: its posts are what is on screen, not a conversation. */
+  const postsList = (kept && isPostsChannel(channel) && !thread) || (p2pGallery && !p2pRoot)
+  const mayPin = kept && (channel?.type === ChannelType.DirectMessage || mayManageMessages)
+  const shown = thread ? [thread.root, ...thread.messages]
+    : p2pRoot ? [p2pRoot, ...((folded ? folded.said : p2pTalk?.threads)?.get(p2pRoot.id) ?? [])]
+    : p2pTalk ? p2pTalk.main : store.messages
+  useEffect(() => { setReplyingTo(null); setEditing(null); setPicker(null); setPanel(null) }, [channel?.id, thread?.root.id, p2pRoot?.id])
+  /** Offered in a conversation: a text channel (P2P or not), a voice channel's chat, messages with a friend. Not in a thread, a forum or a gallery. */
+  const mayMedia = !!channel && !thread && !p2pRoot && ((kept && !isPostsChannel(channel)) || !!p2pTalk)
+  const { loadMedia } = store
+  useEffect(() => { setMediaOnly(false) }, [channel?.id])
+  useEffect(() => {
+    if (!mediaOnly) return
+    let stale = false
+    setMedia({ items: [], more: false, busy: true })
+    loadMedia().then(page => { if (!stale) setMedia({ ...page, busy: false }) }, e => { if (!stale) { setMedia({ items: [], more: false, busy: false }); store.setError(e instanceof Error ? e.message : String(e)) } })
+    return () => { stale = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- asked for when it is turned on, for the channel it is turned on in
+  }, [mediaOnly, channel?.id, loadMedia])
+  const moreMedia = () => {
+    const last = media.items.at(-1)
+    if (!last || media.busy) return
+    setMedia(m => ({ ...m, busy: true }))
+    loadMedia(last.at).then(page => setMedia(m => ({ items: [...m.items, ...page.items.filter(x => !m.items.some(y => y.key === x.key))], more: page.more, busy: false })),
+      e => { setMedia(m => ({ ...m, busy: false })); store.setError(e instanceof Error ? e.message : String(e)) })
+  }
+  // What is on screen as the conversation counts too, so a picture posted while the grid is up shows in it.
+  const mediaShown = useMemo(() => {
+    if (!mediaOnly) return []
+    const fresh: MediaItem[] = p2pTalk ? p2pMedia([...p2pTalk.main, ...[...p2pTalk.threads.values()].flat()])
+      : store.messages.flatMap(m => m.attachments.filter(a => !a.expired && /^(image|video)\//.test(a.contentType)).map(a => ({ key: a.id, file: a, messageId: m.id, threadId: m.threadId ?? null, authorId: m.authorId, authorName: m.authorName, at: m.createdAt })))
+    const newest = media.items[0]?.at ?? ''
+    const have = new Set(media.items.map(x => x.key))
+    return [...fresh.filter(x => !have.has(x.key) && x.at > newest).sort((a, b) => b.at.localeCompare(a.at)), ...media.items]
+  }, [mediaOnly, media.items, p2pTalk, store.messages])
+  const openMedia = (item: MediaItem) => {
+    if (!channel) return
+    setMediaOnly(false)
+    if (shown.some(x => x.id === item.messageId)) store.setHighlight(item.messageId)
+    else void (p2pChat ? store.jumpP2p : store.jumpTo)({ id: item.messageId, channelId: channel.id, threadId: item.threadId })
+  }
   const canSendDirect = store.allowDirect && p2pPlace && store.transferLimits?.enabled !== false
   // A voice message: recorded here, sent like any file. The server's upload limit is looked up when one is started.
   const [voiceMessage, setVoiceMessage] = useState<{ maxBytes: number } | null>(null)
@@ -868,7 +932,21 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
   const noParty = 'Join a voice channel first: rolls go to the people in voice with you'
   const me = store.me()
 
-  useEffect(() => { const el = listRef.current; if (el) el.scrollTop = el.scrollHeight }, [store.messages.length, store.selectedChannel?.id])
+  // A conversation is read from its newest message, at the bottom; a list of posts from the top; and a message that
+  // was jumped to is brought into the middle of the screen.
+  const marked = store.highlight
+  useEffect(() => {
+    const el = listRef.current
+    if (el && !marked) el.scrollTop = postsList ? 0 : el.scrollHeight
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a mark fading must not send the list back to its end
+  }, [shown.length, store.selectedChannel?.id, thread?.root.id, p2pRoot?.id, postsList])
+  useEffect(() => {
+    if (!marked) return
+    listRef.current?.querySelector(`[data-mid="${marked}"]`)?.scrollIntoView({ block: 'center' })
+    const fade = window.setTimeout(() => store.setHighlight(null), 3000)
+    return () => window.clearTimeout(fade)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- when the mark changes, or the list it is in arrives
+  }, [marked, shown.length])
 
   const suggestions = useMemo(() => {
     if (!text.startsWith('/')) return []
@@ -922,7 +1000,86 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
       await store.invokeCommand(command, parseArgs(command, rest.join(' ')))
       return
     }
-    await store.sendMessage(value)
+    const answering = replyingTo
+    setReplyingTo(null)
+    await store.sendMessage(value, null, { replyToId: answering?.id ?? null })
+  }
+
+  const nameOfMessage = (m: MessageDto) => (m.webhookId ? m.authorName : nameIn(m.authorId, m.authorName))
+  const goTo = (m: MessageDto) => { if (!postsList && shown.some(x => x.id === m.id)) store.setHighlight(m.id); else void (p2pChat ? store.jumpP2p(m) : store.jumpTo(m)) }
+  const reactTo = (id: string, emoji: string, on: boolean) => void (p2pChat ? store.reactP2p(id, emoji, on) : store.react(id, emoji, on))
+  const react = (m: MessageDto, emoji: string) => reactTo(m.id, emoji, !(m.reactions ?? []).find(r => r.emoji === emoji)?.mine)
+  /** What a message of a kept channel carries besides its text, and the buttons that hover over it. */
+  const extrasFor = (m: MessageDto): MessageExtras | undefined => {
+    // A P2P channel: reactions everywhere; in a text channel answers and threads as well; in a gallery an open
+    // post's title. All of it is sent between the apps, so the buttons are only there while connected.
+    if (p2pChat) {
+      if (m.ephemeral) return undefined
+      const connected = p2p?.state === 'on'
+      // A thread is started from a message of the channel itself, never from inside one.
+      const mayThread = !!p2pTalk && !p2pRoot && !m.threadId
+      const answered = m.replyTo
+      return {
+      highlighted: store.highlight === m.id,
+      title: p2pGallery && m.id === p2pRoot?.id ? m.title ?? null : null,
+      quote: answered ? (
+        <ReplyQuote reply={answered} name={answered.gone ? '' : nameIn(answered.authorId, answered.authorName)} gone="The message this answers is not on this device"
+          onJump={!answered.gone && shown.some(x => x.id === answered.id) ? () => store.setHighlight(answered.id) : undefined} />
+      ) : undefined,
+      // A post's title can be changed with its words; anything else is its words alone.
+      editor: editing === m.id ? (
+        <MessageEditor text={m.content} title={p2pGallery && m.id === p2pRoot?.id ? m.title ?? '' : null} onCancel={() => setEditing(null)}
+          onSave={(text, title) => {
+            setEditing(null)
+            const changed = text.trim() !== m.content.trim() || (title !== null && title !== m.title)
+            if (changed && (text.trim() || (m.p2pFiles?.length ?? 0) > 0)) void store.editP2p(m.id, text, title)
+          }} />
+      ) : undefined,
+      poll: m.poll && (p2pTalk || P2P_GALLERY_POLLS) ? <PollView poll={m.poll} mayClose={connected && (m.authorId === me?.id || mayManageMessages)} onVote={options => { if (connected) void store.voteP2p(m.id, options) }} onClose={() => void store.closeP2pPoll(m.id)} /> : undefined,
+      reactions: (m.reactions?.length ?? 0) > 0
+        ? <Reactions reactions={m.reactions!} onToggle={(emoji, on) => reactTo(m.id, emoji, on)} onMore={connected ? e => setPicker({ id: m.id, x: e.clientX, y: e.clientY }) : undefined} /> : undefined,
+      threadLink: mayThread && (m.threadCount ?? 0) > 0
+        ? <button className="threadlink" onClick={() => store.openP2pPost(m.id)}>💬 {m.threadCount} {m.threadCount === 1 ? 'reply' : 'replies'} <span className="muted">· open thread</span></button> : undefined,
+      tools: !connected ? undefined : (
+        <span className="msgtools">
+          {QUICK_REACTIONS.slice(0, 3).map(emoji => <button key={emoji} title={`React with ${emoji}`} aria-label={`React with ${emoji}`} onClick={() => react(m, emoji)}>{emoji}</button>)}
+          <button title="More reactions" aria-label="More reactions" onClick={e => setPicker({ id: m.id, x: e.clientX, y: e.clientY })}>＋</button>
+          {p2pTalk && <button title="Reply" aria-label="Reply" onClick={() => setReplyingTo(m)}>↩</button>}
+          {mayThread && <button title={(m.threadCount ?? 0) > 0 ? 'Open thread' : 'Reply in a thread'} aria-label="Thread" onClick={() => store.openP2pPost(m.id)}>💬</button>}
+        </span>
+      ),
+      }
+    }
+    if (!kept || m.ephemeral) return undefined
+    const mine = m.authorId === me?.id && !m.webhookId
+    // A thread is started from a message of the channel itself, never from inside one.
+    const mayThread = !thread && !m.threadId
+    const answered = m.replyTo
+    return {
+      highlighted: store.highlight === m.id,
+      title: m.title ?? null,
+      quote: answered ? (
+        <ReplyQuote reply={answered} name={answered.gone ? '' : nameIn(answered.authorId, answered.authorName)}
+          onJump={answered.gone ? undefined : () => { if (shown.some(x => x.id === answered.id)) store.setHighlight(answered.id); else void store.jumpTo({ id: answered.id, channelId: m.channelId, threadId: m.threadId ?? null }) }} />
+      ) : undefined,
+      editor: editing === m.id ? (
+        <MessageEditor text={m.content} title={isPostsChannel(channel) && !m.threadId ? m.title ?? '' : null} onCancel={() => setEditing(null)}
+          onSave={(text, title) => { setEditing(null); void store.editMessage(m.id, text, title) }} />
+      ) : undefined,
+      poll: m.poll ? <PollView poll={m.poll} mayClose={mine || mayManageMessages} onVote={options => void store.votePoll(m.id, options)} onClose={() => void store.closePoll(m.id)} /> : undefined,
+      reactions: (m.reactions?.length ?? 0) > 0
+        ? <Reactions reactions={m.reactions!} onToggle={(emoji, on) => void store.react(m.id, emoji, on)} onMore={e => setPicker({ id: m.id, x: e.clientX, y: e.clientY })} /> : undefined,
+      threadLink: mayThread && (m.threadCount ?? 0) > 0
+        ? <button className="threadlink" onClick={() => void store.openThread(m)}>💬 {m.threadCount} {m.threadCount === 1 ? 'reply' : 'replies'} <span className="muted">· open thread</span></button> : undefined,
+      tools: (
+        <span className="msgtools">
+          {QUICK_REACTIONS.slice(0, 3).map(emoji => <button key={emoji} title={`React with ${emoji}`} aria-label={`React with ${emoji}`} onClick={() => react(m, emoji)}>{emoji}</button>)}
+          <button title="More reactions" aria-label="More reactions" onClick={e => setPicker({ id: m.id, x: e.clientX, y: e.clientY })}>＋</button>
+          <button title="Reply" aria-label="Reply" onClick={() => setReplyingTo(m)}>↩</button>
+          {mayThread && <button title={(m.threadCount ?? 0) > 0 ? 'Open thread' : 'Reply in a thread'} aria-label="Thread" onClick={() => void store.openThread(m)}>💬</button>}
+        </span>
+      ),
+    }
   }
 
   const holdsFiles = (e: React.DragEvent) => e.dataTransfer.types.includes('Files')
@@ -945,7 +1102,14 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
       )}
       <StreamStage store={store} nameOf={nameIn} />
       <div className="header">
-        <span className="muted">{channel?.type === ChannelType.Voice ? '🔊' : channel?.type === ChannelType.DirectMessage ? '@' : '#'}</span><span>{channel?.name ?? 'Pick a channel'}</span>
+        <span className="muted">{channel?.type === ChannelType.Voice ? '🔊' : channel?.type === ChannelType.DirectMessage ? '@' : channel?.type === ChannelType.Forum ? '☰' : channel?.type === ChannelType.Gallery ? '🖼' : '#'}</span><span>{channel?.name ?? 'Pick a channel'}</span>
+        {(kept || p2pChat) && channel && (
+          <span className="chattools">
+            {(mayMedia || mediaOnly) && <button className="subtle" aria-pressed={mediaOnly} title={mediaOnly ? 'Show the whole conversation again' : 'Show only the pictures and videos'} aria-label="Only pictures and videos" onClick={() => setMediaOnly(on => !on)}>🖼</button>}
+            <button className="subtle" title="Pinned messages" aria-label="Pinned messages" onClick={() => setPanel('pins')}>📌</button>
+            <button className="subtle" title={p2pChat ? 'Search what this device has kept of this channel' : 'Search this channel'} aria-label="Search this channel" onClick={() => setPanel('search')}>🔍</button>
+          </span>
+        )}
         {channel?.type === ChannelType.DirectMessage && <span style={{ width: 8, height: 8, borderRadius: 4, background: !store.selectedDm?.online ? '#555566' : store.dndUsers.has(store.selectedDm.other.id) ? 'var(--red)' : 'var(--green)', display: 'inline-block' }} title={!store.selectedDm?.online ? 'Offline' : store.dndUsers.has(store.selectedDm.other.id) ? 'Do not disturb' : 'Online'} />}
         {channel?.type === ChannelType.DirectMessage && store.selectedDm && !store.call && store.friends.friends.some(f => f.user.id === store.selectedDm?.other.id) && (
           <span className="callbuttons">
@@ -966,21 +1130,70 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
         )}
       </div>
 
-      <div className="messages" ref={listRef}>
-        {store.canLoadOlder && <div style={{ textAlign: 'center' }}><button className="subtle" onClick={store.loadOlder}>Load older messages</button></div>}
-        {store.messages.map(m => isIgnored(m.authorId) && !m.webhookId && !revealed.has(m.id)
+      {thread && (
+        <div className="threadbar">
+          <button className="subtle" onClick={store.closeThread} title="Back to the channel">← Back</button>
+          <span className="grow"><b>{isPostsChannel(channel) ? thread.root.title ?? 'Post' : 'Thread'}</b>
+            <span className="muted"> · {(thread.root.threadCount ?? thread.messages.length) === 0 ? 'nothing said about it yet' : `${thread.root.threadCount ?? thread.messages.length} ${(thread.root.threadCount ?? thread.messages.length) === 1 ? 'reply' : 'replies'}`}</span></span>
+        </div>
+      )}
+      {p2pRoot && (
+        <div className="threadbar">
+          <button className="subtle" onClick={store.closeP2pPost} title={p2pGallery ? 'Back to the pictures' : 'Back to the channel'}>← Back</button>
+          <span className="grow"><b>{p2pGallery ? p2pRoot.title : 'Thread'}</b>
+            <span className="muted"> · {(p2pRoot.threadCount ?? 0) === 0 ? 'nothing said about it yet' : `${p2pRoot.threadCount} ${p2pRoot.threadCount === 1 ? 'reply' : 'replies'}`}</span></span>
+        </div>
+      )}
+      <div className={'messages' + (postsList || mediaOnly ? ' posts' : '')} ref={listRef}>
+        {mediaOnly ? (
+          <MediaGrid items={mediaShown} more={media.more} busy={media.busy} nameOf={item => nameIn(item.authorId, item.authorName)} onOpen={openMedia} onMore={moreMedia}
+            picture={item => (channel && item.p2pFile ? <P2PTile store={store} channelId={channel.id} authorId={item.authorId} file={item.p2pFile} /> : null)} />
+        ) : postsList ? (
+          <>
+            {channel?.type === ChannelType.Gallery
+              ? folded
+                ? <GalleryGrid posts={folded.posts} nameOf={nameOfMessage} onOpen={m => store.openP2pPost(m.id)} onLike={p2p?.state === 'on' ? (m, on) => reactTo(m.id, '❤️', on) : undefined}
+                    cover={m => <P2PCover store={store} m={m} />} />
+                : <GalleryGrid posts={store.messages} nameOf={nameOfMessage} onOpen={m => void store.openThread(m)} onLike={(m, on) => void store.react(m.id, '❤️', on)} />
+              : <ForumList posts={store.messages} nameOf={nameOfMessage} onOpen={m => void store.openThread(m)} />}
+            {store.canLoadOlder && <div style={{ textAlign: 'center' }}><button className="subtle" onClick={store.loadOlder}>Load more posts</button></div>}
+          </>
+        ) : (
+          <>
+        {(thread ? thread.canLoadOlder : store.canLoadOlder) && <div style={{ textAlign: 'center' }}><button className="subtle" onClick={thread ? store.loadOlderThread : store.loadOlder}>Load older messages</button></div>}
+        {shown.map(m => isIgnored(m.authorId) && !m.webhookId && !revealed.has(m.id)
           ? <div key={m.id} className="message ignored"><span /><span className="muted">Message from {m.authorName}, who you ignore · <button className="subtle" onClick={() => setRevealed(new Set([...revealed, m.id]))}>show</button></span></div>
-          : <Message key={m.id} m={m} color={colorOf(m.authorId)} icon={store.itemIcon(m.roll?.item)} serverUrl={store.settings.serverUrl} onInvite={link => void store.openInvite(link)}
+          : <Message key={m.id} m={m} extras={extrasFor(m)} color={colorOf(m.authorId)} icon={store.itemIcon(m.roll?.item)} serverUrl={store.settings.serverUrl} onInvite={link => void store.openInvite(link)}
               fileOffer={m.fileOffer ? <FileOfferView store={store} offer={m.fileOffer} mine={m.authorId === (me?.id ?? '')} /> : undefined}
               p2pFiles={m.p2pFiles?.map(f => <P2PFileChip key={f.hash} store={store} channelId={m.channelId} authorId={m.authorId} file={f} />)}
               author={m.webhookId ? null : store.appearanceOf(m.authorId)} name={m.webhookId ? m.authorName : nameIn(m.authorId, m.authorName)}
               mention={m.authorId !== me?.id && store.mentionsMe(m.content)}
               onMenu={m.ephemeral ? undefined : e => { e.preventDefault(); setMessageMenu({ m, x: e.clientX, y: e.clientY }) }}
               onUserMenu={m.webhookId ? undefined : e => onUserMenu(e, m.authorId, m.authorName)} onUserCard={m.webhookId ? undefined : e => onUserCard(e, m.authorId, m.authorName)} />)}
+          </>
+        )}
       </div>
 
       {messageMenu && (
         <ContextMenu x={messageMenu.x} y={messageMenu.y} onClose={() => setMessageMenu(null)} entries={[
+          ...(kept ? [
+            { kind: 'item', label: 'Reply', icon: '↩', onClick: () => setReplyingTo(messageMenu.m) } as MenuEntry,
+            { kind: 'item', label: 'Add reaction', icon: '😀', onClick: () => setPicker({ id: messageMenu.m.id, x: messageMenu.x, y: messageMenu.y }) } as MenuEntry,
+            ...(!thread && !messageMenu.m.threadId ? [{ kind: 'item', label: (messageMenu.m.threadCount ?? 0) > 0 ? 'Open thread' : 'Reply in a thread', icon: '💬', onClick: () => void store.openThread(messageMenu.m) } as MenuEntry] : []),
+            ...(messageMenu.m.authorId === me?.id && !messageMenu.m.webhookId && messageMenu.m.kind === MessageKind.Text ? [{ kind: 'item', label: 'Edit', icon: '✎', onClick: () => setEditing(messageMenu.m.id) } as MenuEntry] : []),
+            ...(mayPin && !messageMenu.m.threadId ? [{ kind: 'item', label: messageMenu.m.pinnedAt ? 'Unpin' : 'Pin to this channel', icon: '📌', onClick: () => void store.pinMessage(messageMenu.m.id, !messageMenu.m.pinnedAt) } as MenuEntry] : []),
+            { kind: 'sep' } as MenuEntry,
+          ] : []),
+          // A P2P text channel, or the open post of a P2P gallery (where the post itself is what can be pinned).
+          ...(p2pChat && (p2pTalk || p2pRoot) && p2p?.state === 'on' && !messageMenu.m.ephemeral ? [
+            ...(p2pTalk ? [{ kind: 'item', label: 'Reply', icon: '↩', onClick: () => setReplyingTo(messageMenu.m) } as MenuEntry] : []),
+            { kind: 'item', label: 'Add reaction', icon: '😀', onClick: () => setPicker({ id: messageMenu.m.id, x: messageMenu.x, y: messageMenu.y }) } as MenuEntry,
+            ...(p2pTalk && !p2pRoot && !messageMenu.m.threadId ? [{ kind: 'item', label: (messageMenu.m.threadCount ?? 0) > 0 ? 'Open thread' : 'Reply in a thread', icon: '💬', onClick: () => store.openP2pPost(messageMenu.m.id) } as MenuEntry] : []),
+            // Only what was sent between the apps can be edited that way: not a roll or anything else the server put here, and not a poll.
+            ...(messageMenu.m.authorId === me?.id && messageMenu.m.kind === MessageKind.Text && messageMenu.m.id.includes(':') && !messageMenu.m.poll ? [{ kind: 'item', label: 'Edit', icon: '✎', onClick: () => setEditing(messageMenu.m.id) } as MenuEntry] : []),
+            ...(mayManageMessages && (p2pTalk ? !p2pRoot && !messageMenu.m.threadId : messageMenu.m.id === p2pRoot?.id) ? [{ kind: 'item', label: messageMenu.m.pinnedAt ? 'Unpin' : 'Pin to this channel', icon: '📌', onClick: () => void store.pinP2p(messageMenu.m.id, !messageMenu.m.pinnedAt) } as MenuEntry] : []),
+            { kind: 'sep' } as MenuEntry,
+          ] : []),
           ...(messageMenu.m.content ? [{ kind: 'item', label: 'Copy text', onClick: () => { void navigator.clipboard.writeText(messageMenu.m.content).catch(() => { /* no clipboard */ }) } } as MenuEntry] : []),
           // In a P2P channel anyone may remove any message from their own device: it touches nobody else's copy.
           ...(messageMenu.m.authorId === me?.id || mayManageMessages || p2pChat
@@ -993,6 +1206,14 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
         <ConfirmDialog title={p2pChat ? 'Remove this message from this device?' : 'Delete this message?'} message={p2pChat ? 'Only your own copy is removed. Everyone else who received it keeps theirs.' : deleting.authorId === me?.id ? 'It is removed for everyone and cannot be brought back.' : `This removes ${nameIn(deleting.authorId, deleting.authorName)}'s message for everyone. It cannot be brought back.`}
           onConfirm={() => void store.deleteMessage(deleting.id)} onClose={() => setDeleting(null)} />
       )}
+      {picker && <ReactionPicker x={picker.x} y={picker.y} choices={p2pChat ? p2pReactionChoices : store.reactionChoices} onClose={() => setPicker(null)}
+        onPick={emoji => { const m = shown.find(x => x.id === picker.id); if (m) react(m, emoji) }} />}
+      {panel === 'pins' && <PinsDialog load={p2pChat ? store.loadP2pPins : store.loadPins} nameOf={nameOfMessage} onJump={goTo}
+        onUnpin={p2pChat ? (mayManageMessages && p2p?.state === 'on' ? m => store.pinP2p(m.id, false) : undefined) : mayPin ? m => store.pinMessage(m.id, false) : undefined} onClose={() => setPanel(null)} />}
+      {panel === 'search' && channel && <SearchDialog where={(channel.type === ChannelType.DirectMessage ? '@' : '#') + channel.name} search={p2pChat ? store.searchP2p : store.searchMessages} nameOf={nameOfMessage} onJump={goTo} onClose={() => setPanel(null)} />}
+      {panel === 'poll' && <PollDialog onSubmit={(question, poll) => void store.sendMessage(question, null, { poll })} onClose={() => setPanel(null)} />}
+      {panel === 'post' && channel && <NewPostDialog gallery={channel.type === ChannelType.Gallery} mostPictures={10} mostText={p2pGallery ? MAX_P2P_TEXT - P2P_META_ROOM : 4000}
+        onSubmit={p2pGallery ? store.createP2pPost : store.createPost} onClose={() => setPanel(null)} />}
       {store.pendingDrops[0] && !store.pendingDrops[0].auto && <DropBanner drop={store.pendingDrops[0]} more={store.pendingDrops.length - 1} channel={store.partyChannel} onAccept={store.acceptDrop} onDismiss={store.dismissDrop} />}
       {store.activeRoll && <RollPanel store={store} meId={me?.id ?? ''} />}
       {store.activeRps && <RpsPanel store={store} meId={me?.id ?? ''} />}
@@ -1011,7 +1232,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
             : (
               <>
                 <span className="grow">
-                  <b>This is a P2P channel.</b> What is typed here goes straight between people's apps and is kept only on their own devices; the server keeps none of it.
+                  <b>This is a P2P channel.</b> What is {p2pGallery ? 'posted' : 'typed'} here goes straight between people's apps and is kept only on their own devices; the server keeps none of it.
                   People connected to it can find each other's IP address.
                 </span>
                 <button className="accent" onClick={() => channel && store.askDirectText(channel.id)}>{p2p.state === 'blocked' ? 'Why can I not connect?' : 'Connect'}</button>
@@ -1049,6 +1270,18 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
           <button className="subtle" title="Not now" onClick={() => store.dismissP2pBot(channel.id, x.userId)}>×</button>
         </div>
       ))}
+      {kept && store.viewingPast && !thread && (
+        <div className="p2pbar wide" role="status">
+          <span className="grow">You are looking at older messages. What is being said now is not shown below them.</span>
+          <button className="accent" onClick={() => void store.backToPresent()}>Back to now</button>
+        </div>
+      )}
+      {replyingTo && (
+        <div className="replybar">
+          <span className="grow">Replying to <b>{nameOfMessage(replyingTo)}</b> <span className="muted">{replyingTo.content.replace(/\s+/g, ' ').slice(0, 90)}</span></span>
+          <button className="subtle" aria-label="Stop replying" title="Stop replying" onClick={() => setReplyingTo(null)}>×</button>
+        </div>
+      )}
       <div className="typing muted">{store.typing}</div>
       {store.error && <div className="error"><span className="grow">{store.error}</span><button className="subtle" onClick={() => store.setError(null)}>×</button></div>}
 
@@ -1063,7 +1296,17 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
             ))}
           </div>
         )}
-        {voiceMessage && channel ? (
+        {mediaOnly ? (
+          <div className="composer postbar">
+            <span className="muted grow">Only the pictures and videos {p2pChat ? 'this device has kept of this channel' : 'here'} are shown. Click one to go to its message.</span>
+            <button className="accent" onClick={() => setMediaOnly(false)}>Show everything</button>
+          </div>
+        ) : postsList ? (
+          <div className="composer postbar">
+            <span className="muted grow">{channel?.type === ChannelType.Gallery ? 'Every post here is one or more pictures with a title. Open one to see what is said about it.' : 'Every post here has a title. Open one to read it and answer.'}</span>
+            <button className="accent" disabled={p2pGallery && p2p?.state !== 'on'} title={p2pGallery && p2p?.state !== 'on' ? 'You are not connected to this channel yet' : undefined} onClick={() => setPanel('post')}>{channel?.type === ChannelType.Gallery ? 'Post pictures' : 'New post'}</button>
+          </div>
+        ) : voiceMessage && channel ? (
           <VoiceMessageBar deviceId={store.settings.audioInputDeviceId} maxBytes={voiceMessage.maxBytes} onSend={file => store.sendFile(file)} onClose={() => setVoiceMessage(null)} />
         ) : (
         <div className="composer">
@@ -1076,8 +1319,9 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
               onClick={() => void startVoiceMessage()} disabled={!channel || !!store.uploading || voiceBusy}><AudioLines size={17} /></button>
           )}
           {canSendDirect && <button title={directSendTitle} aria-label="Send a file straight from your computer" onClick={() => directRef.current?.click()} disabled={!channel}><ArrowLeftRight size={17} /></button>}
+          {((kept && !thread && channel?.type !== ChannelType.Gallery) || (p2p?.state === 'on' && (p2pTalk ? !p2pRoot : P2P_GALLERY_POLLS && !!p2pRoot))) && <button title={p2pGallery ? 'Ask a poll about this post' : 'Start a poll'} aria-label="Start a poll" onClick={() => setPanel('poll')} disabled={!channel}>📊</button>}
           <textarea
-            placeholder={!channel ? '' : p2pChat ? `Message #${channel.name}  ·  P2P` : `Message ${channel.type === ChannelType.DirectMessage ? '@' : '#'}${channel.name}`}
+            placeholder={!channel ? '' : p2pRoot ? (p2pGallery ? 'Say something about this post  ·  P2P' : 'Reply in this thread  ·  P2P') : thread ? (isPostsChannel(channel) ? 'Say something about this post' : 'Reply in this thread') : p2pChat ? `Message #${channel.name}  ·  P2P` : `Message ${channel.type === ChannelType.DirectMessage ? '@' : '#'}${channel.name}`}
             value={text} disabled={!channel || (p2pChat && p2p?.state !== 'on')} rows={1}
             onChange={e => { setText(e.target.value); if (e.target.value) store.notifyTyping() }}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit() } }}
@@ -1114,7 +1358,40 @@ function withInviteLinks(text: string, open?: (link: string) => void): React.Rea
     : part))
 }
 
-function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu, onUserCard, onMenu, onInvite, fileOffer, p2pFiles }: {
+/** What a message of a kept channel has besides its text. Each part is drawn by whoever knows what to do with it. */
+interface MessageExtras {
+  /** Jumped to: brought into view and marked for a moment. */
+  highlighted?: boolean
+  title?: string | null
+  /** The message this one answers, above it. */
+  quote?: React.ReactNode
+  /** Shown in place of the text while it is being edited. */
+  editor?: React.ReactNode
+  poll?: React.ReactNode
+  reactions?: React.ReactNode
+  threadLink?: React.ReactNode
+  /** The buttons that appear over a message when the pointer is on it. */
+  tools?: React.ReactNode
+}
+
+/** A message being edited where it stands. Enter saves, Escape leaves it as it was. */
+function MessageEditor({ text, title, onSave, onCancel }: { text: string; title: string | null; onSave: (text: string, title: string | null) => void; onCancel: () => void }) {
+  const [value, setValue] = useState(text)
+  const [heading, setHeading] = useState(title ?? '')
+  const save = () => { if (title !== null && !heading.trim()) return; onSave(value, title === null ? null : heading.trim()) }
+  return (
+    <div className="messageeditor">
+      {title !== null && <input value={heading} maxLength={100} placeholder="Title" aria-label="Title" onChange={e => setHeading(e.target.value)} />}
+      <textarea autoFocus rows={Math.min(8, Math.max(2, value.split('\n').length))} maxLength={4000} value={value} aria-label="Edit message" onChange={e => setValue(e.target.value)}
+        onFocus={e => { const end = e.currentTarget.value.length; e.currentTarget.setSelectionRange(end, end) }}
+        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); save() } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onCancel() } }} />
+      <div className="row"><span className="muted grow">Enter to save · Esc to cancel</span><button className="subtle" onClick={onCancel}>Cancel</button><button className="accent" onClick={save}>Save</button></div>
+    </div>
+  )
+}
+
+function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu, onUserCard, onMenu, onInvite, fileOffer, p2pFiles, extras }: {
+  extras?: MessageExtras
   /** The files on a message from a P2P channel, drawn below its text. */
   p2pFiles?: React.ReactNode
   /** Pressed an invite link in the text. */
@@ -1131,14 +1408,18 @@ function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu,
   const time = new Date(m.createdAt)
   const timeText = time.toDateString() === new Date().toDateString() ? time.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : time.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
   return (
-    <div className={'message' + (m.ephemeral ? ' ephemeral' : '') + (mention ? ' mention' : '')} onContextMenu={onMenu}>
+    <div className={'message' + (m.ephemeral ? ' ephemeral' : '') + (mention ? ' mention' : '') + (extras?.highlighted ? ' highlighted' : '')} data-mid={m.id} onContextMenu={onMenu}>
       <Avatar who={author} name={name} serverUrl={serverUrl} size={32} onClick={onUserCard} onContextMenu={onUserMenu} />
       <div>
+        {extras?.tools}
+        {extras?.quote}
         <div className="meta">
           <UserName who={author} label={name} roleColor={color} className="name" onClick={onUserCard} onContextMenu={onUserMenu} />
           {(m.kind === MessageKind.Bot || m.kind === MessageKind.Webhook) && <span className="tag">{m.kind === MessageKind.Bot ? 'BOT' : 'HOOK'}</span>}
           <span className="muted">{timeText}{m.ephemeral ? ' · only you can see this' : ''}</span>
+          {m.pinnedAt && <span className="pinmark" title="Pinned to this channel">📌</span>}
         </div>
+        {extras?.title && !extras.editor && <div className="posttitle">{extras.title}</div>}
         {m.kind === MessageKind.System ? <div className="system">{m.content}</div>
           : m.kind === MessageKind.Roll ? (
             <div className="card">
@@ -1163,7 +1444,7 @@ function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu,
             <div className="row">🎲 rolled <b style={{ fontSize: 18 }}>{m.content}</b> <span className="muted">({m.dice?.min ?? 1}–{m.dice?.max ?? 100})</span></div>
           ) : m.kind === MessageKind.CoinFlip ? (
             <div className="row"><img src={import.meta.env.BASE_URL + (m.content === 'Tails' ? 'coin_tails.png' : 'coin_heads.png')} width={40} height={40} alt="" /> flipped a coin — <b>{m.content}</b></div>
-          ) : <div className="body">{withInviteLinks(m.content, onInvite)}</div>}
+          ) : extras?.editor ?? <div className="body">{withInviteLinks(m.content, onInvite)}{m.editedAt && <span className="edited muted" title={`Edited ${new Date(m.editedAt).toLocaleString()}`}> (edited)</span>}</div>}
         {m.attachments.map(a => <AttachmentView key={a.id} file={a} />)}
         {p2pFiles}
         {m.embeds?.map((e, i) => (
@@ -1175,6 +1456,9 @@ function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu,
             {e.footer && <div className="line">{e.footer}</div>}
           </div>
         ))}
+        {extras?.poll}
+        {extras?.reactions}
+        {extras?.threadLink}
       </div>
     </div>
   )
@@ -1245,6 +1529,34 @@ function FileOfferView({ store, offer, mine }: { store: Store; offer: FileOfferD
  * connected who has them. A picture of an ordinary size is fetched and shown by itself; anything else waits to be
  * asked for. Once fetched it is kept on this device with the message.
  */
+const p2pReactionChoices = () => Promise.resolve(P2P_REACTIONS)
+
+/** A picture on a P2P message, as a tile of the media grid: fetched from whoever connected has it, like anywhere else. */
+function P2PTile({ store, channelId, authorId, file }: { store: Store; channelId: string; authorId: string; file: P2PFile }) {
+  const view = store.p2pFiles[`${channelId}|${file.hash}`]
+  const byItself = P2P_PICTURE.test(file.type) && file.size <= 10 * 1024 * 1024
+  const reachable = store.p2pText?.channelId === channelId ? store.p2pText.reachable : 0
+  const { loadP2pFile } = store
+  useEffect(() => { void loadP2pFile(channelId, file, authorId, byItself) }, [loadP2pFile, channelId, file.hash, authorId, byItself, reachable]) // eslint-disable-line react-hooks/exhaustive-deps
+  if (view?.url) return <img src={view.url} alt={file.name} />
+  return <span className="muted">{view?.state === 'fetching' ? `Fetching · ${Math.min(100, Math.round(view.got / file.size * 100))}%` : view?.state === 'nobody' ? 'Nobody connected has it right now' : byItself ? 'Fetching…' : file.name}</span>
+}
+
+/** The picture a post of a P2P gallery shows in the grid: its first one, fetched from whoever connected has it. */
+function P2PCover({ store, m }: { store: Store; m: MessageDto }) {
+  const file = (m.p2pFiles ?? []).find(f => P2P_PICTURE.test(f.type))
+  const view = file ? store.p2pFiles[`${m.channelId}|${file.hash}`] : undefined
+  const byItself = !!file && file.size <= 10 * 1024 * 1024
+  // Tried again when someone else connects: they may be the one who has it.
+  const reachable = store.p2pText?.channelId === m.channelId ? store.p2pText.reachable : 0
+  const { loadP2pFile } = store
+  useEffect(() => { if (file) void loadP2pFile(m.channelId, file, m.authorId, byItself) }, [loadP2pFile, m.channelId, file?.hash, m.authorId, byItself, reachable]) // eslint-disable-line react-hooks/exhaustive-deps
+  if (!file) return <span className="muted">No picture</span>
+  if (view?.url) return <img src={view.url} alt={m.title ?? ''} />
+  return <span className="muted">{view?.state === 'fetching' ? `Fetching · ${Math.min(100, Math.round(view.got / file.size * 100))}%`
+    : view?.state === 'nobody' ? 'Nobody connected has this picture right now' : view?.state === 'relay' ? 'Too large to fetch through the relay' : !byItself ? 'A large picture: open the post to fetch it' : 'Fetching…'}</span>
+}
+
 function P2PFileChip({ store, channelId, authorId, file }: { store: Store; channelId: string; authorId: string; file: P2PFile }) {
   const view = store.p2pFiles[`${channelId}|${file.hash}`]
   const picture = P2P_PICTURE.test(file.type)

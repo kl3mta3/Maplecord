@@ -286,6 +286,8 @@ export function CreateChannelDialog({ categories, onSubmit, onClose, initialType
     <Dialog title={type === ChannelType.Category ? 'Create category' : 'Create channel'} onClose={onClose}>
       <div className="row">
         <label className="row"><input type="radio" checked={type === ChannelType.Text} onChange={() => setType(ChannelType.Text)} /> # Text</label>
+        <label className="row" title="A list of posts with titles; each has its own thread"><input type="radio" checked={type === ChannelType.Forum} onChange={() => { setType(ChannelType.Forum); setDirect(false) }} /> ☰ Forum</label>
+        <label className="row" title="Posts are pictures with a title; what is said about one is in its thread"><input type="radio" checked={type === ChannelType.Gallery} onChange={() => setType(ChannelType.Gallery)} /> 🖼 Gallery</label>
         <label className="row"><input type="radio" checked={type === ChannelType.Voice} onChange={() => setType(ChannelType.Voice)} /> 🔊 Voice</label>
         <label className="row"><input type="radio" checked={type === ChannelType.Category} onChange={() => setType(ChannelType.Category)} /> Category</label>
       </div>
@@ -303,12 +305,14 @@ export function CreateChannelDialog({ categories, onSubmit, onClose, initialType
       {canDirect && (
         <>
           <div className="row">
-            <label className="row"><input type="checkbox" checked={p2p} disabled={group} onChange={e => setDirect(e.target.checked)} /> <span>{type === ChannelType.Category ? 'P2P group' : 'P2P channel'}</span></label>
+            <label className="row"><input type="checkbox" checked={p2p} disabled={group || type === ChannelType.Forum} onChange={e => setDirect(e.target.checked)} /> <span>{type === ChannelType.Category ? 'P2P group' : 'P2P channel'}</span></label>
             <P2PInfo />
           </div>
           {group && <div className="muted">This group is a P2P one, so every channel in it is a P2P channel.</div>}
           {p2p && type === ChannelType.Category && <div className="muted">Every channel made in this group is a P2P channel, and only P2P channels can be moved into it. A group cannot be switched between P2P and ordinary afterwards.</div>}
           {p2p && type === ChannelType.Voice && <div className="muted">People in it connect straight to each other and can find each other's IP address. Only people who allow P2P can join, and each is warned first.</div>}
+          {type === ChannelType.Forum && <div className="muted">A forum cannot be a P2P channel: its posts are kept by the server.</div>}
+          {p2p && type === ChannelType.Gallery && <div className="muted">Its pictures, what is said about them and its likes go straight between people's apps and are kept only on their own devices; the server keeps none of it. People connected to it can find each other's IP address, and each is warned first. A gallery cannot be switched between P2P and ordinary afterwards.</div>}
           {p2p && type === ChannelType.Text && <div className="muted">What is typed in it goes straight between people's apps and is kept only on their own devices; the server keeps none of it. People connected to it can find each other's IP address, and each is warned first. A text channel cannot be switched between P2P and ordinary afterwards.</div>}
         </>
       )}

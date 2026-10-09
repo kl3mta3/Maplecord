@@ -10,6 +10,8 @@ import { playSound, setQuiet, setSoundPacks, startRing, stopRing, type SoundPack
 import { applyTheme } from './theme'
 import { VoiceConnectError, VoiceEngine, type IcePolicy } from './voice'
 import { type DirectTextPeer, P2PTextEngine, P2PFileUnavailable, describeFile, MAX_P2P_FILE, MAX_P2P_FILES, P2P_PICTURE, type P2PFile, type P2PMessage } from './p2pText'
+import { foldP2p, foldP2pChat, isP2pNoteText, p2pShape, packP2p, searchP2pChat, searchP2pGallery, type P2PMeta } from './p2pPosts'
+import { mayManageMessagesIn } from './channelViewers'
 import { forgetFile, holds, keep, keepFile, kept, keptBefore, keptFile, keyPrint, knownKeys, loadIdentity, p2pTextSupported, rememberKey, sha256Hex } from './p2pIdentity'
 import { inviteCodeFrom, inviteIsForAnotherServer, takeRememberedInvite } from './invites'
 import { DEFAULT_PUSH_KEY, PUSH_RELEASE_MS, isChoosingPushKey, isPushKey, type PushKey } from './pushToTalk'
@@ -21,7 +23,7 @@ import {
   ChannelType, MessageKind, RollChoice, RollKind, UserStatus, type PreferencesDto, type TransferSettingsDto,
   type ChannelDto, type CommandDto, type GuildSummaryDto, type MemberDto, type MessageDto, type RollItemDto, type RollResultDto, type RollSessionDto,
   type VoiceParticipantDto, type RpsSessionDto, type RpsResultDto, RpsChoice, type FriendsDto, type DmChannelDto, type RoleDto,
-  type DecorationDto, type UpdateProfileRequest, type UserDto, type UserProfileDto, type SystemMessageDto, type RollStatsDto, type FileOfferDto, type TokenResponse, type StreamSettingsDto,
+  type DecorationDto, type UpdateProfileRequest, type UserDto, type UserProfileDto, type SystemMessageDto, type MediaItem, type SearchResultDto, type NewPollDto, isPostsChannel, type RollStatsDto, type FileOfferDto, type TokenResponse, type StreamSettingsDto,
   type SfuPassDto,
 } from './types'
 
@@ -96,9 +98,16 @@ const asStats = (s: RollStatsDto): Stats => ({ totalRolls: s.rolls, rollSum: s.s
 /** All client state and actions. One instance for the app; components read what they need. */
 /** A P2P message in the shape the chat screen draws every message in. */
 const p2pToMessage = (m: P2PMessage): MessageDto => ({
-  id: m.id, channelId: m.channelId, authorId: m.authorId, authorName: m.authorName, kind: MessageKind.Text, content: m.content,
+  id: m.id, channelId: m.channelId, authorId: m.authorId, authorName: m.authorName, kind: MessageKind.Text,
   createdAt: m.sentAt, editedAt: null, attachments: [], roll: null, p2pFiles: m.files,
+  // A post, a poll, part of a thread, or a note about another message says so at the start of its text.
+  ...p2pShape(m.content),
 })
+
+/** The pictures and videos on these P2P messages, newest first. */
+export const p2pMedia = (messages: MessageDto[]): MediaItem[] => messages
+  .flatMap(m => (m.p2pFiles ?? []).filter(f => /^(image|video)\//.test(f.type)).map(f => ({ key: `${m.id}|${f.hash}`, messageId: m.id, threadId: m.threadId ?? null, authorId: m.authorId, authorName: m.authorName, at: m.createdAt, p2pFile: f })))
+  .sort((a, b) => b.at.localeCompare(a.at))
 
 /** A file on a P2P message, as the screen shows it: whether this device has it, is fetching it, or could not find it. */
 export interface P2PFileView { state: 'have' | 'fetching' | 'nobody' | 'relay'; got: number; url?: string }
@@ -329,6 +338,25 @@ export function useMaplecord() {
   useEffect(() => { homeRef.current = home }, [home])
   const [messages, setMessages] = useState<MessageDto[]>([])
   const [canLoadOlder, setCanLoadOlder] = useState(false)
+  /** The thread being read, if one is open: the message it hangs off, and what was said in it, oldest first. */
+  const [thread, setThread] = useState<{ root: MessageDto; messages: MessageDto[]; canLoadOlder: boolean } | null>(null)
+  const threadRef = useRef<string | null>(null)
+  threadRef.current = thread?.root.id ?? null
+  /** The post that is open in a P2P gallery, or the message whose thread is open in a P2P text channel. Its messages are among the channel's own, so only which one is kept. */
+  const [p2pPost, setP2pPost] = useState<string | null>(null)
+  const p2pPostRef = useRef<string | null>(null)
+  p2pPostRef.current = p2pPost
+  /** Looking at a page from the past (after jumping to a message): what is said now is not added below it. */
+  const [viewingPast, setViewingPast] = useState(false)
+  const viewingPastRef = useRef(false)
+  viewingPastRef.current = viewingPast
+  /** The message to bring into view and mark, after jumping to it. */
+  const [highlight, setHighlight] = useState<string | null>(null)
+  /** Changes a message wherever it is held: in the channel's list, in the open thread, or as that thread's first message. */
+  const patchMessage = useCallback((messageId: string, change: (m: MessageDto) => MessageDto) => {
+    setMessages(ms => (ms.some(m => m.id === messageId) ? ms.map(m => (m.id === messageId ? change(m) : m)) : ms))
+    setThread(t => (!t ? t : { ...t, root: t.root.id === messageId ? change(t.root) : t.root, messages: t.messages.map(m => (m.id === messageId ? change(m) : m)) }))
+  }, [])
   const [activeRoll, setActiveRoll] = useState<ActiveRoll | null>(null)
   const [activeRps, setActiveRps] = useState<ActiveRps | null>(null)
   const activeRpsRef = useRef<ActiveRps | null>(null)
@@ -548,7 +576,8 @@ export function useMaplecord() {
       MessageReceived: m => {
         if (!m.ephemeral && findChannel(m.channelId)?.channel.directSince && findChannel(m.channelId)?.guild) void keep(p2pBox(settingsRef.current.user?.id, m.channelId), m.id, m.createdAt, { server: m }).catch(() => {})
         if (selected.current.channel === m.channelId) {
-          setMessages(ms => (ms.some(x => x.id === m.id) ? ms : [...ms, m]))
+          // While a page from the past is on screen, what is said now is not put below it: there would be a gap between.
+          if (!viewingPastRef.current) setMessages(ms => (ms.some(x => x.id === m.id) ? ms : [...ms, m]))
           if (m.authorId !== me()) { setTyping(null); window.clearTimeout(typingTimer.current) }
         } else if (!m.ephemeral && !isIgnored(m.authorId)) {
           const found = findChannel(m.channelId)
@@ -608,7 +637,26 @@ export function useMaplecord() {
         setDms(ds => ds.map(d => (d.other.id === u.id ? { ...d, other: u } : d)))
         if (u.id === me()) updateSettings({ user: u })
       },
-      MessageDeleted: (channelId, messageId) => { if (selected.current.channel === channelId) setMessages(ms => ms.filter(x => x.id !== messageId)) },
+      MessageDeleted: (channelId, messageId) => {
+        if (selected.current.channel === channelId) setMessages(ms => ms.filter(x => x.id !== messageId))
+        // A thread goes with the message it hangs off.
+        setThread(t => (!t ? t : t.root.id === messageId ? null : { ...t, messages: t.messages.filter(x => x.id !== messageId) }))
+      },
+      ThreadMessage: m => { if (threadRef.current === m.threadId) setThread(t => (t && !t.messages.some(x => x.id === m.id) ? { ...t, messages: [...t.messages, m] } : t)) },
+      ThreadChanged: (_channelId, rootId, count, lastAt) => patchMessage(rootId, m => ({ ...m, threadCount: count, threadLastAt: lastAt })),
+      MessageEdited: (_channelId, messageId, content, title, editedAt) => patchMessage(messageId, m => ({ ...m, content, title: title ?? m.title, editedAt })),
+      MessagePinned: (_channelId, messageId, pinnedAt) => patchMessage(messageId, m => ({ ...m, pinnedAt })),
+      // Whose reaction it was says whether "mine" changes; the count is the server's.
+      ReactionChanged: (_channelId, messageId, emoji, userId, on, count) => patchMessage(messageId, m => {
+        const had = m.reactions ?? []
+        const mine = userId === me() ? on : had.find(r => r.emoji === emoji)?.mine ?? false
+        const next = count <= 0 ? had.filter(r => r.emoji !== emoji)
+          : had.some(r => r.emoji === emoji) ? had.map(r => (r.emoji === emoji ? { ...r, count, mine } : r)) : [...had, { emoji, count, mine }]
+        return { ...m, reactions: next.length > 0 ? next : null }
+      }),
+      PollChanged: (_channelId, messageId, userId, theirs, counts, voters, closed) => patchMessage(messageId, m => (!m.poll ? m : {
+        ...m, poll: { ...m.poll, voters, closed, options: m.poll.options.map((o, i) => ({ ...o, votes: counts[i] ?? o.votes, mine: userId === me() ? theirs.includes(i) : o.mine })) },
+      })),
       // Someone was banned and what they wrote was deleted with them: all of it, or what they wrote since a moment.
       MessagesRemoved: (channelId, authorId, since) => {
         if (selected.current.channel !== channelId) return
@@ -876,17 +924,22 @@ export function useMaplecord() {
 
   // Load history + active roll + commands when the channel changes.
   useEffect(() => {
-    setMessages([]); setTyping(null); setCanLoadOlder(false)
+    setMessages([]); setTyping(null); setCanLoadOlder(false); setThread(null); setP2pPost(null); setViewingPast(false); setHighlight(null)
     if (!selectedChannelId) return
     let cancelled = false
     ;(async () => {
       try {
-        const page = await api.messages(selectedChannelId)
-        if (cancelled) return
         const opened = findChannel(selectedChannelId)
-        if (opened?.guild && opened.channel.directSince) {
-          // A P2P channel: the server has nothing of it. What was said is what this device kept.
-          const mine = p2pTextSupported() ? await kept<{ p2p?: P2PMessage; server?: MessageDto }>(p2pBox(settingsRef.current.user?.id, selectedChannelId)).catch(() => []) : []
+        // A forum or a gallery lists its posts; what is said about one is in its thread. (A P2P gallery's posts are
+        // P2P messages like any other: the server has none of them.)
+        const p2pHere = !!opened?.guild && !!opened.channel.directSince
+        const posts = !p2pHere && isPostsChannel(opened?.channel)
+        const page = posts ? await api.posts(selectedChannelId) : await api.messages(selectedChannelId)
+        if (cancelled) return
+        if (p2pHere) {
+          // A P2P channel: the server has nothing of it. What was said is what this device kept. A gallery's likes
+          // and comments are messages too, so much more of it is read at once to count them.
+          const mine = p2pTextSupported() ? await kept<{ p2p?: P2PMessage; server?: MessageDto }>(p2pBox(settingsRef.current.user?.id, selectedChannelId), isPostsChannel(opened?.channel) ? 5000 : 300).catch(() => []) : []
           if (cancelled) return
           const local = mine.map(e => (e.p2p ? p2pToMessage(e.p2p) : e.server)).filter((m): m is MessageDto => !!m)
           const all = new Map([...page, ...local].map(m => [m.id, m]))
@@ -896,7 +949,7 @@ export function useMaplecord() {
           return
         }
         setMessages(page.slice().reverse())
-        setCanLoadOlder(page.length >= 50)
+        setCanLoadOlder(page.length >= (posts ? 30 : 50))
         if (!inParty(selectedChannelId)) return
         const active = await hub.getActiveRoll(selectedChannelId)
         if (!cancelled && active && activeRollRef.current?.session.id !== active.id) onRollStarted(active)
@@ -946,7 +999,7 @@ export function useMaplecord() {
     }
   }
 
-  const sendMessage = useCallback(async (text: string, attachmentIds: string[] | null = null) => {
+  const sendMessage = useCallback(async (text: string, attachmentIds: string[] | null = null, more: { replyToId?: string | null; poll?: NewPollDto | null } = {}) => {
     const channelId = selected.current.channel
     if (!channelId || (!text.trim() && !attachmentIds?.length)) return
     const sendingIn = findChannel(channelId)
@@ -954,13 +1007,22 @@ export function useMaplecord() {
       // A P2P channel: signed here and sent straight to everyone connected. The server is not involved.
       if (!text.trim()) return
       await run(async () => {
-        const message = await p2pEngine.send(channelId, text)
+        // Said in the thread (or about the post) that is open, if one is, and in answer to a message if one was picked.
+        const about = p2pPostRef.current
+        const answers = more.replyToId
+        const poll = more.poll ? { pl: { o: more.poll.options, m: more.poll.multi, h: more.poll.hours } } : {}
+        const message = await p2pEngine.send(channelId, packP2p({ ...(about ? { th: about } : {}), ...(answers ? { re: answers } : {}), ...poll }, text))
         await keep(p2pBox(settingsRef.current.user?.id, channelId), message.id, message.sentAt, { p2p: message })
         if (selected.current.channel === channelId) setMessages(ms => [...ms, p2pToMessage(message)])
       })
       return
     }
-    await run(() => hub.sendMessage(channelId, text.trim(), attachmentIds))
+    // Said in the open thread, if there is one. The plain way of sending is kept for a plain message, so that an
+    // older server still takes it.
+    const threadId = threadRef.current
+    await run(() => (threadId || more.replyToId || more.poll
+      ? hub.post({ channelId, content: text.trim(), attachmentIds, replyToId: more.replyToId ?? null, threadId, title: null, poll: more.poll ?? null })
+      : hub.sendMessage(channelId, text.trim(), attachmentIds)))
   }, [hub])
 
   /**
@@ -968,7 +1030,8 @@ export function useMaplecord() {
    * by name, size, kind and the hash of its contents; other people's apps fetch the contents from ours, or from
    * anyone else who has them by then. Nothing about them goes to the server.
    */
-  const sendP2pFiles = useCallback(async (channelId: string, picked: File[], text = '') => {
+  const sendP2pFiles = useCallback(async (channelId: string, picked: File[], text = '', meta: P2PMeta | null = null): Promise<boolean> => {
+    let sent = false
     await run(async () => {
       if (!p2pEngine.isIn(channelId)) throw new Error('You are not connected to this channel.')
       if (picked.length > MAX_P2P_FILES) throw new Error(`Up to ${MAX_P2P_FILES} files can go with one message.`)
@@ -986,12 +1049,102 @@ export function useMaplecord() {
           await keepFile(box, hash, bytes)
           files.push(describeFile(f.name, f.type, bytes.byteLength, hash))
         }
-        const message = await p2pEngine.send(channelId, text, files)
+        // A post says so itself; anything else sent while a post is open is said about that post.
+        const head = meta ?? (p2pPostRef.current && selected.current.channel === channelId ? { th: p2pPostRef.current } : null)
+        const message = await p2pEngine.send(channelId, head ? packP2p(head, text) : text, files)
         await keep(box, message.id, message.sentAt, { p2p: message })
         if (selected.current.channel === channelId) setMessages(ms => [...ms, p2pToMessage(message)])
+        sent = true
       } finally { setUploading(null) }
     })
+    return sent
   }, [p2pEngine])
+
+  /** A post in a P2P gallery: pictures and a title, sent to everyone connected like any other P2P message. */
+  const createP2pPost = useCallback(async (title: string, text: string, files: File[]): Promise<boolean> => {
+    const channelId = selected.current.channel
+    if (!channelId || !title.trim()) return false
+    const pictures = files.filter(f => P2P_PICTURE.test(f.type))
+    if (pictures.length === 0 || pictures.length !== files.length) { setError('A post here is one or more pictures (PNG, JPEG, GIF or WebP).'); return false }
+    return sendP2pFiles(channelId, pictures, text, { t: title })
+  }, [sendP2pFiles])
+
+  /**
+   * A note about another message in a P2P channel (a reaction, an edit, a pin, a vote, a poll being closed) is a
+   * message of its own, sent and kept like any other. Nothing already sent is changed.
+   */
+  const sendP2pNote = useCallback(async (meta: P2PMeta, text = '') => {
+    const channelId = selected.current.channel
+    if (!channelId) return
+    await run(async () => {
+      const message = await p2pEngine.send(channelId, packP2p(meta, text))
+      await keep(p2pBox(settingsRef.current.user?.id, channelId), message.id, message.sentAt, { p2p: message })
+      if (selected.current.channel === channelId) setMessages(ms => [...ms, p2pToMessage(message)])
+    })
+  }, [p2pEngine])
+  const reactP2p = useCallback((messageId: string, emoji: string, on: boolean) => sendP2pNote({ rx: { id: messageId, e: emoji, on } }), [sendP2pNote])
+  const editP2p = useCallback((messageId: string, text: string, title: string | null = null) => sendP2pNote({ ed: messageId, ...(title ? { t: title } : {}) }, text), [sendP2pNote])
+  const pinP2p = useCallback((messageId: string, on: boolean) => sendP2pNote({ pin: { id: messageId, on } }), [sendP2pNote])
+  const voteP2p = useCallback((messageId: string, options: number[]) => sendP2pNote({ v: { id: messageId, o: options } }), [sendP2pNote])
+  const closeP2pPoll = useCallback((messageId: string) => sendP2pNote({ pc: messageId }), [sendP2pNote])
+
+  /** Everything this device has kept of the P2P channel on screen (the newest 5,000 messages), oldest first, as it arrived. */
+  const allKeptHere = useCallback(async (): Promise<{ channelId: string; all: MessageDto[]; mayManage: (authorId: string) => boolean; gallery: boolean } | null> => {
+    const channelId = selected.current.channel
+    const found = channelId ? findChannel(channelId) : null
+    if (!channelId || !found?.guild || !found.channel.directSince) return null
+    const mine = await kept<{ p2p?: P2PMessage; server?: MessageDto }>(p2pBox(settingsRef.current.user?.id, channelId), 5000).catch(() => [])
+    const all = mine.map(e => (e.p2p ? p2pToMessage(e.p2p) : e.server)).filter((m): m is MessageDto => !!m).sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    const [guild, channel] = [found.guild, found.channel]
+    return { channelId, all, mayManage: authorId => mayManageMessagesIn(guild, authorId, channel), gallery: isPostsChannel(channel) }
+  }, [])
+  /**
+   * Just the pictures and videos of the channel on screen, newest first. For a channel the server keeps they are asked
+   * for a page at a time; for a P2P text channel they are the ones on the messages this device has kept, all at once.
+   */
+  const loadMedia = useCallback(async (before: string | null = null): Promise<{ items: MediaItem[]; more: boolean }> => {
+    const channelId = selected.current.channel
+    if (!channelId) return { items: [], more: false }
+    const found = findChannel(channelId)
+    if (found?.guild && found.channel.directSince) {
+      const here = await allKeptHere()
+      if (!here) return { items: [], more: false }
+      const chat = foldP2pChat(here.all, settingsRef.current.user?.id, here.mayManage)
+      return { items: p2pMedia([...chat.main, ...[...chat.threads.values()].flat()]), more: false }
+    }
+    const page = await api.media(channelId, before)
+    return { items: page.map(x => ({ ...x, key: x.file.id })), more: page.length >= 60 }
+  }, [api, allKeptHere])
+
+  /** What is pinned in a P2P text channel or gallery, from what this device has kept. */
+  const loadP2pPins = useCallback(async (): Promise<MessageDto[]> => {
+    const here = await allKeptHere()
+    return !here ? [] : (here.gallery ? foldP2p : foldP2pChat)(here.all, settingsRef.current.user?.id, here.mayManage).pins
+  }, [allKeptHere])
+  /** Searching a P2P text channel or gallery looks through what this device has kept: the server has none of it. */
+  const searchP2p = useCallback(async (q: string, before: string | null = null): Promise<SearchResultDto> => {
+    const here = await allKeptHere()
+    if (!here) return { messages: [], before: null, more: false }
+    const me = settingsRef.current.user?.id
+    const found = (here.gallery ? searchP2pGallery(foldP2p(here.all, me, here.mayManage), q) : searchP2pChat(foldP2pChat(here.all, me, here.mayManage), q)).filter(m => !before || m.createdAt < before)
+    const page = found.slice(0, 25)
+    return { messages: page, before: page.at(-1)?.createdAt ?? null, more: found.length > page.length }
+  }, [allKeptHere])
+  /** Brings a message of a P2P channel on screen: everything kept from a little before it onwards, and its thread if it is in one. In a gallery that is the post it is, or is said about. */
+  const jumpP2p = useCallback(async (m: { id: string; channelId: string; threadId?: string | null }) => {
+    const here = await allKeptHere()
+    if (!here || here.channelId !== m.channelId) return
+    const at = [m.id, m.threadId].map(id => here.all.findIndex(x => x.id === id)).filter(i => i >= 0)
+    if (at.length === 0) return
+    const from = here.all.slice(Math.max(0, Math.min(...at) - 30))
+    if (selected.current.channel !== here.channelId) return
+    setMessages(ms => [...new Map([...from, ...ms].map(x => [x.id, x])).values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt)))
+    setCanLoadOlder(true)
+    setP2pPost(m.threadId && here.all.some(x => x.id === m.threadId) ? m.threadId : here.gallery ? m.id : null)
+    setHighlight(m.id)
+  }, [allKeptHere])
+  const openP2pPost = useCallback((id: string) => { setP2pPost(id); setHighlight(null) }, [])
+  const closeP2pPost = useCallback(() => setP2pPost(null), [])
 
   /**
    * Makes a file on a P2P message ready to show or save: from this device if it is kept here, otherwise (when
@@ -1105,7 +1258,12 @@ export function useMaplecord() {
         throw new Error(`${file.name} is ${(file.size / 1048576).toFixed(1)} MB. The limit here is ${(rules.maxBytes / 1048576).toFixed(0)} MB.`)
       }
       setUploading(file.name)
-      try { const a = await api.upload(channelId, file); await hub.sendMessage(channelId, text, [a.id]) }
+      try {
+        const a = await api.upload(channelId, file)
+        const threadId = threadRef.current
+        if (threadId) await hub.post({ channelId, content: text, attachmentIds: [a.id], threadId })
+        else await hub.sendMessage(channelId, text, [a.id])
+      }
       finally { setUploading(null) }
     })
   }, [api, hub, holdOffer, sendP2pFiles])
@@ -1140,8 +1298,107 @@ export function useMaplecord() {
       })
       return
     }
+    if (isPostsChannel(reading?.channel)) {
+      // Posts are listed by a moment (when each was last spoken in, or posted), so the next page is asked for by one.
+      const forum = reading?.channel.type === ChannelType.Forum
+      const last = messages.map(m => (forum ? m.threadLastAt ?? m.createdAt : m.createdAt)).sort()[0]
+      await run(async () => {
+        const page = await api.posts(channelId, last)
+        setMessages(ms => { const have = new Set(ms.map(m => m.id)); return [...page.filter(m => !have.has(m.id)).reverse(), ...ms] })
+        setCanLoadOlder(page.length >= 30)
+      })
+      return
+    }
     await run(async () => { const page = await api.messages(channelId, oldest.id); setMessages(ms => [...page.slice().reverse(), ...ms]); setCanLoadOlder(page.length >= 50) })
   }, [api, messages, p2pEngine])
+
+  // ---- What a message can have: a thread, an edit, reactions, a pin, a poll; and finding one ----
+
+  /** Opens the thread of a message of the channel on screen. */
+  const openThread = useCallback(async (root: MessageDto) => {
+    setThread({ root, messages: [], canLoadOlder: false })
+    setHighlight(null)
+    await run(async () => {
+      const page = await api.messages(root.channelId, undefined, 50, { thread: root.id })
+      setThread(t => (t?.root.id === root.id ? { ...t, messages: page.slice().reverse(), canLoadOlder: page.length >= 50 } : t))
+    })
+  }, [api])
+  const closeThread = useCallback(() => { setThread(null); setHighlight(null) }, [])
+  const loadOlderThread = useCallback(async () => {
+    const open = thread
+    if (!open || open.messages.length === 0) return
+    await run(async () => {
+      const page = await api.messages(open.root.channelId, open.messages[0]!.id, 50, { thread: open.root.id })
+      setThread(t => (t?.root.id === open.root.id ? { ...t, messages: [...page.slice().reverse(), ...t.messages], canLoadOlder: page.length >= 50 } : t))
+    })
+  }, [api, thread])
+
+  /** A post in a forum or a gallery: its files are uploaded first, then it is posted with its title. */
+  const createPost = useCallback(async (title: string, text: string, files: File[], poll: NewPollDto | null = null): Promise<boolean> => {
+    const channelId = selected.current.channel
+    if (!channelId) return false
+    let ok = false
+    await run(async () => {
+      const ids: string[] = []
+      try {
+        for (const file of files) { setUploading(file.name); ids.push((await api.upload(channelId, file)).id) }
+      } finally { setUploading(null) }
+      await hub.post({ channelId, content: text.trim(), attachmentIds: ids, title: title.trim(), poll })
+      ok = true
+    })
+    return ok
+  }, [api, hub])
+
+  const editMessage = useCallback(async (messageId: string, content: string, title: string | null = null) => { await run(() => hub.editMessage(messageId, content, title)) }, [hub])
+  const react = useCallback(async (messageId: string, emoji: string, on: boolean) => { await run(() => hub.react(messageId, emoji, on)) }, [hub])
+  const pinMessage = useCallback(async (messageId: string, on: boolean) => { await run(() => hub.pin(messageId, on)) }, [hub])
+  const votePoll = useCallback(async (messageId: string, options: number[]) => { await run(() => hub.vote(messageId, options)) }, [hub])
+  const closePoll = useCallback(async (messageId: string) => { await run(() => hub.closePoll(messageId)) }, [hub])
+  /** What can be reacted with: asked for once, the first time someone opens the choice. */
+  const reactionList = useRef<Promise<string[]> | null>(null)
+  const reactionChoices = useCallback(() => (reactionList.current ??= api.reactions().catch(() => { reactionList.current = null; return [] as string[] })), [api])
+  const loadPins = useCallback(async (): Promise<MessageDto[]> => {
+    const channelId = selected.current.channel
+    return channelId ? api.pins(channelId) : []
+  }, [api])
+  const searchMessages = useCallback(async (q: string, before: string | null = null) => {
+    const channelId = selected.current.channel
+    if (!channelId) return { messages: [], before: null, more: false }
+    return api.search(channelId, q, before)
+  }, [api])
+
+  /** Brings a message of the channel on screen into view: the page around it, or its thread if it is in one. */
+  const jumpTo = useCallback(async (m: { id: string; channelId: string; threadId?: string | null }) => {
+    if (selected.current.channel !== m.channelId) return
+    const posts = isPostsChannel(findChannel(m.channelId)?.channel)
+    await run(async () => {
+      if (m.threadId || posts) {
+        // In a thread, or a post (whose page is its thread): the thread is opened, on the page that holds the message.
+        const rootId = m.threadId ?? m.id
+        const root = await api.message(m.channelId, rootId)
+        const page = m.threadId ? await api.messages(m.channelId, undefined, 50, { around: m.id }) : await api.messages(m.channelId, undefined, 50, { thread: rootId })
+        setThread({ root, messages: page.slice().reverse(), canLoadOlder: page.length >= 25 })
+        setHighlight(m.id)
+        return
+      }
+      const page = await api.messages(m.channelId, undefined, 50, { around: m.id })
+      setThread(null)
+      setMessages(page.slice().reverse())
+      setCanLoadOlder(true)
+      setViewingPast(true)
+      setHighlight(m.id)
+    })
+  }, [api])
+  /** Back from a page of the past to what is being said now. */
+  const backToPresent = useCallback(async () => {
+    const channelId = selected.current.channel
+    if (!channelId) return
+    await run(async () => {
+      const page = await api.messages(channelId)
+      if (selected.current.channel !== channelId) return
+      setMessages(page.slice().reverse()); setCanLoadOlder(page.length >= 50); setViewingPast(false); setHighlight(null)
+    })
+  }, [api])
 
   const startRoll = useCallback(async (kind: RollKind, item: RollItemDto | null, min = 1, max = 100) => {
     const channelId = requireParty()
@@ -2029,7 +2286,8 @@ export function useMaplecord() {
     }
     // A subscribed channel that is not being read: it shows as unread, like any other, unless it is muted.
     const found = findChannel(message.channelId)
-    if (!found?.guild || settingsRef.current.mutedChannels?.[message.channelId] || isIgnored(message.authorId)) return
+    // Someone's reaction, edit, pin or vote is not something new to read.
+    if (!found?.guild || settingsRef.current.mutedChannels?.[message.channelId] || isIgnored(message.authorId) || isP2pNoteText(message.content)) return
     patchGuild(found.guild.guild.id, g => ({ ...g, unread: g.unread + 1, channelUnread: { ...g.channelUnread, [message.channelId]: (g.channelUnread[message.channelId] ?? 0) + 1 } }))
   }
 
@@ -2381,6 +2639,9 @@ export function useMaplecord() {
   return {
     api, hub, settings, updateSettings, ready, status, error, setError, systemMessages, dismissSystemMessage,
     guilds, selectedGuild, selectedChannel, selectedDm, home, friends, dms, dmUnread, messages, canLoadOlder, activeRoll, typing, commands, stats, setGuildCountRolls,
+    thread, viewingPast, highlight, setHighlight, openThread, closeThread, loadOlderThread, createPost, editMessage, react, pinMessage, votePoll, closePoll,
+    reactionChoices, loadPins, searchMessages, jumpTo, backToPresent,
+    loadMedia, p2pPost, openP2pPost, closeP2pPost, createP2pPost, reactP2p, editP2p, pinP2p, voteP2p, closeP2pPoll, loadP2pPins, searchP2p, jumpP2p,
     connect, selectGuild, selectChannel, openHome, openDm, addFriend, removeFriend, searchUsers, sendMessage, sendFile, uploading, offerFile, withdrawFile, downloadFile, cancelTransfer, transfers, notifyTyping, loadOlder,
     renameGuild, setGuildIcon, createRole, updateRole, deleteRole, setMemberRoles,
     partyChannel, partyLabel,

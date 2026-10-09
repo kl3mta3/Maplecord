@@ -1,5 +1,5 @@
 import type {
-  AccountDeletionDto, ApplicationDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto, RollStatsDto } from './types'
+  AccountDeletionDto, ApplicationDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto, RollStatsDto, SearchResultDto, MediaItemDto } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -157,9 +157,25 @@ export class Api {
   }
 
   // ---- messages ----
-  messages(channelId: string, before?: string, limit = 50) {
-    return this.request<MessageDto[]>('GET', `/api/channels/${channelId}/messages?limit=${limit}${before ? `&before=${before}` : ''}`)
+  /** A channel's own messages, newest first; with `thread` the ones in that message's thread; with `around` the page that message is in. */
+  messages(channelId: string, before?: string, limit = 50, more: { thread?: string | null; around?: string; after?: string } = {}) {
+    return this.request<MessageDto[]>('GET', `/api/channels/${channelId}/messages?limit=${limit}${before ? `&before=${before}` : ''}${more.thread ? `&thread=${more.thread}` : ''}${more.around ? `&around=${more.around}` : ''}${more.after ? `&after=${more.after}` : ''}`)
   }
+  message(channelId: string, messageId: string) { return this.request<MessageDto>('GET', `/api/channels/${channelId}/messages/${messageId}`) }
+  /** A forum's or gallery's posts, newest first; `before` is the moment the last one of the page before was at. */
+  posts(channelId: string, before?: string, limit = 30) {
+    return this.request<MessageDto[]>('GET', `/api/channels/${channelId}/posts?limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ''}`)
+  }
+  pins(channelId: string) { return this.request<MessageDto[]>('GET', `/api/channels/${channelId}/pins`) }
+  /** Just the pictures and videos of a channel, newest first; `before` is the moment on the last one of the page before. */
+  media(channelId: string, before?: string | null, limit = 60) {
+    return this.request<MediaItemDto[]>('GET', `/api/channels/${channelId}/media?limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ''}`)
+  }
+  search(channelId: string, q: string, before?: string | null) {
+    return this.request<SearchResultDto>('GET', `/api/channels/${channelId}/search?q=${encodeURIComponent(q)}${before ? `&before=${encodeURIComponent(before)}` : ''}`)
+  }
+  /** What a message can be reacted to with. */
+  reactions() { return this.request<string[]>('GET', '/api/reactions') }
   transferSettings() { return this.request<TransferSettingsDto>('GET', '/api/transfers/settings') }
   /** Connection details for one transfer: `requester` is the connection id of the app that asked for the file. */
   transferIce(offerId: string, requester: string) { return this.request<IceServerDto[]>('GET', `/api/transfers/ice?offerId=${offerId}&requester=${encodeURIComponent(requester)}`) }

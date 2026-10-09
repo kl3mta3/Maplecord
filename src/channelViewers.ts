@@ -9,15 +9,32 @@ import { Permission, type ChannelDto, type GuildSummaryDto, type MemberDto } fro
 export function canSeeChannel(guild: GuildSummaryDto, member: MemberDto, channel: ChannelDto): boolean {
   // A P2P bot is in the P2P channels it was let into, and in nothing else.
   if (member.directBot) return !!channel.directSince && (channel.bots ?? []).includes(member.userId)
-  if (member.userId === guild.guild.ownerId) return true
-  const roles = guild.roles
+  const has = permissionsIn(guild, member, channel)
   // An app that was not told the roles cannot say who is left out, so nobody is.
-  if (!roles) return true
+  return has === null || (has & Permission.ViewChannels) !== 0
+}
+
+/**
+ * Whether the app takes someone to be allowed to manage messages in a channel. In a P2P channel nothing goes through
+ * the server, so this is how each app decides whose pins count; someone the app knows nothing about is not.
+ */
+export function mayManageMessagesIn(guild: GuildSummaryDto, userId: string, channel: ChannelDto): boolean {
+  const member = guild.members.find(m => m.userId === userId)
+  if (!member || member.directBot) return false
+  const has = permissionsIn(guild, member, channel)
+  return has !== null && (has & Permission.ManageMessages) !== 0
+}
+
+/** Everything a member may do in a channel (every permission for the owner and for an administrator), or null if the app was not told the roles. */
+export function permissionsIn(guild: GuildSummaryDto, member: MemberDto, channel: ChannelDto): number | null {
+  if (member.userId === guild.guild.ownerId) return -1
+  const roles = guild.roles
+  if (!roles) return null
   const everyone = roles.find(r => r.isEveryone)
   const held = new Set(member.roleIds ?? [])
   let has = everyone?.permissions ?? 0
   for (const role of roles) if (held.has(role.id)) has |= role.permissions
-  if (has & Permission.Administrator) return true
+  if (has & Permission.Administrator) return -1
 
   const overrides = channel.overrides ?? []
   if (overrides.length > 0) {
@@ -30,7 +47,7 @@ export function canSeeChannel(guild: GuildSummaryDto, member: MemberDto, channel
     const own = overrides.find(o => o.userId === member.userId)
     if (own) has = (has & ~own.deny) | own.allow
   }
-  return (has & Permission.ViewChannels) !== 0
+  return has
 }
 
 /** The members of a server who can see a channel, in the order they came. */

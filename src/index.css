@@ -715,3 +715,88 @@ button.chip { cursor: pointer; }
 .shell > .colgrip.members { grid-column: 4; margin-left: -3px; }
 .colgrip:hover, .colgrip:active, .colgrip:focus-visible { background: var(--accent2); opacity: 0.6; outline: none; }
 @media (max-width: 900px) { .colgrip { display: none; } }
+
+/* ---- What a message can have beyond its text: an answer above it, reactions, a poll, a thread ---- */
+.message { position: relative; }
+.message > div:last-child { min-width: 0; }
+.message.highlighted { background: rgba(144, 0, 255, 0.18); box-shadow: inset 3px 0 0 var(--accent); }
+/* The buttons over a message, where there is a pointer to hover with. On a touch screen they are in its menu. */
+.message .msgtools { position: absolute; top: -12px; right: 16px; display: none; gap: 1px; padding: 2px; background: var(--bg1); border: 1px solid var(--border); border-radius: 8px; z-index: 2; }
+.message:hover .msgtools, .message:focus-within .msgtools { display: inline-flex; }
+.message .msgtools button { padding: 1px 6px; font-size: 14px; background: transparent; border-color: transparent; }
+.message .msgtools button:hover { background: var(--bg3); }
+@media (hover: none) { .message .msgtools { display: none !important; } }
+.replyquote { display: block; max-width: 100%; padding: 0; background: transparent; border: 0; color: var(--muted); font-size: 12px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.replyquote:disabled, .replyquote.gone { cursor: default; font-style: italic; }
+.replyquote b { color: var(--text); font-weight: 600; }
+.replyquote:not(:disabled):hover span { color: var(--text); }
+.message .edited { font-size: 11px; }
+.message .pinmark { font-size: 11px; }
+.posttitle { font-weight: 700; font-size: 15px; overflow: hidden; text-overflow: ellipsis; }
+.reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.reaction { padding: 1px 7px; border-radius: 10px; font-size: 13px; line-height: 20px; background: var(--bg3); border: 1px solid var(--border); }
+.reaction span { font-size: 12px; color: var(--muted); }
+.reaction.mine { border-color: var(--accent2); background: rgba(0, 221, 255, 0.12); }
+.reaction.mine span { color: var(--text); }
+.reaction.add { color: var(--muted); }
+.pickerback { position: fixed; inset: 0; z-index: 30; }
+.reactpicker { position: fixed; display: grid; grid-template-columns: repeat(8, 34px); gap: 2px; padding: 6px; max-height: 270px; overflow-y: auto; background: var(--bg1); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); }
+.reactpicker button { padding: 4px 0; font-size: 18px; background: transparent; border-color: transparent; }
+.reactpicker button:hover { background: var(--bg3); }
+.threadlink { display: block; margin-top: 4px; padding: 2px 0; background: transparent; border: 0; color: var(--accent2); font-size: 13px; cursor: pointer; }
+.threadlink:hover { text-decoration: underline; }
+.threadbar { display: flex; align-items: center; gap: 10px; padding: 6px 12px; background: var(--bg1); border-bottom: 1px solid var(--border); min-width: 0; }
+.threadbar .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.replybar { display: flex; align-items: center; gap: 8px; margin: 0 12px; padding: 4px 10px; background: var(--bg1); border: 1px solid var(--border); border-bottom: 0; border-radius: 8px 8px 0 0; font-size: 13px; min-width: 0; }
+.replybar .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chattools { display: inline-flex; gap: 2px; }
+.chattools button { padding: 2px 6px; }
+.messageeditor { display: grid; gap: 4px; max-width: 640px; margin: 2px 0; }
+.messageeditor textarea { width: 100%; resize: vertical; }
+.poll { display: grid; gap: 4px; margin-top: 6px; max-width: 440px; }
+.poll .option { position: relative; display: flex; gap: 8px; padding: 6px 10px; text-align: left; overflow: hidden; background: var(--bg1); }
+.poll .option .bar { position: absolute; inset: 0 auto 0 0; background: rgba(144, 0, 255, 0.28); pointer-events: none; }
+.poll .option.mine { border-color: var(--accent2); }
+.poll .option .text { position: relative; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.poll .option .count { position: relative; color: var(--muted); }
+.poll.closed .option { cursor: default; opacity: 0.85; }
+.poll .pollfoot { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: 12px; }
+
+/* ---- A forum's posts, and a gallery's pictures ---- */
+.messages.posts { padding: 12px 16px; }
+.emptyposts { padding: 30px 0; text-align: center; }
+.forumlist { display: grid; gap: 8px; max-width: 860px; }
+.forumpost { display: grid; gap: 2px; padding: 10px 14px; text-align: left; background: var(--bg1); border: 1px solid var(--border); border-radius: 10px; min-width: 0; }
+.forumpost:hover { border-color: var(--accent); }
+.forumpost .said { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.postfoot { display: flex; align-items: center; gap: 10px; font-size: 12px; min-width: 0; }
+.gallerygrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.gallerypost { display: grid; gap: 4px; min-width: 0; }
+.gallerypost .cover { position: relative; aspect-ratio: 1; padding: 0; overflow: hidden; background: var(--bg0); border-radius: 10px; display: grid; place-items: center; }
+.gallerypost .cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.gallerypost .cover:hover { border-color: var(--accent); }
+.gallerypost .cover .more { position: absolute; top: 6px; right: 6px; padding: 1px 7px; border-radius: 10px; background: rgba(0, 0, 0, 0.7); color: #fff; font-size: 12px; }
+.gallerypost .posttitle { font-size: 14px; white-space: nowrap; }
+.gallerypost .by { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer.postbar { align-items: center; }
+.postfiles { display: flex; flex-wrap: wrap; gap: 8px; }
+.postfile { position: relative; width: 92px; height: 92px; display: grid; place-items: center; overflow: hidden; background: var(--bg0); border: 1px solid var(--border); border-radius: 8px; font-size: 11px; text-align: center; padding: 0; }
+.postfile img { width: 100%; height: 100%; object-fit: cover; }
+.postfile > button { position: absolute; top: 2px; right: 2px; padding: 0 6px; background: rgba(0, 0, 0, 0.7); border-radius: 10px; }
+.postfile.add { color: var(--muted); border-style: dashed; cursor: pointer; }
+
+/* ---- A message as a line in a list: pins, search results ---- */
+.listedmessage { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); }
+.listedmessage > button.grow { display: grid; gap: 1px; padding: 8px 6px; text-align: left; background: transparent; border-color: transparent; min-width: 0; }
+.listedmessage > button.grow:hover { background: var(--bg3); }
+.listedmessage .said { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+
+/* Only the pictures and videos of a conversation */
+.mediagrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px; }
+.mediatile { position: relative; aspect-ratio: 1; padding: 0; overflow: hidden; background: var(--bg0); border-radius: 8px; display: grid; place-items: center; min-width: 0; font-size: 12px; }
+.mediatile:hover { border-color: var(--accent); }
+.mediatile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mediatile .video { display: grid; gap: 6px; justify-items: center; padding: 8px; min-width: 0; max-width: 100%; }
+.mediatile .video .play { font-size: 26px; line-height: 1; }
+.mediatile .video .name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chattools button[aria-pressed="true"] { border-color: var(--accent); background: var(--bg0); }

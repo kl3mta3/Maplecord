@@ -1,5 +1,5 @@
 // Run with: node src/channelViewers.test.ts
-import { canSeeChannel, channelMembers } from './channelViewers.ts'
+import { canSeeChannel, channelMembers, mayManageMessagesIn } from './channelViewers.ts'
 import { Permission, type ChannelDto, type ChannelOverrideDto, type GuildSummaryDto, type MemberDto, type RoleDto } from './types.ts'
 
 let failures = 0
@@ -40,6 +40,12 @@ check(who(guild(), channel([], { directSince: '2026-10-09T00:00:00Z', bots: [] }
 check(who(guild(), channel([], { bots: ['keeper'] })) === 'owner ann sam ada helper', 'and never in an ordinary channel, whatever roles it was given');
 check(who(guild(null), channel([override({ roleId: 'everyone' }, 0, View)])) === 'owner ann sam ada helper', 'an app that was not told the roles leaves nobody out');
 check(canSeeChannel(guild(), ann, channel()) && !canSeeChannel(guild(), keeper, channel()), 'one person at a time says the same');
+
+console.log('Whose pins count in a P2P channel')
+const manages = (g: GuildSummaryDto, c: ChannelDto) => ['owner', 'ann', 'sam', 'ada', 'keeper', 'stranger'].filter(id => mayManageMessagesIn(g, id, c)).join(' ')
+check(manages(guild(), channel()) === 'owner sam ada', 'the owner, an administrator and a role that manages messages; not a P2P bot whatever its roles, and not someone who is not a member');
+check(manages(guild(), channel([override({ roleId: 'staff' }, 0, Permission.ManageMessages), override({ userId: 'ann' }, Permission.ManageMessages, 0)])) === 'owner ann ada', 'the channel\'s own rules count: taken from a role there, given to one person there');
+check(manages(guild(null), channel()) === 'owner', 'an app that was not told the roles takes only the owner\'s word');
 
 console.log(failures === 0 ? '\nALL PASSED' : `\n${failures} FAILED`)
 // This file is checked with the app's own (browser) types, which have no `process`: failing loudly does the same job.

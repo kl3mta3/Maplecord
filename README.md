@@ -15,8 +15,14 @@ one.
 - Private channels: only the roles and people you let in can see that they exist
 - The member list shows the people who can see the channel you are in
 - Friends and direct messages
+- Reply to a message, react to it, edit what you sent, and pin the ones worth keeping
+- Threads, to keep a side conversation out of the channel
+- Search a channel's messages, and polls
+- Forum channels: posts with a title, each with its own thread
+- Gallery channels: every post is pictures with a title. Open one to see what is said about it, and like it
 - Files, pictures and videos in chat; pictures and videos show right there
 - Send a file by dropping it on the chat, or by pasting it into the message box
+- See only the pictures and videos of a channel or a conversation, as a grid; click one to go to its message
 - Voice messages: record up to 15 minutes and post it, and it plays right in the chat (so do other sound files)
 - Unread counts, per-channel and per-server mute, and folders to group your servers
 - On a wide screen, the channel list and the member list can be dragged wider or narrower
@@ -82,6 +88,8 @@ you connect to that way can, with the know how, find your IP address**.
 - **P2P voice channels** are their own kind of channel, shown in italics with a P2P tag, and you are warned before
   you join one. They never mix with ordinary channels: a channel is one or the other, and changing which empties
   it first. Making one takes its own permission.
+- **P2P text channels and galleries.** What is posted in one goes straight between people's apps and is kept only on
+  their own devices. The server keeps none of it.
 - **P2P calls** are a separate button in a conversation with a friend. It only shows if you allow P2P, it asks
   first, and it only rings if your friend allows P2P too.
 - **Files of any size** between friends who both allow P2P, straight from one computer to the other (the ⇄ button).
