@@ -13,11 +13,15 @@ one.
 - Servers with text and voice channels, roles and permissions, and invite links that open in the app or the browser
 - Public servers anyone can find by name or topic and join; private ones are by invite
 - Private channels: only the roles and people you let in can see that they exist
+- The member list shows the people who can see the channel you are in
 - Friends and direct messages
 - Files, pictures and videos in chat; pictures and videos show right there
+- Send a file by dropping it on the chat, or by pasting it into the message box
 - Voice messages: record up to 15 minutes and post it, and it plays right in the chat (so do other sound files)
 - Unread counts, per-channel and per-server mute, and folders to group your servers
-- Profiles with display names, avatars, banners, name fonts and animated decorations
+- On a wide screen, the channel list and the member list can be dragged wider or narrower
+- Profiles with display names, avatars, banners, name fonts, animated decorations and profile effects
+- Server tags, which a server can keep to the roles it chooses
 - Status (online, do not disturb, invisible), blocking, and a say over who may send you friend requests
 - Slash commands, bots and webhooks
 
@@ -37,6 +41,7 @@ one.
 
 - Rolls: roll, need/greed, rock paper scissors, coin flip, dice. The server does the rolling, and a roll goes to
   whoever is in voice with you.
+- Your roll stats are kept on your account, so they follow you to every device. Only you see them.
 - In-game overlay with global hotkeys (desktop only)
 - Game plugins: item names and icons, optional drop detection from the game's log (desktop only)
 - Custom sound packs
@@ -56,6 +61,8 @@ nothing to unlock.
 - Files of any size between friends who both allow P2P
 - Sharper streams: up to 1080p at 60 frames a second in P2P channels and calls, with sound
 - Animated profile pictures, and animated decorations around them: ours in your own colours, or one you made
+- Profile effects: an animation that plays over your profile card, ours or one you made
+- Server tags: a server can have a tag, a symbol and up to five letters, for its members to wear beside their names
 - Profile banners, a colour of your own, a bio and pronouns
 - Name fonts and colours, including two-colour names
 - Colour themes for the whole app
