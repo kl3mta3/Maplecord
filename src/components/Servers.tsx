@@ -32,7 +32,8 @@ export function AddServerDialog({ onCreate, onJoin, onDiscover, onClose }: { onC
  */
 export function CreateServerDialog({ onCreate, onClose }: { onCreate: (name: string, isPublic: boolean, kind: 'standard' | 'hybrid' | 'p2p') => void; onClose: () => void }) {
   const [name, setName] = useState('')
-  const [open, setOpen] = useState(false)
+  // Public unless they say otherwise.
+  const [open, setOpen] = useState(true)
   const [kind, setKind] = useState<'standard' | 'hybrid' | 'p2p'>('standard')
   const submit = () => { if (name.trim()) { onCreate(name.trim(), open, open ? 'standard' : kind); onClose() } }
   return (
@@ -41,8 +42,8 @@ export function CreateServerDialog({ onCreate, onClose }: { onCreate: (name: str
         <div className="muted">Server name</div>
         <input autoFocus value={name} maxLength={100} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()} aria-label="Server name" />
         <div className="muted">Who can join</div>
+        <label className="choice"><input type="radio" name="newlisting" checked={open} onChange={() => setOpen(true)} /><span><b>Public</b> <span className="muted">Listed for everyone to find and join *</span></span></label>
         <label className="choice"><input type="radio" name="newlisting" checked={!open} onChange={() => setOpen(false)} /><span><b>Private</b> <span className="muted">Only people with an invite</span></span></label>
-        <label className="choice"><input type="radio" name="newlisting" checked={open} onChange={() => setOpen(true)} /><span><b>Public</b> <span className="muted">Listed for everyone to find and join. A public server cannot have P2P channels.</span></span></label>
         {!open && (
           <>
             <div className="muted">Kind of server</div>
@@ -52,6 +53,7 @@ export function CreateServerDialog({ onCreate, onClose }: { onCreate: (name: str
           </>
         )}
         <div className="muted">You can add and change channels afterwards.</div>
+        <div className="muted">* A public server cannot have P2P channels.</div>
       </div>
       <div className="buttons"><button onClick={onClose}>Cancel</button><button className="accent" disabled={!name.trim()} onClick={submit}>Create</button></div>
     </Dialog>
@@ -74,8 +76,8 @@ export function JoinServerDialog({ example, onJoin, onBack, onClose }: {
   }
   return (
     <Dialog title="Join a server" onClose={onClose}>
-      <div className="muted">Enter an invite to join an existing server.</div>
-      <input autoFocus placeholder={start + 'KFLRL7XQ'} value={invite} onChange={e => setInvite(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') void go() }} aria-label="Invite link or code" />
+      <div className="muted">Enter the invite link or code to join an existing server.</div>
+      <input autoFocus placeholder="Invite link or code" value={invite} onChange={e => setInvite(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') void go() }} aria-label="Invite link or code" />
       <div className="muted">Invites look like</div>
       <div className="row examples"><code>KFLRL7XQ</code><code>{start}KFLRL7XQ</code></div>
       <div className="buttons">

@@ -811,11 +811,11 @@ button.chip { cursor: pointer; }
 .friendlink { display: flex; flex-direction: column; gap: 6px; }
 .friendlink .row { display: flex; gap: 6px; align-items: center; }
 .friendlink .row input { flex: 1; min-width: 0; }
-.friendlink .qr { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; margin-top: 4px; }
+.qrpanel { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; margin-top: 4px; }
 .msgbuttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .msgbuttons button { padding: 5px 12px; }
-.friendlink .qr .actions { display: flex; flex-direction: column; gap: 6px; }
-.friendlink .qr .actions label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.qrpanel .actions { display: flex; flex-direction: column; gap: 6px; }
+.qrpanel .actions label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
 .qrcard { display: block; max-width: 100%; height: auto; border-radius: 14px; }
 .qrcode { border-radius: 10px; display: block; }
 

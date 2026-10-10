@@ -24,7 +24,7 @@ import {
   ChannelType, MessageKind, RollChoice, RollKind, UserStatus, type PreferencesDto, type TransferSettingsDto,
   type ChannelDto, type CommandDto, type GuildSummaryDto, type MemberDto, type MessageDto, type RollItemDto, type RollResultDto, type RollSessionDto,
   type VoiceParticipantDto, type RpsSessionDto, type RpsResultDto, RpsChoice, type FriendsDto, type DmChannelDto, type RoleDto,
-  type DecorationDto, type UpdateProfileRequest, type UserDto, type UserProfileDto, type SystemMessageDto, type SignInMethodsDto, type ContactEmailDto, type ConnectionDto, type ConnectionServiceDto, type FriendLinkDto, type MediaItem, type SearchResultDto, type NewPollDto, isPostsChannel, type RollStatsDto, type FileOfferDto, type TokenResponse, type StreamSettingsDto,
+  type DecorationDto, type QrDto, type UpdateProfileRequest, type UserDto, type UserProfileDto, type SystemMessageDto, type SignInMethodsDto, type ContactEmailDto, type ConnectionDto, type ConnectionServiceDto, type FriendLinkDto, type MediaItem, type SearchResultDto, type NewPollDto, isPostsChannel, type RollStatsDto, type FileOfferDto, type TokenResponse, type StreamSettingsDto,
   type SfuPassDto, type InviteDto,
 } from './types'
 
@@ -1617,6 +1617,8 @@ export function useMaplecord() {
     try { return await api.invites(guildId) } catch { return null }
   }, [api])
   const revokeInvite = useCallback(async (code: string): Promise<boolean> => { let done = false; await run(async () => { await api.revokeInvite(code); done = true }); return done }, [api])
+  /** An invite's link as a QR code, or null where the server cannot give one (one from before it could, or the invite is gone). */
+  const inviteQr = useCallback(async (code: string): Promise<QrDto | null> => { try { return await api.inviteQr(code) } catch { return null } }, [api])
   /** What an invite code is put after to make a link, where the server gives links out. */
   const inviteBase = useCallback(async (): Promise<string | null> => (await api.meta(settingsRef.current.serverUrl).catch(() => null))?.inviteBase ?? null, [api])
 
@@ -2811,7 +2813,7 @@ export function useMaplecord() {
     startShare, stopShare, watchStream, unwatchStream, setStreamLimit: (streamer: string, kbps: number) => streamEngine.requestLimit(streamer, kbps),
     voice, isMuted, isSpeaking, joinVoice, leaveVoice, toggleMute,
     call, startCall, answerCall, declineCall, renameChannel, deleteChannel, deleteGroup, setChannelMuted,
-    preferences, savePreferences, blocked, setBlocked, dndUsers, idleUsers, makeInvite, loadInvites, revokeInvite, inviteBase, deafened, toggleDeafen, ownLook, transferLimits,
+    preferences, savePreferences, blocked, setBlocked, dndUsers, idleUsers, makeInvite, loadInvites, revokeInvite, inviteBase, inviteQr, deafened, toggleDeafen, ownLook, transferLimits,
     farewell, deleteStep, openDeleteAccount: (step: 'explain' | 'confirm' = 'explain') => setDeleteStep(step), closeDeleteAccount: () => setDeleteStep(null), reauthenticateForDelete, deleteAccount,
     p2pText, askDirectText, setP2pSubscribed, setP2pBroadcast, p2pFiles, loadP2pFile, saveP2pFile, p2pNewApps, acceptP2pApp, p2pBotsWaiting, acceptP2pBot, dismissP2pBot,
     allowDirect, setAllowDirect, reauthenticateForDirect, reauthProviders, directPrompt, confirmDirect, dismissDirectPrompt: () => setDirectPrompt(null), setChannelDirect,

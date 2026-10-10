@@ -4,7 +4,7 @@
   "private": true,
   "license": "GPL-3.0-or-later",
   "author": "Kenny Lasyone",
-  "version": "0.3.16",
+  "version": "0.3.17",
   "description": "Loot rolling, chat and voice for your party",
   "repository": "github:kl3mta3/Maplecord",
   "type": "module",

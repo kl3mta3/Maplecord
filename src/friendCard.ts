@@ -6,6 +6,9 @@ import type { QrDto } from './types'
  * A card to hand out with one's friend link on it: the QR code in whichever look was chosen, with who it belongs to
  * and where it leads. Each card keeps a square place for the code, so every look sits in every card.
  *
+ * The same cards carry a server's invite: the server's name where the person's would be, small tags for what kind
+ * of server it is where their @username would be, and words that ask people to join.
+ *
  * It is drawn on a canvas, not as an SVG like the bare code: a canvas can use the fonts the app has loaded (a
  * person's own name font among them), and what is on it is the picture that gets saved.
  */
@@ -40,7 +43,12 @@ export interface CardWho {
   look: Pick<Appearance, 'nameFont' | 'nameColor' | 'nameColor2'>
   /** Where the link leads, as people would say it: "maplecord.app". */
   site: string
+  /** The card is for a server's invite, not a person: `name` is the server's, and these are shown in place of an @username ("Private", "Hybrid"). */
+  server?: { tags: string[] }
 }
+
+/** What a server's card asks of whoever is looking at it. */
+const JOIN = 'Scan me to join the server'
 
 const BG = '#14141c', TEXT = '#ececf4', MUTED = '#9a9ab0', PANEL = '#1d1d28'
 const UI = `'Segoe UI', system-ui, sans-serif`
@@ -97,6 +105,23 @@ function writeName(ctx: CanvasRenderingContext2D, who: CardWho, at: number, y: n
   }, centred)
 }
 
+/** Small labels in a row, each in its own outline: the row centred on `at`, or starting there. `y` is the top of the row. */
+function writeTags(ctx: CanvasRenderingContext2D, labels: string[], at: number, y: number, centred = true) {
+  const px = 15, pad = 12, gap = 8, tall = 28
+  ctx.font = `600 ${px}px ${UI}`
+  const widths = labels.map(label => ctx.measureText(label).width + pad * 2)
+  let x = centred ? at - (widths.reduce((sum, w) => sum + w, 0) + gap * (labels.length - 1)) / 2 : at
+  labels.forEach((label, i) => {
+    ctx.fillStyle = PANEL; box(ctx, x, y, widths[i], tall, tall / 2); ctx.fill()
+    ctx.globalAlpha = 0.55; ctx.strokeStyle = MUTED; ctx.lineWidth = 1.5; ctx.stroke(); ctx.globalAlpha = 1
+    ctx.font = `600 ${px}px ${UI}`
+    ctx.fillStyle = TEXT; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
+    ctx.fillText(label, x + pad, y + tall / 2 + 1)
+    x += widths[i] + gap
+  })
+  ctx.textBaseline = 'alphabetic'
+}
+
 /**
  * The code, in a square `side` across whose corner is at x, y. Every square of it lands on whole pixels, so there
  * are no hairlines between them: it is drawn a touch smaller than the place it is given, in the middle of it.
@@ -126,6 +151,7 @@ export function drawCard(ctx: CanvasRenderingContext2D, kind: RealCard, look: Qr
   const { w, h } = SIZES[kind]
   const mid = w / 2
   const handle = '@' + who.username
+  const tags = who.server?.tags ?? null
   ctx.setTransform(scale, 0, 0, scale, 0, 0)
   ctx.clearRect(0, 0, w, h)
   ctx.fillStyle = BG; box(ctx, 0, 0, w, h, 28); ctx.fill()
@@ -137,6 +163,13 @@ export function drawCard(ctx: CanvasRenderingContext2D, kind: RealCard, look: Qr
     code(70, 40, 380)
     ctx.globalAlpha = 0.35; ctx.fillStyle = MUTED; ctx.fillRect(60, 452, w - 120, 2); ctx.globalAlpha = 1
     writeName(ctx, who, mid, 522, 52, w - 80)
+    if (tags) {
+      // A server: its tags, what to do, and the wordmark on a line of its own.
+      writeTags(ctx, tags, mid, 540)
+      write(ctx, JOIN, mid, 616, 400, 21, UI, w - 80, TEXT)
+      write(ctx, 'Maplecord', mid, 658, 400, 26, WORDMARK, w, (l, r) => brand(ctx, l, r))
+      return
+    }
     write(ctx, handle, mid, 558, 400, 20, UI, w - 80, MUTED)
     // "Scan to add me on Maplecord", the last word as the wordmark: the two are measured so the pair sits in the middle.
     const lead = 'Scan to add me on '
@@ -150,6 +183,12 @@ export function drawCard(ctx: CanvasRenderingContext2D, kind: RealCard, look: Qr
     write(ctx, who.site, mid, 60, 400, 38, WORDMARK, w - 60, '#ffffff')
     ctx.fillStyle = PANEL; box(ctx, 50, 116, w - 100, 420, 22); ctx.fill()
     code(75, 141, 370)
+    if (tags) {
+      writeName(ctx, who, mid, 596, 46, w - 80)
+      writeTags(ctx, tags, mid, 612)
+      write(ctx, JOIN, mid, 672, 400, 19, UI, w - 60, MUTED)
+      return
+    }
     writeName(ctx, who, mid, 606, 50, w - 80)
     write(ctx, `${handle}  ·  scan to add me`, mid, 644, 400, 20, UI, w - 60, MUTED)
   } else if (kind === 'wide') {
@@ -157,13 +196,22 @@ export function drawCard(ctx: CanvasRenderingContext2D, kind: RealCard, look: Qr
     code(34, 34, 332)
     write(ctx, who.site, 400, 120, 400, 40, WORDMARK, 330, (l, r) => brand(ctx, l, r), false)
     writeName(ctx, who, 400, 212, 64, 330, false)
-    write(ctx, handle, 402, 252, 400, 22, UI, 330, MUTED, false)
-    write(ctx, 'Scan to add me as a friend', 402, 330, 400, 21, UI, 330, TEXT, false)
+    if (tags) writeTags(ctx, tags, 402, 232, false)
+    else write(ctx, handle, 402, 252, 400, 22, UI, 330, MUTED, false)
+    write(ctx, tags ? JOIN : 'Scan to add me as a friend', 402, 330, 400, 21, UI, 330, TEXT, false)
   } else {
     border()
     code(70, 40, 380)
     ctx.fillStyle = PANEL; box(ctx, mid - 160, 462, 320, 56, 28); ctx.fill()
     ctx.strokeStyle = brand(ctx, mid - 160, mid + 160); ctx.lineWidth = 2.5; ctx.stroke()
+    if (tags) {
+      // A server: its name in the pill, its tags under it, then where it leads and what to do.
+      writeName(ctx, who, mid, 499, 26, 290)
+      writeTags(ctx, tags, mid, 528)
+      write(ctx, who.site, mid, 592, 400, 30, WORDMARK, w - 80, (l, r) => brand(ctx, l, r))
+      write(ctx, JOIN, mid, 622, 400, 17, UI, w - 80, MUTED)
+      return
+    }
     write(ctx, handle, mid, 499, 600, 26, UI, 290, TEXT)
     write(ctx, who.site, mid, 584, 400, 32, WORDMARK, w - 80, (l, r) => brand(ctx, l, r))
   }
