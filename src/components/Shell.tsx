@@ -7,6 +7,9 @@ import { ChannelType, isPostsChannel, MessageKind, Permission, UserStatus, RollC
 const RPS_ICON: Record<number, string> = { [RpsChoice.Rock]: '✊', [RpsChoice.Paper]: '✋', [RpsChoice.Scissors]: '✌️' }
 const RPS_NAME: Record<number, string> = { [RpsChoice.Rock]: 'Rock', [RpsChoice.Paper]: 'Paper', [RpsChoice.Scissors]: 'Scissors' }
 
+/** What the server writes down as the outcome of a roll, a quick roll, a flip or a round of rock-paper-scissors. */
+const GAME_RESULTS: ReadonlySet<number> = new Set([MessageKind.Roll, MessageKind.Dice, MessageKind.CoinFlip, MessageKind.Rps])
+
 /** Built-in commands handled by the client; they show up in the "/" list next to bot commands. */
 const BUILTIN_COMMANDS = [
   { name: 'roll', description: 'Start a roll for everyone (optional range, e.g. /roll 1-20)' },
@@ -1203,7 +1206,8 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
           ] : []),
           ...(messageMenu.m.content ? [{ kind: 'item', label: 'Copy text', onClick: () => { void navigator.clipboard.writeText(messageMenu.m.content).catch(() => { /* no clipboard */ }) } } as MenuEntry] : []),
           // In a P2P channel anyone may remove any message from their own device: it touches nobody else's copy.
-          ...(messageMenu.m.authorId === me?.id || mayManageMessages || p2pChat
+          // The result of a roll, a flip or a round is the server's record: only someone who manages messages removes it.
+          ...((messageMenu.m.authorId === me?.id && !GAME_RESULTS.has(messageMenu.m.kind)) || mayManageMessages || p2pChat
             ? [{ kind: 'item', label: p2pChat ? 'Remove from this device' : 'Delete message', danger: true, onClick: () => setDeleting(messageMenu.m) } as MenuEntry]
             : []),
           ...(!messageMenu.m.content && messageMenu.m.authorId !== me?.id && !mayManageMessages ? [{ kind: 'label', text: 'Nothing to do with this message' } as MenuEntry] : []),
