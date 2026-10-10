@@ -375,6 +375,7 @@ export function ProfileEditor({ store, onClose }: { store: Store; onClose: () =>
           </div>
 
           <ColorRow label="Banner color" value={draft.accentColor} onChange={v => set({ accentColor: v })} />
+          <div className="muted">Banner picture <span>— PNG, JPEG, WebP or an animated GIF, up to 4 MB</span></div>
           <div className="row">
             <button disabled={busy} onClick={() => bannerInput.current?.click()}>Upload banner picture</button>
             {draft.bannerUrl && <button className="subtle" disabled={busy} onClick={() => picture('banner', null)}>Remove</button>}

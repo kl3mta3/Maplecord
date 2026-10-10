@@ -1,27 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Store } from '../store'
 import type { FriendDto, FriendLinkDto, QrDto } from '../types'
-import { leafPath, leafQr, LEAF_CODE, LEAF_DOT, LEAF_EDGE, LEAF_PAPER, type LeafStyle } from '../leafQr'
+import { leafPath, leafQr, qrPath, LEAF_CODE, LEAF_DOT, LEAF_EDGE, LEAF_PAPER, type LeafStyle } from '../leafQr'
+import { CARDS, CARD_SCALE, cardFonts, cardSize, drawCard, type CardKind, type CardWho, type QrLook, type RealCard } from '../friendCard'
+import { shownName } from '../profile'
 import { ConfirmDialog } from './Dialogs'
 
 /** The empty margin a QR code needs around it to be read, in squares. */
 const MARGIN = 3
-
-/** One path that draws every dark square of a QR code, each one unit across, starting `at` units in from the corner. */
-export function qrPath(qr: QrDto, at = 0): string {
-  let d = ''
-  for (let y = 0; y < qr.size; y++) {
-    for (let x = 0; x < qr.size; x++) {
-      if (qr.modules[y * qr.size + x] !== '1') continue
-      // Runs of dark squares in a row are drawn as one bar.
-      let run = 1
-      while (x + run < qr.size && qr.modules[y * qr.size + x + run] === '1') run++
-      d += `M${x + at} ${y + at}h${run}v1h-${run}z`
-      x += run - 1
-    }
-  }
-  return d
-}
 
 /** A QR code as a picture: dark squares on white, with the margin it needs. */
 export function QrCode({ qr, size = 200, innerRef }: { qr: QrDto; size?: number; innerRef?: React.Ref<SVGSVGElement> }) {
@@ -67,8 +53,25 @@ const QR_LOOKS = [
   { key: 'blended', name: 'Leaf, no border' },
   { key: 'boxed', name: 'Leaf with a square' },
   { key: 'square', name: 'Plain square' },
-] as const
-type QrLook = typeof QR_LOOKS[number]['key']
+] as const satisfies readonly { key: QrLook; name: string }[]
+
+/**
+ * The code on a card (see friendCard.ts), with who it belongs to. It is a canvas, and what is on it is the picture
+ * that gets saved. Drawn again whenever anything on it changes, once the fonts it is written in are ready.
+ */
+function FriendCard({ kind, look, qr, seed, who, innerRef }: { kind: RealCard; look: QrLook; qr: QrDto; seed: string; who: CardWho; innerRef: React.RefObject<HTMLCanvasElement | null> }) {
+  const { w, h } = cardSize(kind)
+  useEffect(() => {
+    let alive = true
+    void Promise.all(cardFonts(who).map(font => document.fonts.load(font).catch(() => null))).then(() => {
+      const ctx = alive ? innerRef.current?.getContext('2d') : null
+      if (ctx) drawCard(ctx, kind, look, qr, seed, who)
+    })
+    return () => { alive = false }
+  }, [kind, look, qr, seed, who, innerRef])
+  return <canvas ref={innerRef} className="qrcard" width={w * CARD_SCALE} height={h * CARD_SCALE} style={{ width: w > h ? 380 : 300 }} role="img"
+    aria-label={`A card with the QR code of your friend link, your name ${who.name} and @${who.username}`} />
+}
 
 /** Saves something made in the app as a file, the way a download is saved. */
 export function saveAs(blob: Blob, name: string) {
@@ -99,6 +102,19 @@ export function FriendLinkPanel({ store }: { store: Store }) {
   // The one picked last on this device; until one is picked, the first. The plain square is there for anything that has trouble reading a leaf.
   const look: QrLook = QR_LOOKS.find(l => l.key === store.settings.qrLook)?.key ?? QR_LOOKS[0].key
   const setLook = (qrLook: QrLook) => store.updateSettings({ qrLook })
+  // The card it is put on, if any: also the one picked last on this device.
+  const card: CardKind = CARDS.find(c => c.key === store.settings.qrCard)?.key ?? 'none'
+  const setCard = (qrCard: CardKind) => store.updateSettings({ qrCard })
+  const cardCanvas = useRef<HTMLCanvasElement>(null)
+  const me = store.settings.user
+  const url = link?.url
+  // Who the card is for, and where the link leads as people would say it: the server's name without a leading "api.".
+  const who = useMemo<CardWho | null>(() => {
+    if (!me || !url) return null
+    let site = 'Maplecord'
+    try { site = new URL(url).host.replace(/^api\./, '') } catch { /* not an address: the name will do */ }
+    return { name: shownName(me), username: me.username, look: { nameFont: me.nameFont ?? null, nameColor: me.nameColor ?? null, nameColor2: me.nameColor2 ?? null }, site }
+  }, [me, url])
   const [copied, setCopied] = useState(false)
   const [asking, setAsking] = useState(false)
   const svg = useRef<SVGSVGElement>(null)
@@ -109,6 +125,8 @@ export function FriendLinkPanel({ store }: { store: Store }) {
   const copy = () => { void navigator.clipboard.writeText(link.url).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1500) }, () => store.setError('Could not copy. Select the link and copy it yourself.')) }
   // The picture is drawn large, so that it is still sharp printed or shown on a stream.
   const savePicture = () => {
+    // A card is already the picture, at the size it is saved.
+    if (card !== 'none') { cardCanvas.current?.toBlob(blob => { if (blob) saveAs(blob, 'maplecord-friend-link-card.png') }, 'image/png'); return }
     const el = svg.current
     if (!el) return
     const side = 1024
@@ -137,11 +155,19 @@ export function FriendLinkPanel({ store }: { store: Store }) {
       </div>
       {showQr && (
         <div className="qr">
-          {look === 'square' ? <QrCode qr={link.qr} size={300} innerRef={svg} /> : <LeafQrCode qr={link.qr} seed={link.code} style={look} innerRef={svg} />}
+          {card !== 'none' && who ? <FriendCard kind={card} look={look} qr={link.qr} seed={link.code} who={who} innerRef={cardCanvas} />
+            : look === 'square' ? <QrCode qr={link.qr} size={300} innerRef={svg} /> : <LeafQrCode qr={link.qr} seed={link.code} style={look} innerRef={svg} />}
           <div className="actions">
-            <select value={look} onChange={e => setLook(e.target.value as QrLook)} aria-label="How the QR code is drawn" title="The same link each way. If something has trouble reading a leaf, use the plain square.">
-              {QR_LOOKS.map(l => <option key={l.key} value={l.key}>{l.name}</option>)}
-            </select>
+            <label>QR
+              <select value={look} onChange={e => setLook(e.target.value as QrLook)} title="How the code itself is drawn. It is the same link each way. If something has trouble reading a leaf, use the plain square.">
+                {QR_LOOKS.map(l => <option key={l.key} value={l.key}>{l.name}</option>)}
+              </select>
+            </label>
+            <label>Card
+              <select value={card} onChange={e => setCard(e.target.value as CardKind)} title="A card to put the code on, with your name and where it leads. None is the code by itself.">
+                {CARDS.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
+              </select>
+            </label>
             <button onClick={savePicture}>Save as a picture</button>
             <button className="subtle" onClick={() => setAsking(true)} title="The link you have handed out so far stops working">Make a new link</button>
           </div>

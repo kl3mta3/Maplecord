@@ -89,7 +89,7 @@ export default function Friends({ store }: { store: Store }) {
           {[...friends].sort((a, b) => Number(b.online) - Number(a.online) || a.user.username.localeCompare(b.user.username)).map(f => (
             <div key={f.user.id} className="f" style={{ opacity: f.online ? 1 : 0.55 }}>
               <Avatar who={f.user} name={shownName(f.user)} serverUrl={serverUrl} size={28} />
-              <span className={'presence' + (f.online ? ' online' : '')} />
+              <span className={'presence' + (!f.online ? '' : store.dndUsers.has(f.user.id) ? ' online dnd' : store.idleUsers.has(f.user.id) ? ' online idle' : ' online')} title={!f.online ? 'Offline' : store.dndUsers.has(f.user.id) ? 'Do not disturb' : store.idleUsers.has(f.user.id) ? 'Idle' : 'Online'} />
               <UserName who={store.appearanceOf(f.user.id)} label={shownName(f.user)} />
               <div className="actions">
                 <button onClick={() => store.openDm(f.user.id)}>💬 Message</button>

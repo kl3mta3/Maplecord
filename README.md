@@ -10,13 +10,14 @@ one.
 
 ### Chat
 
-- Servers with text and voice channels, roles and permissions, and invite links that open in the app or the browser
+- Servers with text and voice channels, roles and permissions, and invite links that open in the app or the browser.
+  An invite can be made to run out, and taken back
 - Public servers anyone can find by name or topic and join; private ones are by invite
 - Private channels: only the roles and people you let in can see that they exist
 - The member list shows the people who can see the channel you are in
 - Friends and direct messages
 - Your own friend link, and a QR code of it in the shape of a maple leaf (or a plain square), to hand out anywhere:
-  whoever opens it can ask to be your friend
+  whoever opens it can ask to be your friend. It can be saved on a card with your name on it
 - Save your friends list as a file
 - Connections: link an account on another service (where the server offers it) to show its name on your profile
 - Reply to a message, react to it, edit what you sent, and pin the ones worth keeping
@@ -32,7 +33,7 @@ one.
 - On a wide screen, the channel list and the member list can be dragged wider or narrower
 - Profiles with display names, avatars, banners, name fonts, animated decorations and profile effects
 - Server tags, which a server can keep to the roles it chooses
-- Status (online, do not disturb, invisible), blocking, and a say over who may send you friend requests
+- Status (online, idle, do not disturb, invisible), blocking, and a say over who may send you friend requests
 - Slash commands, bots and webhooks
 
 ### Voice and video
@@ -89,7 +90,7 @@ In a P2P connection your app connects straight to the others. That allows more, 
 you connect to that way can, with the know how, find your IP address**.
 
 - **Privacy** a P2P connection is made for users by the server but the connection is direct and private. Nothing passes through the server or relay.
-- **Turning it on.** Untick "Do not allow P2P connections" in Voice settings. You are asked to sign in again, to be
+- **Turning it on.** Untick "Do not allow P2P connections" in Settings, under Voice & audio. You are asked to sign in again, to be
   sure it is you. Tick it again whenever you like.
 - **P2P voice channels** are their own kind of channel, shown in italics with a P2P tag, and you are warned before
   you join one. They never mix with ordinary channels: a channel is one or the other, and changing which empties

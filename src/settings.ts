@@ -60,6 +60,8 @@ export interface Settings {
   theme?: { preset: string; accent: string | null }
   /** How the QR code of the friend link was last drawn on this device (see FriendLink.tsx). */
   qrLook?: string
+  /** The card that code was last put on, if any (see friendCard.ts). */
+  qrCard?: string
   /** Per user id: how you hear them in voice and whether you see what they write. Yours alone; they are never told. */
   users: Record<string, UserPrefs>
   /** Per server id. */

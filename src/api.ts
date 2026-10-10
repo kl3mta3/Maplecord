@@ -79,7 +79,9 @@ export class Api {
   createGuild(name: string, isPublic = false, kind: 'standard' | 'hybrid' | 'p2p' = 'standard') { return this.request<GuildSummaryDto>('POST', '/api/guilds', { name, isPublic, kind }) }
   deleteGuild(id: string) { return this.request<void>('DELETE', `/api/guilds/${id}`) }
   leaveGuild(id: string) { return this.request<void>('POST', `/api/guilds/${id}/leave`) }
-  createInvite(guildId: string) { return this.request<InviteDto>('POST', `/api/guilds/${guildId}/invites`, { expiresInMinutes: null, maxUses: null }) }
+  createInvite(guildId: string, expiresInMinutes: number | null = null, maxUses: number | null = null) { return this.request<InviteDto>('POST', `/api/guilds/${guildId}/invites`, { expiresInMinutes, maxUses }) }
+  invites(guildId: string) { return this.request<InviteDto[]>('GET', `/api/guilds/${guildId}/invites`) }
+  revokeInvite(code: string) { return this.request<void>('DELETE', `/api/invites/${encodeURIComponent(code)}`) }
   updateGuildListing(id: string, patch: { isPublic: boolean; description: string; topics: string[] }) { return this.request<GuildDto>('PATCH', `/api/guilds/${id}`, patch) }
   /** Whether rolls in a server's P2P channels add to people's roll totals. */
   setGuildCountRolls(id: string, countRolls: boolean) { return this.request<GuildDto>('PATCH', `/api/guilds/${id}`, { countRolls }) }

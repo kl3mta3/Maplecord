@@ -14,6 +14,7 @@ import { VoiceAudioSettings } from './VoiceAudio'
 /** The ways a person can appear, in the order they are offered. */
 export const STATUSES: { value: UserStatus; label: string; hint: string; dot: string }[] = [
   { value: UserStatus.Online, label: 'Online', hint: '', dot: 'online' },
+  { value: UserStatus.Idle, label: 'Idle', hint: 'You appear away', dot: 'idle' },
   { value: UserStatus.DoNotDisturb, label: 'Do not disturb', hint: 'No sounds or desktop notifications', dot: 'dnd' },
   { value: UserStatus.Invisible, label: 'Invisible', hint: 'You appear offline', dot: 'invisible' },
 ]
@@ -82,6 +83,7 @@ export function UserSettingsDialog({ store, initial, onOpen, onAllowDirect, onSi
                   <span className={'statusdot ' + s.dot} /><span>{s.label}</span>{s.hint && <span className="muted">{s.hint}</span>}
                 </label>
               ))}
+              <div className="muted">On Online, you are shown as idle by itself after 10 minutes without using the keyboard or mouse (anywhere on your computer in the desktop app, in Maplecord in a browser), unless you are in a voice channel or a call.</div>
 
               <h4>Friend requests</h4>
               <label className="switch">

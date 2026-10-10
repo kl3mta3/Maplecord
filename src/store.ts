@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Api, ApiError } from './api'
 import { ChatHub } from './hub'
 import { bridge, isHandheld, type OverlayAction } from './platform'
+import { IdleWatch } from './idle'
 import { DEFAULT_GATE_LEVEL, DEFAULT_NOTIFY, defaultPluginSettings, gateThreshold, loadSettings, saveSettings, type GuildPrefs, type PluginSettings, type Settings, type UserPrefs } from './settings'
 import { pluginIconUrl, type PluginDrop, type PluginInfo, type PluginItem } from './pluginTypes'
 import { serverIconUrl, shareIcon, withTimeout } from './itemIcons'
@@ -24,7 +25,7 @@ import {
   type ChannelDto, type CommandDto, type GuildSummaryDto, type MemberDto, type MessageDto, type RollItemDto, type RollResultDto, type RollSessionDto,
   type VoiceParticipantDto, type RpsSessionDto, type RpsResultDto, RpsChoice, type FriendsDto, type DmChannelDto, type RoleDto,
   type DecorationDto, type UpdateProfileRequest, type UserDto, type UserProfileDto, type SystemMessageDto, type SignInMethodsDto, type ContactEmailDto, type ConnectionDto, type ConnectionServiceDto, type FriendLinkDto, type MediaItem, type SearchResultDto, type NewPollDto, isPostsChannel, type RollStatsDto, type FileOfferDto, type TokenResponse, type StreamSettingsDto,
-  type SfuPassDto,
+  type SfuPassDto, type InviteDto,
 } from './types'
 
 /** A DM rendered as a channel so chat, rolls and the overlay treat it like any other. */
@@ -163,6 +164,16 @@ export function useMaplecord() {
     if (dnd) next.add(userId); else next.delete(userId)
     return next
   }), [])
+  /** People who are online and idle: they chose it, or every app they have open has gone unused (see idle.ts). */
+  const [idleUsers, setIdleUsers] = useState<Set<string>>(new Set())
+  const markIdle = useCallback((userId: string, idle: boolean) => setIdleUsers(cur => {
+    if (cur.has(userId) === idle) return cur
+    const next = new Set(cur)
+    if (idle) next.add(userId); else next.delete(userId)
+    return next
+  }), [])
+  /** Whether this app has gone unused. Said again to the server after a reconnect, which is a new connection to it. */
+  const unusedRef = useRef(false)
   /** Hearing nobody, without leaving the call. */
   const [deafened, setDeafened] = useState(false)
   /** The colour and picture from our own profile, drawn behind our name at the bottom of the sidebar. */
@@ -527,6 +538,7 @@ export function useMaplecord() {
       if (s === 'connected') {
         // One's roll totals, as the server has them: asked for as the app connects, and sent by the server after each roll.
         void api.rollStats().then(s => setStats(asStats(s))).catch(() => { /* an older server keeps none */ })
+        if (unusedRef.current) void hub.setIdle(true).catch(() => { /* an older server has no idle */ })
         if (wasConnected) {
           setHubEpoch(n => n + 1)
           void loadGuilds().catch(() => { /* still what we had; the next reconnect asks again */ })
@@ -622,7 +634,7 @@ export function useMaplecord() {
         friends: fr.friends.filter(x => x.user.id !== userId), incoming: fr.incoming.filter(x => x.user.id !== userId), outgoing: fr.outgoing.filter(x => x.user.id !== userId),
       })),
       FriendPresence: (userId, online) => {
-        if (!online) markDnd(userId, false)
+        if (!online) { markDnd(userId, false); markIdle(userId, false) }
         const mark = <T extends { user: { id: string } }>(f: T): T => (f.user.id === userId ? { ...f, online } : f)
         setFriends(fr => ({ friends: fr.friends.map(mark), incoming: fr.incoming.map(mark), outgoing: fr.outgoing.map(mark) }))
         setDms(ds => ds.map(d => (d.other.id === userId ? { ...d, online } : d)))
@@ -677,8 +689,9 @@ export function useMaplecord() {
         typingTimer.current = window.setTimeout(() => setTyping(null), 4000)
       },
       PresenceStatus: (userId, dnd) => markDnd(userId, dnd),
+      PresenceIdle: (userId, idle) => markIdle(userId, idle),
       MemberPresence: (guildId, userId, online) => {
-        if (!online) markDnd(userId, false)
+        if (!online) { markDnd(userId, false); markIdle(userId, false) }
         // No sound for this: the knock and the door are for people coming into and leaving the voice channel you are in.
         patchGuild(guildId, gs => ({ ...gs, members: gs.members.map(x => (x.userId === userId ? { ...x, online } : x)) }))
       },
@@ -854,6 +867,11 @@ export function useMaplecord() {
       ...list.flatMap(g => g.members.filter(m => m.dnd).map(m => m.userId)),
       ...fr.friends.filter(f => f.dnd).map(f => f.user.id),
       ...dmList.filter(d => d.dnd).map(d => d.other.id),
+    ]))
+    setIdleUsers(new Set([
+      ...list.flatMap(g => g.members.filter(m => m.idle).map(m => m.userId)),
+      ...fr.friends.filter(f => f.idle).map(f => f.user.id),
+      ...dmList.filter(d => d.idle).map(d => d.other.id),
     ]))
     const s = settingsRef.current
     const guild = list.find(g => g.guild.id === s.lastGuildId) ?? list[0]
@@ -1574,18 +1592,41 @@ export function useMaplecord() {
     })
   }, [api, hub])
 
-  const createInvite = useCallback(async (guildId?: string) => {
-    const g = guildId ?? selected.current.guild
-    if (!g) return
-    await run(async () => {
-      const invite = await api.createInvite(g)
-      // A link to click where the server gives them out; the bare code otherwise.
-      const meta = await api.meta(settingsRef.current.serverUrl)
-      const link = meta?.inviteBase ? meta.inviteBase + invite.code : null
-      try { await navigator.clipboard.writeText(link ?? invite.code) } catch { /* no clipboard */ }
-      setError(link ? `Invite link copied: ${link}` : `Invite code ${invite.code} copied to clipboard.`)
-    })
+  // ---- Invites (see Invites.tsx): made with an end or without, listed, and taken back
+  const makeInvite = useCallback(async (guildId: string, expiresInMinutes: number | null, maxUses: number | null): Promise<InviteDto | null> => {
+    let made: InviteDto | null = null
+    await run(async () => { made = await api.createInvite(guildId, expiresInMinutes, maxUses) })
+    return made
   }, [api])
+  const loadInvites = useCallback(async (guildId: string): Promise<InviteDto[] | null> => {
+    try { return await api.invites(guildId) } catch { return null }
+  }, [api])
+  const revokeInvite = useCallback(async (code: string): Promise<boolean> => { let done = false; await run(async () => { await api.revokeInvite(code); done = true }); return done }, [api])
+  /** What an invite code is put after to make a link, where the server gives links out. */
+  const inviteBase = useCallback(async (): Promise<string | null> => (await api.meta(settingsRef.current.serverUrl).catch(() => null))?.inviteBase ?? null, [api])
+
+  // ---- Idle (see idle.ts): the server is told when this app goes unused and when it is used again, and only then
+  const idleWatchRef = useRef<IdleWatch | null>(null)
+  useEffect(() => {
+    const desktop = bridge()
+    const watch = new IdleWatch({
+      now: () => Date.now(),
+      later: (go, ms) => window.setTimeout(go, ms),
+      cancel: timer => window.clearTimeout(timer as number),
+      systemIdleSeconds: desktop ? () => desktop.systemIdleSeconds() : undefined,
+      busy: () => !!voiceRef.current || !!callRef.current,
+      changed: idle => { unusedRef.current = idle; try { void hub.setIdle(idle).catch(() => { /* said again once connected */ }) } catch { /* not connected: said once it is */ } },
+    })
+    // Moving the mouse fires many times a second; once every couple of seconds is plenty to say "in use".
+    let noted = 0
+    const used = () => { const now = Date.now(); if (now - noted < 2000 && !watch.idle) return; noted = now; watch.used() }
+    const kinds = ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart'] as const
+    for (const kind of kinds) window.addEventListener(kind, used, { passive: true })
+    idleWatchRef.current = watch
+    return () => { watch.stop(); idleWatchRef.current = null; for (const kind of kinds) window.removeEventListener(kind, used) }
+  }, [hub])
+  // Joining or leaving a voice channel or a call counts as using the app: the ten minutes start again from there.
+  useEffect(() => { idleWatchRef.current?.used() }, [voice?.channelId, call?.channelId])
 
   // ---- Invite links (see invites.ts) -------------------------------------------
   /** A server someone has followed an invite link to, waiting for their yes. */
@@ -2716,13 +2757,13 @@ export function useMaplecord() {
     soundPacks, reloadSoundPacks, openSoundsFolder,
     startRoll, quickRoll, roll, voteEnd, dismissRoll, coinFlip, invokeCommand,
     activeRps, startRps, rpsPick, rpsThrow, dismissRps,
-    createGuild, joinGuild, joinPublicGuild, tagSymbols, setGuildTag, removeGuildTag, wearTag, tagCard, setGuildListing, deleteMessage, disconnectMember, setVoiceMuted, moveChannel, inviteToServer, openInvite, createInvite, pendingInvite, acceptInvite, dismissInvite: () => setPendingInvite(null), createChannel, leaveGuild, kickMember, banMember, signOut,
+    createGuild, joinGuild, joinPublicGuild, tagSymbols, setGuildTag, removeGuildTag, wearTag, tagCard, setGuildListing, deleteMessage, disconnectMember, setVoiceMuted, moveChannel, inviteToServer, openInvite, pendingInvite, acceptInvite, dismissInvite: () => setPendingInvite(null), createChannel, leaveGuild, kickMember, banMember, signOut,
     sharing, shareQuality: streamEngine.quality, localStream: streamEngine.localStream, shareViewers: streamEngine.viaServer ? { total: viewerCounts[voiceHub.connectionId ?? ''] ?? 0, relayed: 0 } : streamEngine.viewerCounts(), watching: streamEngine.watching(),
     streamOf: (streamer: string) => streamEngine.streamOf(streamer), viewerCounts, streamRules, loadStreamRules,
     startShare, stopShare, watchStream, unwatchStream, setStreamLimit: (streamer: string, kbps: number) => streamEngine.requestLimit(streamer, kbps),
     voice, isMuted, isSpeaking, joinVoice, leaveVoice, toggleMute,
     call, startCall, answerCall, declineCall, renameChannel, deleteChannel, deleteGroup, setChannelMuted,
-    preferences, savePreferences, blocked, setBlocked, dndUsers, deafened, toggleDeafen, ownLook, transferLimits,
+    preferences, savePreferences, blocked, setBlocked, dndUsers, idleUsers, makeInvite, loadInvites, revokeInvite, inviteBase, deafened, toggleDeafen, ownLook, transferLimits,
     farewell, deleteStep, openDeleteAccount: (step: 'explain' | 'confirm' = 'explain') => setDeleteStep(step), closeDeleteAccount: () => setDeleteStep(null), reauthenticateForDelete, deleteAccount,
     p2pText, askDirectText, setP2pSubscribed, setP2pBroadcast, p2pFiles, loadP2pFile, saveP2pFile, p2pNewApps, acceptP2pApp, p2pBotsWaiting, acceptP2pBot, dismissP2pBot,
     allowDirect, setAllowDirect, reauthenticateForDirect, directPrompt, confirmDirect, dismissDirectPrompt: () => setDirectPrompt(null), setChannelDirect,

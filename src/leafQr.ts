@@ -102,6 +102,22 @@ export function leafQr(qr: QrDto, seed: string, style: LeafStyle = 'boxed'): Lea
   throw new Error('That code is too large to draw as a leaf.')
 }
 
+/** One path that draws every dark square of a plain QR code, each one unit across, starting `at` units in from the corner. */
+export function qrPath(qr: QrDto, at = 0): string {
+  let d = ''
+  for (let y = 0; y < qr.size; y++) {
+    for (let x = 0; x < qr.size; x++) {
+      if (qr.modules[y * qr.size + x] !== '1') continue
+      // Runs of dark squares in a row are drawn as one bar.
+      let run = 1
+      while (x + run < qr.size && qr.modules[y * qr.size + x + run] === '1') run++
+      d += `M${x + at} ${y + at}h${run}v1h-${run}z`
+      x += run - 1
+    }
+  }
+  return d
+}
+
 /** One path that draws every square of the given kinds, each one unit across. Runs along a row are one bar. */
 export function leafPath(leaf: LeafQr, kinds: string): string {
   let d = ''

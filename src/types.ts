@@ -96,7 +96,7 @@ export interface AccountDeletionDto { ownedServers: string[]; bots: number }
 /** Whether this account allows P2P connections. Kept on the server; off unless the person turns it on. */
 export interface PrivacyDto { allowDirect: boolean }
 /** How a person chooses to appear. Invisible looks exactly like being offline to everyone else. */
-export const UserStatus = { Online: 0, DoNotDisturb: 1, Invisible: 2 } as const
+export const UserStatus = { Online: 0, DoNotDisturb: 1, Invisible: 2, Idle: 3 } as const
 export type UserStatus = (typeof UserStatus)[keyof typeof UserStatus]
 /** A person's own choices, kept on their account. friendRequestsSharedOnly: only from people they share a server with. */
 export interface PreferencesDto { status: UserStatus; ignoreFriendRequests: boolean; friendRequestsSharedOnly: boolean }
@@ -106,6 +106,8 @@ export interface MemberDto {
   displayName?: string | null; nameFont?: string | null; nameColor?: string | null; nameColor2?: string | null; decoration?: string | null; tag?: TagDto | null
   /** Only on whole-server listings; changes arrive as PresenceStatus. */
   dnd?: boolean
+  /** Online and idle. Only on whole-server listings; changes arrive as PresenceIdle. */
+  idle?: boolean
   /** Muted in this server's voice channels by someone who may mute members. */
   voiceMuted?: boolean
 }
@@ -177,7 +179,7 @@ export interface MessageDto {
   p2pVote?: { id: string; o: number[] }
   p2pPollClose?: string
 }
-export interface InviteDto { code: string; guildId: string; createdAt: string; expiresAt: string | null; maxUses: number | null; uses: number }
+export interface InviteDto { code: string; guildId: string; createdAt: string; expiresAt: string | null; maxUses: number | null; uses: number; /** Who made it; only when a server's invites are listed. */ createdBy?: string | null }
 export interface IceServerDto { urls: string[]; username: string | null; credential: string | null }
 /** A message from whoever runs the Maplecord server, to everyone online or just to you. */
 export interface SystemMessageDto { id: string; message: string; at: string }
@@ -228,7 +230,7 @@ export interface InteractionDto { id: string; token: string; applicationId: stri
 
 export const FriendStatus = { Pending: 0, Accepted: 1 } as const
 export type FriendStatus = (typeof FriendStatus)[keyof typeof FriendStatus]
-export interface FriendDto { user: UserDto; online: boolean; status: FriendStatus; incoming: boolean; dnd?: boolean }
+export interface FriendDto { user: UserDto; online: boolean; status: FriendStatus; incoming: boolean; dnd?: boolean; idle?: boolean }
 export interface FriendsDto { friends: FriendDto[]; incoming: FriendDto[]; outgoing: FriendDto[] }
 /** A QR code as its squares: `size` rows of `size`, '1' for a dark one, with no margin around it. */
 export interface QrDto { size: number; modules: string }
@@ -236,4 +238,4 @@ export interface QrDto { size: number; modules: string }
 export interface FriendLinkDto { code: string; url: string; qr: QrDto }
 /** Whose friend link a code is, and how things stand with them. */
 export interface FriendLinkOwnerDto { user: UserDto; state: 'self' | 'friends' | 'asked' | 'open' }
-export interface DmChannelDto { channelId: string; other: UserDto; online: boolean; createdAt: string; dnd?: boolean }
+export interface DmChannelDto { channelId: string; other: UserDto; online: boolean; createdAt: string; dnd?: boolean; idle?: boolean }

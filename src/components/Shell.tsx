@@ -42,6 +42,7 @@ import { STATUSES, UserSettingsDialog } from './UserSettings'
 import { ArrowLeftRight, AudioLines, ChartBarDecreasing, ChevronDown, ChevronRight, HeadphoneOff, Headphones, Images, LoaderCircle, Menu, Mic, MicOff, MonitorUp, Paperclip, Phone, PhoneOff, Pin, Plus, Search, Settings as SettingsIcon, Signal, Users, Video } from 'lucide-react'
 import { AddServerDialog, CreateServerDialog, DiscoverDialog, JoinServerDialog } from './Servers'
 import { ChannelAccessDialog } from './ChannelAccess'
+import { InviteDialog } from './Invites'
 import { DeleteAccountDialog } from './DeleteAccount'
 import { VoiceMessageBar } from './VoiceMessage'
 import { DEFAULT_PUSH_KEY } from '../pushToTalk'
@@ -57,7 +58,7 @@ type DialogState =
   | { kind: 'createGuild' } | { kind: 'joinGuild' } | { kind: 'addGuild' } | { kind: 'discover' } | { kind: 'channelAccess'; channelId: string } | { kind: 'deleteGroup'; channelId: string; name: string } | { kind: 'createChannel'; category?: boolean } | { kind: 'startRoll'; rollKind: RollKind }
   | { kind: 'leaveGuild' } | { kind: 'kick'; member: MemberDto } | { kind: 'ban'; member: MemberDto }
   | { kind: 'audio' } | { kind: 'allowDirect' } | { kind: 'channelKind'; channelId: string; name: string; direct: boolean } | { kind: 'p2pCall'; userId: string; name: string } | { kind: 'share' } | { kind: 'settings' } | { kind: 'renameChannel'; channelId: string; name: string } | { kind: 'deleteChannel'; channelId: string; name: string } | { kind: 'renameFolder'; folderId: string } | { kind: 'overlay' } | { kind: 'server' } | { kind: 'plugins' } | { kind: 'profile' }
-  | { kind: 'nickname'; guildId: string; userId: string } | null
+  | { kind: 'nickname'; guildId: string; userId: string } | { kind: 'invite'; guildId: string } | null
 
 export default function Shell({ store, onSignedOut }: { store: Store; onSignedOut: () => void }) {
   const [dialog, setDialog] = useState<DialogState>(null)
@@ -138,7 +139,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   }
   const statusEntries = (): MenuEntry[] => [
     { kind: 'label', text: me ? shownName(me) : '' },
-    ...STATUSES.map(st => ({ kind: 'item', label: st.label + (st.hint ? ' · ' + st.hint.toLowerCase() : ''), icon: st.value === UserStatus.Online ? '🟢' : st.value === UserStatus.DoNotDisturb ? '⛔' : '⚪', checked: store.preferences.status === st.value, onClick: () => { void store.savePreferences({ status: st.value }) } } as MenuEntry)),
+    ...STATUSES.map(st => ({ kind: 'item', label: st.label + (st.hint ? ' · ' + st.hint.toLowerCase() : ''), icon: st.value === UserStatus.Online ? '🟢' : st.value === UserStatus.Idle ? '🌙' : st.value === UserStatus.DoNotDisturb ? '⛔' : '⚪', checked: store.preferences.status === st.value, onClick: () => { void store.savePreferences({ status: st.value }) } } as MenuEntry)),
     { kind: 'sep' },
     { kind: 'item', label: 'Edit profile', icon: '✎', onClick: () => setDialog({ kind: 'profile' }) },
     { kind: 'item', label: 'Copy user ID', icon: '🆔', onClick: () => { if (me) void navigator.clipboard.writeText(me.id) } },
@@ -286,7 +287,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       ...(folderOf(guildId)
         ? [{ kind: 'item', label: `Take out of "${folderOf(guildId)!.name}"`, icon: '📁', onClick: () => moveToFolder(guildId, null) } as MenuEntry]
         : folders.map(f => ({ kind: 'item', label: `Put in "${f.name}"`, icon: '📁', onClick: () => moveToFolder(guildId, f.id) } as MenuEntry))),
-      ...(allowed(Permission.CreateInvites) ? [{ kind: 'item', label: 'Invite people', icon: '✉', onClick: () => { void store.createInvite(guildId) } } as MenuEntry] : []),
+      ...(allowed(Permission.CreateInvites) ? [{ kind: 'item', label: 'Invite people', icon: '✉', onClick: () => setDialog({ kind: 'invite', guildId }) } as MenuEntry] : []),
       ...(me ? [{ kind: 'item', label: 'Change nickname', onClick: () => { store.selectGuild(guildId); setDialog({ kind: 'nickname', guildId, userId: me.id }) } } as MenuEntry] : []),
       { kind: 'sep' },
       { kind: 'item', label: 'Mute server', checked: !!prefs.muted, onClick: () => store.setGuildPrefs(guildId, { muted: !prefs.muted }) },
@@ -490,7 +491,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
               {store.dms.map(d => (
                 <div key={d.channelId} className={'dm' + (d.channelId === store.selectedChannel?.id ? ' active' : '')} onClick={() => store.selectChannel(d.channelId)} onContextMenu={e => openUserMenu(e, d.other.id, shownName(d.other))}>
                   <Avatar who={d.other} name={shownName(d.other)} serverUrl={serverUrl} size={24} />
-                  <span className={'presence' + (d.online ? ' online' : '')} />
+                  <span className={'presence' + (!d.online ? '' : store.dndUsers.has(d.other.id) ? ' online dnd' : store.idleUsers.has(d.other.id) ? ' online idle' : ' online')} />
                   <span className="grow nameline" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: (store.dmUnread[d.channelId] ?? 0) > 0 ? 600 : undefined }}><UserName who={store.appearanceOf(d.other.id)} label={shownName(d.other)} /></span>
                   {(store.dmUnread[d.channelId] ?? 0) > 0 && <span className="badge">{store.dmUnread[d.channelId]}</span>}
                 </div>
@@ -514,7 +515,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
                 <>
                   <div className="menubackdrop" onClick={() => setServerMenu(false)} onContextMenu={e => { e.preventDefault(); setServerMenu(false) }} />
                   <div className="menu servermenu" role="menu">
-                    {can(Permission.CreateInvites) && <button role="menuitem" className="item accent" onClick={pick(() => { void store.createInvite() })}><span>Invite people</span><span className="ico">✉</span></button>}
+                    {can(Permission.CreateInvites) && <button role="menuitem" className="item accent" onClick={pick(() => { if (g) setDialog({ kind: 'invite', guildId: g.guild.id }) })}><span>Invite people</span><span className="ico">✉</span></button>}
                     {settings && <button role="menuitem" className="item" onClick={pick(() => setDialog({ kind: 'server' }))}><span>Server settings</span><span className="ico">⚙</span></button>}
                     {can(Permission.ManageChannels) && <button role="menuitem" className="item" onClick={pick(() => setDialog({ kind: 'createChannel' }))}><span>Create channel</span><span className="ico">＋</span></button>}
                     {can(Permission.ManageChannels) && <button role="menuitem" className="item" onClick={pick(() => setDialog({ kind: 'createChannel', category: true }))}><span>Create category</span><span className="ico">📁</span></button>}
@@ -668,7 +669,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
             <div className="header">Friends <span className="muted">{store.friends.friends.filter(f => f.online).length} online</span></div>
             <div className="list">
               {[...store.friends.friends].sort((a, b) => Number(b.online) - Number(a.online) || a.user.username.localeCompare(b.user.username)).map(f => (
-                <div key={f.user.id} className={'member' + (f.online ? ' online' : ' offline') + (f.online && store.dndUsers.has(f.user.id) ? ' dnd' : '')} title="Click to message · right-click for options" onClick={() => store.openDm(f.user.id)} onContextMenu={e => openUserMenu(e, f.user.id, shownName(f.user))}>
+                <div key={f.user.id} className={'member' + (f.online ? ' online' : ' offline') + (f.online && store.dndUsers.has(f.user.id) ? ' dnd' : f.online && store.idleUsers.has(f.user.id) ? ' idle' : '')} title="Click to message · right-click for options" onClick={() => store.openDm(f.user.id)} onContextMenu={e => openUserMenu(e, f.user.id, shownName(f.user))}>
                   <div className="row" style={{ gap: 0 }}><Avatar who={f.user} name={shownName(f.user)} serverUrl={serverUrl} size={28} /><div className="presence" /></div>
                   <div className="grow nameline" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><UserName who={store.appearanceOf(f.user.id)} label={shownName(f.user)} /></div>
                 </div>
@@ -680,7 +681,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
             <div className="header" title={inChannel ? `The people who can see ${inChannel.name}` : undefined}>Members <span className="muted">{listed.filter(m => m.online).length} online</span></div>
             <div className="list">
               {g && [...listed].sort((a, b) => Number(b.online) - Number(a.online) || a.username.localeCompare(b.username)).map(m => (
-                <div key={m.userId} className={'member' + (m.online ? ' online' : ' offline') + (m.online && store.dndUsers.has(m.userId) ? ' dnd' : '') + (ignored(m.userId) ? ' ignoredmember' : '')} title={'@' + m.username + ' — click for profile, right-click for options'}
+                <div key={m.userId} className={'member' + (m.online ? ' online' : ' offline') + (m.online && store.dndUsers.has(m.userId) ? ' dnd' : m.online && store.idleUsers.has(m.userId) ? ' idle' : '') + (ignored(m.userId) ? ' ignoredmember' : '')} title={'@' + m.username + ' — click for profile, right-click for options'}
                   onClick={e => openCard(e, m.userId, memberName(m))} onContextMenu={e => openUserMenu(e, m.userId, memberName(m))}>
                   <div className="row" style={{ gap: 0 }}><Avatar who={m} name={memberName(m)} serverUrl={serverUrl} size={28} /><div className="presence" /></div>
                   <div className="grow" style={{ overflow: 'hidden' }}>
@@ -727,6 +728,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           onConfirm={store.leaveGuild} onClose={() => setDialog(null)} />
       )}
       {dialog?.kind === 'profile' && <ProfileEditor store={store} onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'invite' && <InviteDialog store={store} guildId={dialog.guildId} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'nickname' && (() => {
         const where = store.guilds.find(x => x.guild.id === dialog.guildId)
         const target = where?.members.find(m => m.userId === dialog.userId)
@@ -1115,7 +1117,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
             <button className="subtle" title={p2pChat ? 'Search what this device has kept of this channel' : 'Search this channel'} aria-label="Search this channel" onClick={() => setPanel('search')}><Search size={16} /></button>
           </span>
         )}
-        {channel?.type === ChannelType.DirectMessage && <span style={{ width: 8, height: 8, borderRadius: 4, background: !store.selectedDm?.online ? '#555566' : store.dndUsers.has(store.selectedDm.other.id) ? 'var(--red)' : 'var(--green)', display: 'inline-block' }} title={!store.selectedDm?.online ? 'Offline' : store.dndUsers.has(store.selectedDm.other.id) ? 'Do not disturb' : 'Online'} />}
+        {channel?.type === ChannelType.DirectMessage && <span style={{ width: 8, height: 8, borderRadius: 4, background: !store.selectedDm?.online ? '#555566' : store.dndUsers.has(store.selectedDm.other.id) ? 'var(--red)' : store.idleUsers.has(store.selectedDm.other.id) ? 'var(--idle)' : 'var(--green)', display: 'inline-block' }} title={!store.selectedDm?.online ? 'Offline' : store.dndUsers.has(store.selectedDm.other.id) ? 'Do not disturb' : store.idleUsers.has(store.selectedDm.other.id) ? 'Idle' : 'Online'} />}
         {channel?.type === ChannelType.DirectMessage && store.selectedDm && !store.call && store.friends.friends.some(f => f.user.id === store.selectedDm?.other.id) && (
           <span className="callbuttons">
             <button className="subtle" title="Call" onClick={() => onCall(store.selectedDm!.other.id, channel.name, false)}>📞 Call</button>

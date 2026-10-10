@@ -63,6 +63,7 @@ export interface ChatEvents {
   FriendRemoved: (userId: string) => void
   FriendPresence: (userId: string, online: boolean) => void
   PresenceStatus: (userId: string, dnd: boolean) => void
+  PresenceIdle: (userId: string, idle: boolean) => void
   DmOpened: (dm: DmChannelDto) => void
   UserUpdated: (user: UserDto) => void
 }
@@ -204,6 +205,8 @@ export class ChatHub {
   leaveDirectText(channelId: string) { return this.c.invoke('LeaveDirectText', channelId) }
   directTextSignal(channelId: string, target: string, kind: string, payload: string) { return this.c.invoke('DirectTextSignal', channelId, target, kind, payload) }
   setTyping(channelId: string) { return this.c.send('SetTyping', channelId) }
+  /** This app has gone unused for a while, or is in use again (see idle.ts). */
+  setIdle(idle: boolean) { return this.c.send('SetIdle', idle) }
   startRoll(channelId: string, kind: RollKind, item: RollItemDto | null, min = 1, max = 100) {
     return this.c.invoke<RollSessionDto>('StartRoll', channelId, kind, item, min, max)
   }
