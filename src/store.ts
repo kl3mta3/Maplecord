@@ -1467,6 +1467,8 @@ export function useMaplecord() {
   }, [hub])
   const dismissRps = useCallback(() => { window.clearTimeout(rpsClearTimer.current); setActiveRps(null) }, [])
 
+  /** Presses a button under a bot's message. What the bot answers arrives as a message. */
+  const pressButton = useCallback(async (messageId: string, buttonId: string) => { await run(() => hub.pressButton(messageId, buttonId)) }, [hub])
   const invokeCommand = useCallback(async (command: CommandDto, args: Record<string, string>) => {
     const channelId = selected.current.channel
     if (!channelId) return
@@ -2235,6 +2237,19 @@ export function useMaplecord() {
     return true
   }, [api, updateSettings])
 
+  /**
+   * The ways this account can sign in again here: of what the server offers, the ones the account has. Signing in
+   * with any other would be a different account. All of them if that cannot be told.
+   */
+  const reauthProviders = useCallback(async (): Promise<string[]> => {
+    const offered = await api.providers(settingsRef.current.serverUrl)
+    try {
+      const mine = new Set((await api.signInMethods()).methods.map(m => m.service))
+      const own = offered.filter(p => mine.has(p))
+      return own.length > 0 ? own : offered
+    } catch { return offered }
+  }, [api])
+
   /** Sign in again and, if it comes back as the same account, allow P2P. */
   const reauthenticateForDirect = useCallback(async (provider: string, devUsername = '') => {
     if (await signInAgain(provider, devUsername, PENDING_DIRECT)) await setAllowDirect(true)
@@ -2755,7 +2770,7 @@ export function useMaplecord() {
     plugins, pendingDrops, resolveItem, itemIcon, searchItems, acceptDrop, dismissDrop, simulateDrop,
     setPluginSettings, reloadPlugins, installPlugin, openPluginsFolder, pickPluginLog,
     soundPacks, reloadSoundPacks, openSoundsFolder,
-    startRoll, quickRoll, roll, voteEnd, dismissRoll, coinFlip, invokeCommand,
+    startRoll, quickRoll, roll, voteEnd, dismissRoll, coinFlip, invokeCommand, pressButton,
     activeRps, startRps, rpsPick, rpsThrow, dismissRps,
     createGuild, joinGuild, joinPublicGuild, tagSymbols, setGuildTag, removeGuildTag, wearTag, tagCard, setGuildListing, deleteMessage, disconnectMember, setVoiceMuted, moveChannel, inviteToServer, openInvite, pendingInvite, acceptInvite, dismissInvite: () => setPendingInvite(null), createChannel, leaveGuild, kickMember, banMember, signOut,
     sharing, shareQuality: streamEngine.quality, localStream: streamEngine.localStream, shareViewers: streamEngine.viaServer ? { total: viewerCounts[voiceHub.connectionId ?? ''] ?? 0, relayed: 0 } : streamEngine.viewerCounts(), watching: streamEngine.watching(),
@@ -2766,7 +2781,7 @@ export function useMaplecord() {
     preferences, savePreferences, blocked, setBlocked, dndUsers, idleUsers, makeInvite, loadInvites, revokeInvite, inviteBase, deafened, toggleDeafen, ownLook, transferLimits,
     farewell, deleteStep, openDeleteAccount: (step: 'explain' | 'confirm' = 'explain') => setDeleteStep(step), closeDeleteAccount: () => setDeleteStep(null), reauthenticateForDelete, deleteAccount,
     p2pText, askDirectText, setP2pSubscribed, setP2pBroadcast, p2pFiles, loadP2pFile, saveP2pFile, p2pNewApps, acceptP2pApp, p2pBotsWaiting, acceptP2pBot, dismissP2pBot,
-    allowDirect, setAllowDirect, reauthenticateForDirect, directPrompt, confirmDirect, dismissDirectPrompt: () => setDirectPrompt(null), setChannelDirect,
+    allowDirect, setAllowDirect, reauthenticateForDirect, reauthProviders, directPrompt, confirmDirect, dismissDirectPrompt: () => setDirectPrompt(null), setChannelDirect,
     setAudioDevices, me: () => settingsRef.current.user,
     MessageKind,
   }

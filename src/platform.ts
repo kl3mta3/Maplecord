@@ -143,7 +143,7 @@ export const appleTouch = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || 
 
 /**
  * The public Maplecord server every install connects to. Set VITE_SERVER_URL at build time for release.
- * Users never see this unless they open "Advanced" on the login screen or the default server is unreachable.
+ * The sign-in screen offers no other: an app belongs to the server it was built for.
  */
 export const DEFAULT_SERVER_URL: string = (import.meta.env.VITE_SERVER_URL as string | undefined)
   // A Maplecord server that hosts this page says who it is as it hands the page out.

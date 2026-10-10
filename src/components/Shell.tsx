@@ -1170,7 +1170,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
         {(thread ? thread.canLoadOlder : store.canLoadOlder) && <div style={{ textAlign: 'center' }}><button className="subtle" onClick={thread ? store.loadOlderThread : store.loadOlder}>Load older messages</button></div>}
         {shown.map(m => isIgnored(m.authorId) && !m.webhookId && !revealed.has(m.id)
           ? <div key={m.id} className="message ignored"><span /><span className="muted">Message from {m.authorName}, who you ignore · <button className="subtle" onClick={() => setRevealed(new Set([...revealed, m.id]))}>show</button></span></div>
-          : <Message key={m.id} m={m} extras={extrasFor(m)} color={colorOf(m.authorId)} icon={store.itemIcon(m.roll?.item)} serverUrl={store.settings.serverUrl} onInvite={link => void store.openInvite(link)}
+          : <Message key={m.id} m={m} extras={extrasFor(m)} color={colorOf(m.authorId)} icon={store.itemIcon(m.roll?.item)} serverUrl={store.settings.serverUrl} onInvite={link => void store.openInvite(link)} onPress={id => void store.pressButton(m.id, id)}
               fileOffer={m.fileOffer ? <FileOfferView store={store} offer={m.fileOffer} mine={m.authorId === (me?.id ?? '')} /> : undefined}
               p2pFiles={m.p2pFiles?.map(f => <P2PFileChip key={f.hash} store={store} channelId={m.channelId} authorId={m.authorId} file={f} />)}
               author={m.webhookId ? null : store.appearanceOf(m.authorId)} name={m.webhookId ? m.authorName : nameIn(m.authorId, m.authorName)}
@@ -1397,8 +1397,10 @@ function MessageEditor({ text, title, onSave, onCancel }: { text: string; title:
   )
 }
 
-function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu, onUserCard, onMenu, onInvite, fileOffer, p2pFiles, extras }: {
+function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu, onUserCard, onMenu, onInvite, onPress, fileOffer, p2pFiles, extras }: {
   extras?: MessageExtras
+  /** Pressed one of the buttons under a bot's message. */
+  onPress?: (buttonId: string) => void
   /** The files on a message from a P2P channel, drawn below its text. */
   p2pFiles?: React.ReactNode
   /** Pressed an invite link in the text. */
@@ -1463,6 +1465,13 @@ function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu,
             {e.footer && <div className="line">{e.footer}</div>}
           </div>
         ))}
+        {m.buttons && m.buttons.length > 0 && (
+          <div className="msgbuttons">
+            {m.buttons.map(b => (
+              <button key={b.id} className={b.style === 1 ? 'accent' : b.style === 2 ? 'danger' : undefined} disabled={!onPress} onClick={() => onPress?.(b.id)}>{b.label}</button>
+            ))}
+          </div>
+        )}
         {extras?.poll}
         {extras?.reactions}
         {extras?.threadLink}
@@ -1476,7 +1485,7 @@ function AllowDirectStep({ store, onClose }: { store: Store; onClose: () => void
   const [providers, setProviders] = useState<string[] | null>(null)
   useEffect(() => {
     let alive = true
-    store.api.providers(store.settings.serverUrl).then(list => { if (alive) setProviders(list) }).catch(() => { if (alive) setProviders([]) })
+    store.reauthProviders().then(list => { if (alive) setProviders(list) }).catch(() => { if (alive) setProviders([]) })
     return () => { alive = false }
   }, [store.api, store.settings.serverUrl])
   return <AllowDirectDialog providers={providers} username={store.settings.user?.username ?? ''} onSignIn={store.reauthenticateForDirect} onClose={onClose} />

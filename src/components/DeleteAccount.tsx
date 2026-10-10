@@ -21,10 +21,10 @@ export function DeleteAccountDialog({ store }: { store: Store }) {
 
   useEffect(() => {
     let alive = true
-    store.api.providers(store.settings.serverUrl).then(list => { if (alive) setProviders(list) }).catch(() => { if (alive) setProviders([]) })
+    store.reauthProviders().then(list => { if (alive) setProviders(list) }).catch(() => { if (alive) setProviders([]) })
     store.api.deletionPreview().then(preview => { if (alive) setLosing(preview) }).catch(() => { /* shown without the list */ })
     return () => { alive = false }
-  }, [store.api, store.settings.serverUrl])
+  }, [store.api, store.reauthProviders])
 
   if (!step || !me) return null
   const close = () => store.closeDeleteAccount()

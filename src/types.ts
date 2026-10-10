@@ -149,6 +149,8 @@ export interface RollResultDto {
 export interface CallDto { id: string; channelId: string; callerId: string; callerName: string; calleeId: string; calleeName: string; direct: boolean; ringing: boolean }
 /** The note a call leaves in the conversation. The message's author is who called. */
 export interface CallLogDto { outcome: 'ended' | 'missed' | 'declined'; seconds: number; direct: boolean }
+/** A button under a bot's message: the bot's own name for it, what it says, and 0 plain, 1 accent or 2 red. */
+export interface ButtonDto { id: string; label: string; style?: number }
 export interface MessageDto {
   id: string; channelId: string; authorId: string; authorName: string; kind: MessageKind; content: string
   createdAt: string; editedAt: string | null; attachments: AttachmentDto[]; roll: RollResultDto | null
@@ -165,6 +167,8 @@ export interface MessageDto {
   pinnedAt?: string | null
   reactions?: ReactionDto[] | null
   poll?: PollDto | null
+  /** Buttons under a bot's message. Pressing one tells the bot who pressed which. */
+  buttons?: ButtonDto[] | null
   /** Files on a message from a P2P channel. They are not on the server: their contents come from other people's apps. */
   p2pFiles?: import('./p2pText').P2PFile[]
   /** A P2P message that is only someone's reaction to another message (see p2pPosts.ts). It is counted, never shown. */

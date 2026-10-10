@@ -237,6 +237,8 @@ export class ChatHub {
       await this.c.invoke('FileSignal', offerId, target, kind, await seal(theirs.key, payload, `file\n${kind}\n${mine.publicKey}`))
     })
   }
+  /** Presses a button under a bot's message. The bot answers as it would a slash command. */
+  pressButton(messageId: string, buttonId: string) { return this.c.invoke<InteractionDto>('PressButton', messageId, buttonId) }
   invokeCommand(channelId: string, commandId: string, args: Record<string, string>) {
     return this.c.invoke<InteractionDto>('InvokeCommand', channelId, commandId, args)
   }
