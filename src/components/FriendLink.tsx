@@ -96,8 +96,9 @@ export function friendsCsv(friends: FriendDto[]): string {
 export function FriendLinkPanel({ store }: { store: Store }) {
   const [link, setLink] = useState<FriendLinkDto | null>(null)
   const [showQr, setShowQr] = useState(false)
-  // A leaf is the one shown first; the plain square is there for anything that has trouble reading a leaf.
-  const [look, setLook] = useState<QrLook>('thin')
+  // The one picked last on this device; until one is picked, the first. The plain square is there for anything that has trouble reading a leaf.
+  const look: QrLook = QR_LOOKS.find(l => l.key === store.settings.qrLook)?.key ?? QR_LOOKS[0].key
+  const setLook = (qrLook: QrLook) => store.updateSettings({ qrLook })
   const [copied, setCopied] = useState(false)
   const [asking, setAsking] = useState(false)
   const svg = useRef<SVGSVGElement>(null)

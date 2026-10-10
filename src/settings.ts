@@ -58,6 +58,8 @@ export interface Settings {
   voiceGateLevel?: number
   /** The app's colours on this device (see theme.ts). */
   theme?: { preset: string; accent: string | null }
+  /** How the QR code of the friend link was last drawn on this device (see FriendLink.tsx). */
+  qrLook?: string
   /** Per user id: how you hear them in voice and whether you see what they write. Yours alone; they are never told. */
   users: Record<string, UserPrefs>
   /** Per server id. */

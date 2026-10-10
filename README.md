@@ -15,7 +15,8 @@ one.
 - Private channels: only the roles and people you let in can see that they exist
 - The member list shows the people who can see the channel you are in
 - Friends and direct messages
-- Your own friend link, and a QR code of it, to hand out anywhere: whoever opens it can ask to be your friend
+- Your own friend link, and a QR code of it in the shape of a maple leaf (or a plain square), to hand out anywhere:
+  whoever opens it can ask to be your friend
 - Save your friends list as a file
 - Connections: link an account on another service (where the server offers it) to show its name on your profile
 - Reply to a message, react to it, edit what you sent, and pin the ones worth keeping
@@ -60,7 +61,8 @@ one.
 - A desktop app, and the same thing in a browser. On a phone it can be added to the home screen.
 - Colour themes
 - Sign in with Google or GitHub, and with Microsoft or Twitch where the server offers them. There is no password.
-  In Settings you can add another way to sign in, and change the address Maplecord writes to.
+- Add a second way to sign in to your account (Steam included, where the server offers it), so you are not left
+  with one. You can also change the address Maplecord writes to.
 
 ### Quality of life, for everyone
 
