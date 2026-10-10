@@ -177,18 +177,21 @@ on('overlay-resize', (_event, size: { width: number; height: number }) => {
  * server's login URL, and resolve with the one-time code the server redirects back with.
  * The renderer then exchanges the code for a JWT over HTTPS; no provider secret is ever in the app.
  */
-handle('oauth-login', (_event, serverUrl: string, provider: string) =>
-  new Promise<string>((resolve, reject) => {
+/** How a sign-in in the browser ended: a code to exchange, a ticket to wait with while an email is confirmed, or why it did not go through. */
+type SignInResult = { code: string } | { pending: string; email: string } | { error: string }
+const signInInBrowser = (serverUrl: string, provider: string) =>
+  new Promise<SignInResult>((resolve, reject) => {
     const server = http.createServer((req, res) => {
       const url = new URL(req.url ?? '/', 'http://127.0.0.1')
       if (url.pathname !== '/callback') { res.statusCode = 404; res.end(); return }
       const code = url.searchParams.get('code')
+      const pending = url.searchParams.get('pending')
       const error = url.searchParams.get('error')
       res.setHeader('Content-Type', 'text/html; charset=utf-8')
       res.end(`<html><body style="font-family:Segoe UI,sans-serif;background:#14141c;color:#e8e8f0;text-align:center;padding-top:80px">
-        <h2>${code ? 'Signed in to Maplecord' : 'Sign-in failed'}</h2><p>You can close this tab and return to the app.</p></body></html>`)
+        <h2>${code ? 'Signed in to Maplecord' : pending ? 'One more step: check your email' : 'Sign-in did not go through'}</h2><p>You can close this tab and return to the app.</p></body></html>`)
       server.close()
-      if (code) resolve(code); else reject(new Error(error ?? 'login_failed'))
+      resolve(code ? { code } : pending ? { pending, email: url.searchParams.get('email') ?? '' } : { error: error ?? 'login_failed' })
       win?.focus()
     })
     server.on('error', reject)
@@ -198,8 +201,14 @@ handle('oauth-login', (_event, serverUrl: string, provider: string) =>
       shell.openExternal(`${serverUrl.replace(/\/$/, '')}/auth/login/${provider}?redirect_uri=${encodeURIComponent(redirect)}`)
     })
     setTimeout(() => { server.close(); reject(new Error('Sign-in timed out.')) }, 5 * 60 * 1000)
-  }),
-)
+  })
+handle('oauth-sign-in', (_event, serverUrl: string, provider: string) => signInInBrowser(serverUrl, provider))
+// The older form, for proving again who is here (before P2P is allowed, or an account deleted): a code or nothing.
+handle('oauth-login', async (_event, serverUrl: string, provider: string) => {
+  const result = await signInInBrowser(serverUrl, provider)
+  if ('code' in result) return result.code
+  throw new Error('error' in result ? result.error : 'login_failed')
+})
 
 // ---- Game plugins -------------------------------------------------------------
 // Plugins are folders of data under <userData>/plugins. The host reads catalogs and tails game logs; the UI only

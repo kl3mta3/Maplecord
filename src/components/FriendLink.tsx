@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Store } from '../store'
 import type { FriendDto, FriendLinkDto, QrDto } from '../types'
-import { leafPath, leafQr, LEAF_CODE, LEAF_DOT, LEAF_EDGE, LEAF_PAPER } from '../leafQr'
+import { leafPath, leafQr, LEAF_CODE, LEAF_DOT, LEAF_EDGE, LEAF_PAPER, type LeafStyle } from '../leafQr'
 import { ConfirmDialog } from './Dialogs'
 
 /** The empty margin a QR code needs around it to be read, in squares. */
@@ -37,9 +37,11 @@ export function QrCode({ qr, size = 200, innerRef }: { qr: QrDto; size?: number;
 /**
  * The same QR code in the shape of the app's maple leaf (see leafQr.ts): the real code in the middle, and the rest of
  * the leaf filled with dots in the logo's colours. Nothing is drawn outside the leaf, so it sits on any background.
+ * `style`: how the code is set into the leaf. Boxed, it is black with a margin; thin or blended, it is in the leaf's
+ * colours with one empty square round it or none, so that it reads as one leaf.
  */
-export function LeafQrCode({ qr, seed, size = 300, innerRef }: { qr: QrDto; seed: string; size?: number; innerRef?: React.Ref<SVGSVGElement> }) {
-  const leaf = useMemo(() => leafQr(qr, seed), [qr, seed])
+export function LeafQrCode({ qr, seed, style = 'boxed', size = 300, innerRef }: { qr: QrDto; seed: string; style?: LeafStyle; size?: number; innerRef?: React.Ref<SVGSVGElement> }) {
+  const leaf = useMemo(() => leafQr(qr, seed, style), [qr, seed, style])
   const paths = useMemo(() => ({
     paper: leafPath(leaf, LEAF_PAPER + LEAF_DOT + LEAF_CODE + LEAF_EDGE),
     dots: leafPath(leaf, LEAF_DOT + LEAF_EDGE),
@@ -54,10 +56,19 @@ export function LeafQrCode({ qr, seed, size = 300, innerRef }: { qr: QrDto; seed
       </defs>
       <path d={paths.paper} fill="#ffffff" />
       <path d={paths.dots} fill="url(#leafqr-ink)" />
-      <path d={paths.code} fill="#14141c" />
+      <path d={paths.code} fill={style === 'boxed' ? '#14141c' : 'url(#leafqr-ink)'} />
     </svg>
   )
 }
+
+/** The ways the QR code of a friend link can be drawn, the one shown first at the top. All of them are the same link. */
+const QR_LOOKS = [
+  { key: 'thin', name: 'Leaf, thin border' },
+  { key: 'blended', name: 'Leaf, no border' },
+  { key: 'boxed', name: 'Leaf with a square' },
+  { key: 'square', name: 'Plain square' },
+] as const
+type QrLook = typeof QR_LOOKS[number]['key']
 
 /** Saves something made in the app as a file, the way a download is saved. */
 export function saveAs(blob: Blob, name: string) {
@@ -85,8 +96,8 @@ export function friendsCsv(friends: FriendDto[]): string {
 export function FriendLinkPanel({ store }: { store: Store }) {
   const [link, setLink] = useState<FriendLinkDto | null>(null)
   const [showQr, setShowQr] = useState(false)
-  // The leaf is the one shown first; the plain square is there for anything that has trouble reading the leaf.
-  const [plain, setPlain] = useState(false)
+  // A leaf is the one shown first; the plain square is there for anything that has trouble reading a leaf.
+  const [look, setLook] = useState<QrLook>('thin')
   const [copied, setCopied] = useState(false)
   const [asking, setAsking] = useState(false)
   const svg = useRef<SVGSVGElement>(null)
@@ -109,7 +120,7 @@ export function FriendLinkPanel({ store }: { store: Store }) {
       if (!ctx) return
       ctx.imageSmoothingEnabled = false
       ctx.drawImage(img, 0, 0, side, side)
-      canvas.toBlob(blob => { if (blob) saveAs(blob, plain ? 'maplecord-friend-link.png' : 'maplecord-friend-link-leaf.png') }, 'image/png')
+      canvas.toBlob(blob => { if (blob) saveAs(blob, look === 'square' ? 'maplecord-friend-link.png' : 'maplecord-friend-link-leaf.png') }, 'image/png')
     }
     img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(source)
   }
@@ -125,10 +136,12 @@ export function FriendLinkPanel({ store }: { store: Store }) {
       </div>
       {showQr && (
         <div className="qr">
-          {plain ? <QrCode qr={link.qr} size={300} innerRef={svg} /> : <LeafQrCode qr={link.qr} seed={link.code} innerRef={svg} />}
+          {look === 'square' ? <QrCode qr={link.qr} size={300} innerRef={svg} /> : <LeafQrCode qr={link.qr} seed={link.code} style={look} innerRef={svg} />}
           <div className="actions">
+            <select value={look} onChange={e => setLook(e.target.value as QrLook)} aria-label="How the QR code is drawn" title="The same link each way. If something has trouble reading a leaf, use the plain square.">
+              {QR_LOOKS.map(l => <option key={l.key} value={l.key}>{l.name}</option>)}
+            </select>
             <button onClick={savePicture}>Save as a picture</button>
-            <button onClick={() => setPlain(on => !on)} title={plain ? 'The same code in the shape of a maple leaf' : 'The same code as an ordinary square, for anything that has trouble reading the leaf'}>{plain ? 'Leaf shape' : 'Plain square'}</button>
             <button className="subtle" onClick={() => setAsking(true)} title="The link you have handed out so far stops working">Make a new link</button>
           </div>
         </div>

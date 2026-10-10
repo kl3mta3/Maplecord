@@ -23,7 +23,7 @@ import {
   ChannelType, MessageKind, RollChoice, RollKind, UserStatus, type PreferencesDto, type TransferSettingsDto,
   type ChannelDto, type CommandDto, type GuildSummaryDto, type MemberDto, type MessageDto, type RollItemDto, type RollResultDto, type RollSessionDto,
   type VoiceParticipantDto, type RpsSessionDto, type RpsResultDto, RpsChoice, type FriendsDto, type DmChannelDto, type RoleDto,
-  type DecorationDto, type UpdateProfileRequest, type UserDto, type UserProfileDto, type SystemMessageDto, type ConnectionDto, type ConnectionServiceDto, type FriendLinkDto, type MediaItem, type SearchResultDto, type NewPollDto, isPostsChannel, type RollStatsDto, type FileOfferDto, type TokenResponse, type StreamSettingsDto,
+  type DecorationDto, type UpdateProfileRequest, type UserDto, type UserProfileDto, type SystemMessageDto, type SignInMethodsDto, type ContactEmailDto, type ConnectionDto, type ConnectionServiceDto, type FriendLinkDto, type MediaItem, type SearchResultDto, type NewPollDto, isPostsChannel, type RollStatsDto, type FileOfferDto, type TokenResponse, type StreamSettingsDto,
   type SfuPassDto,
 } from './types'
 
@@ -1603,6 +1603,16 @@ export function useMaplecord() {
   const setConnectionShown = useCallback(async (id: string, shown: boolean): Promise<ConnectionDto | null> => { let saved: ConnectionDto | null = null; await run(async () => { saved = await api.setConnectionShown(id, shown) }); return saved }, [api])
   const removeConnection = useCallback(async (id: string): Promise<boolean> => { let done = false; await run(async () => { await api.removeConnection(id); done = true }); return done }, [api])
 
+  // ---- Ways to sign in, and the address to be written to (Settings, My account) ----
+  const loadSignIn = useCallback(async (): Promise<{ ways: SignInMethodsDto; email: ContactEmailDto } | null> => {
+    try { const [ways, email] = await Promise.all([api.signInMethods(), api.contactEmail()]); return { ways, email } }
+    catch { return null }
+  }, [api])
+  const startSignInMethod = useCallback(async (service: string): Promise<string | null> => { let url: string | null = null; await run(async () => { url = (await api.startSignInMethod(service)).url }); return url }, [api])
+  const removeSignInMethod = useCallback(async (id: number): Promise<boolean> => { let done = false; await run(async () => { await api.removeSignInMethod(id); done = true }); return done }, [api])
+  const setContactEmail = useCallback(async (email: string): Promise<ContactEmailDto | null> => { let saved: ContactEmailDto | null = null; await run(async () => { saved = await api.setContactEmail(email) }); return saved }, [api])
+  const clearContactEmail = useCallback(async (): Promise<ContactEmailDto | null> => { let saved: ContactEmailDto | null = null; await run(async () => { saved = await api.clearContactEmail() }); return saved }, [api])
+
   // ---- Friend links: someone's own address, which asks them to be friends ----
   const [pendingFriendLink, setPendingFriendLink] = useState<{ code: string; user: UserDto } | null>(null)
   /** Follows a friend link: says how things already stand, or asks before a request is sent. */
@@ -2694,6 +2704,7 @@ export function useMaplecord() {
     reactionChoices, loadPins, searchMessages, jumpTo, backToPresent,
     pendingFriendLink, openFriendLink, acceptFriendLink, dismissFriendLink, loadFriendLink, resetFriendLink,
     connectionsEpoch, loadConnections, startConnection, setConnectionShown, removeConnection,
+    loadSignIn, startSignInMethod, removeSignInMethod, setContactEmail, clearContactEmail,
     loadMedia, p2pPost, openP2pPost, closeP2pPost, createP2pPost, reactP2p, editP2p, pinP2p, voteP2p, closeP2pPoll, loadP2pPins, searchP2p, jumpP2p,
     connect, selectGuild, selectChannel, openHome, openDm, addFriend, removeFriend, searchUsers, sendMessage, sendFile, uploading, offerFile, withdrawFile, downloadFile, cancelTransfer, transfers, notifyTyping, loadOlder,
     renameGuild, setGuildIcon, createRole, updateRole, deleteRole, setMemberRoles,

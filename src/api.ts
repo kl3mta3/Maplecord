@@ -1,5 +1,5 @@
 import type {
-  AccountDeletionDto, ApplicationDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto, RollStatsDto, SearchResultDto, MediaItemDto, ConnectionDto, ConnectionServiceDto, FriendLinkDto, FriendLinkOwnerDto } from './types'
+  AccountDeletionDto, ApplicationDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto, RollStatsDto, SearchResultDto, MediaItemDto, SignInMethodsDto, ContactEmailDto, ConnectionDto, ConnectionServiceDto, FriendLinkDto, FriendLinkOwnerDto } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -54,6 +54,18 @@ export class Api {
   devLogin(serverUrl: string, username: string) {
     return fetch(serverUrl.replace(/\/$/, '') + '/auth/dev-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username }) })
       .then(async r => { if (!r.ok) throw new ApiError('Dev login failed', r.status); return (await r.json()) as TokenResponse })
+  }
+  /**
+   * A new person whose email has to be confirmed first holds a ticket: this asks whether the link has been opened yet.
+   * The sign-in once it has; 'waiting' until then.
+   */
+  pendingSignIn(serverUrl: string, ticket: string): Promise<TokenResponse | 'waiting'> {
+    return fetch(serverUrl.replace(/\/$/, '') + '/auth/pending', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticket }) })
+      .then(async r => {
+        if (r.status === 202) return 'waiting' as const
+        if (!r.ok) throw new ApiError(r.status === 410 ? 'That sign-in has run out. Start again.' : 'Sign-in failed', r.status)
+        return (await r.json()) as TokenResponse
+      })
   }
   exchangeCode(serverUrl: string, code: string) {
     return fetch(serverUrl.replace(/\/$/, '') + '/auth/token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) })
@@ -227,6 +239,12 @@ export class Api {
   searchUsers(q: string) { return this.request<UserDto[]>('GET', `/api/users/search?q=${encodeURIComponent(q)}`) }
   friends() { return this.request<FriendsDto>('GET', '/api/friends') }
   addFriend(userId: string) { return this.request<FriendDto>('POST', `/api/friends/${userId}`) }
+  signInMethods() { return this.request<SignInMethodsDto>('GET', '/api/me/logins') }
+  startSignInMethod(service: string) { return this.request<{ url: string }>('POST', `/api/me/logins/${encodeURIComponent(service)}/start`) }
+  removeSignInMethod(id: number) { return this.request<void>('DELETE', `/api/me/logins/${id}`) }
+  contactEmail() { return this.request<ContactEmailDto>('GET', '/api/me/email') }
+  setContactEmail(email: string) { return this.request<ContactEmailDto>('PUT', '/api/me/email', { email }) }
+  clearContactEmail() { return this.request<ContactEmailDto>('DELETE', '/api/me/email') }
   connectionServices() { return this.request<ConnectionServiceDto[]>('GET', '/api/connections/services') }
   connections() { return this.request<ConnectionDto[]>('GET', '/api/me/connections') }
   startConnection(service: string) { return this.request<{ url: string }>('POST', `/api/me/connections/${encodeURIComponent(service)}/start`) }

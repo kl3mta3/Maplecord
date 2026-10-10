@@ -2,6 +2,14 @@ import { useEffect, useState } from 'react'
 import { bridge, DEFAULT_SERVER_URL } from '../platform'
 import { usesCustomServer } from '../settings'
 import type { Store } from '../store'
+import { SIGN_IN_NAMES, signInProblem } from './SignIn'
+
+/** Where a browser keeps the ticket of a sign-in that is waiting on an email, across the trip to the sign-in service and back. */
+export const PENDING_SIGN_IN = 'maplecord.pendingSignIn'
+type Waiting = { ticket: string; email: string }
+function waitingSignIn(): Waiting | null {
+  try { const kept = sessionStorage.getItem(PENDING_SIGN_IN); return kept ? JSON.parse(kept) as Waiting : null } catch { return null }
+}
 
 export default function Login({ store, onSignedIn }: { store: Store; onSignedIn: () => void }) {
   const [serverUrl, setServerUrl] = useState(store.settings.serverUrl)
@@ -10,6 +18,12 @@ export default function Login({ store, onSignedIn }: { store: Store; onSignedIn:
   const [devUsername, setDevUsername] = useState('')
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('')
+  // A new person on a server that wants the email confirmed first: nothing more happens here until the link is opened.
+  const [waiting, setWaitingState] = useState<Waiting | null>(waitingSignIn)
+  const setWaiting = (w: Waiting | null) => {
+    setWaitingState(w)
+    try { if (w) sessionStorage.setItem(PENDING_SIGN_IN, JSON.stringify(w)); else sessionStorage.removeItem(PENDING_SIGN_IN) } catch { /* private browsing: it is only kept while this page is open */ }
+  }
 
   const check = async (url = serverUrl) => {
     setBusy(true); setStatus('Checking server…')
@@ -35,8 +49,11 @@ export default function Login({ store, onSignedIn }: { store: Store; onSignedIn:
     try {
       const b = bridge()
       if (b) {
-        const code = await b.oauthLogin(serverUrl, provider)
-        finish(await store.api.exchangeCode(serverUrl, code))
+        const result = await b.oauthSignIn(serverUrl, provider)
+        if (result.code) finish(await store.api.exchangeCode(serverUrl, result.code))
+        else if (result.pending) setWaiting({ ticket: result.pending, email: result.email ?? '' })
+        setStatus(result.code || result.pending ? '' : signInProblem(result.error ?? 'login_failed'))
+        return
       } else {
         // Plain browser: round-trip through the provider and come back to this page with ?code=.
         const redirect = window.location.origin + window.location.pathname
@@ -45,6 +62,24 @@ export default function Login({ store, onSignedIn }: { store: Store; onSignedIn:
     } catch (e) { setStatus(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
+
+  // Has the link been opened? Asked when the button is pressed and when this window is come back to, never on a timer.
+  const checkWaiting = async (quiet = false) => {
+    if (!waiting) return
+    try {
+      const answer = await store.api.pendingSignIn(serverUrl, waiting.ticket)
+      if (answer === 'waiting') { if (!quiet) setStatus('Not confirmed yet. Open the link in the message, then press this again.') }
+      else { setWaiting(null); finish(answer) }
+    } catch (e) { setWaiting(null); setStatus(e instanceof Error ? e.message : String(e)) }
+  }
+  useEffect(() => {
+    if (!waiting) return
+    const back = () => { if (document.visibilityState === 'visible') void checkWaiting(true) }
+    window.addEventListener('focus', back)
+    document.addEventListener('visibilitychange', back)
+    return () => { window.removeEventListener('focus', back); document.removeEventListener('visibilitychange', back) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- asked afresh each time the window is come back to
+  }, [waiting?.ticket, serverUrl])
 
   const devLogin = async () => {
     if (!devUsername.trim()) { setStatus('Enter a username.'); return }
@@ -71,9 +106,18 @@ export default function Login({ store, onSignedIn }: { store: Store; onSignedIn:
           </>
         )}
 
-        {providers?.includes('google') && <button className="provider" onClick={() => loginWith('google')} disabled={busy}>Sign in with Google</button>}
-        {providers?.includes('github') && <button className="provider" onClick={() => loginWith('github')} disabled={busy}>Sign in with GitHub</button>}
-        {providers?.includes('dev') && (
+        {waiting ? (
+          <>
+            <h3 style={{ margin: '8px 0 0' }}>Check your email</h3>
+            <div className="muted">A link was sent to {waiting.email || 'your address'}. Open it to finish making your account, then come back here.</div>
+            <button className="provider" onClick={() => void checkWaiting()} disabled={busy}>I have opened the link</button>
+            <button className="subtle" onClick={() => { setWaiting(null); setStatus('') }}>Start again</button>
+          </>
+        ) : (['google', 'github', 'microsoft', 'twitch', 'steam'] as const).filter(p => providers?.includes(p)).map(p => (
+          <button key={p} className="provider" onClick={() => loginWith(p)} disabled={busy}
+            title={p === 'steam' ? 'For accounts that have added Steam as a way to sign in. Steam cannot start a new account.' : undefined}>Sign in with {SIGN_IN_NAMES[p]}</button>
+        ))}
+        {!waiting && providers?.includes('dev') && (
           <>
             <div className="muted" style={{ marginTop: 8 }}>Development login (no OAuth app needed)</div>
             <div className="row">

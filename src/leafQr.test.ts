@@ -1,5 +1,5 @@
 // Run with: node src/leafQr.test.ts
-import { leafPath, leafQr, LEAF_CODE, LEAF_DOT, LEAF_EDGE, LEAF_OUT, LEAF_PAPER, LEAF_QUIET } from './leafQr.ts'
+import { leafPath, leafQr, LEAF_BLEND_ROOM, LEAF_CODE, LEAF_DOT, LEAF_EDGE, LEAF_OUT, LEAF_PAPER, LEAF_QUIET } from './leafQr.ts'
 import { LEAF_GRID, LEAF_ROWS, LEAF_SQUARE } from './leafShape.ts'
 import type { QrDto } from './types.ts'
 
@@ -63,4 +63,35 @@ for (const bar of leafPath(leaf, LEAF_CODE + LEAF_DOT + LEAF_EDGE + LEAF_PAPER).
 check(barred === [...leaf.cells].filter(c => c !== LEAF_OUT).length, 'every square of the leaf is covered once when all kinds are drawn')
 
 if (failures > 0) throw new Error(`${failures} failed`)
+// ---- Blended: no margin, the dots come right up to the code ----
+const blend = leafQr(qr, 'K7MQ2XW9AB', 'blended')
+const bat = (x: number, y: number) => blend.cells[(blend.code.y + y) * blend.size + blend.code.x + x]!
+let sameBlended = true
+for (let y = 0; y < qr.size; y++) for (let x = 0; x < qr.size; x++) if ((bat(x, y) === LEAF_CODE) !== (qr.modules[y * qr.size + x] === '1') || (bat(x, y) !== LEAF_CODE && bat(x, y) !== LEAF_PAPER)) sameBlended = false
+check(sameBlended && blend.code.size === 29, 'blended: the real code still sits in it square for square, unchanged')
+check(blend.size < leaf.size && LEAF_BLEND_ROOM < LEAF_QUIET, `blended: with no margin the leaf takes fewer squares (${blend.size} against ${leaf.size})`)
+// The ring of squares just outside the code: empty beside the three corner squares, dotted elsewhere.
+let cornersClear = true, ringDots = 0
+for (let v = -1; v <= qr.size; v++) for (const [x, y] of [[v, -1], [v, qr.size], [-1, v], [qr.size, v]] as const) {
+  const beside = (x <= 7 && y <= 7) || (x >= qr.size - 8 && y <= 7) || (x <= 7 && y >= qr.size - 8)
+  if (beside && bat(x, y) !== LEAF_PAPER) cornersClear = false
+  if (!beside && (bat(x, y) === LEAF_DOT || bat(x, y) === LEAF_EDGE)) ringDots++
+}
+check(cornersClear, 'blended: the squares beside the three corner squares are left empty')
+check(ringDots > 8, `blended: everywhere else the dots come right up to the code (${ringDots} of them touch it)`)
+check(leafQr(qr, 'K7MQ2XW9AB', 'blended').cells === blend.cells && leafQr(qr, 'K7MQ2XW9AB').cells === leaf.cells, 'blended: the same link is always the same leaf, and the leaf with a margin is as it was')
+check([21, 25, 29, 33, 37, 41, 45].every(size => leafQr(code(size), 'x', 'blended').code.size === size), 'blended: codes from the smallest to a long link all fit')
+
+// ---- Thin: one empty square all round the code ----
+const thin = leafQr(qr, 'K7MQ2XW9AB', 'thin')
+const tat = (x: number, y: number) => thin.cells[(thin.code.y + y) * thin.size + thin.code.x + x]!
+let thinRight = thin.code.size === 29
+for (let y = -1; y <= qr.size; y++) for (let x = -1; x <= qr.size; x++) {
+  const inside = x >= 0 && y >= 0 && x < qr.size && y < qr.size
+  if (inside ? (tat(x, y) === LEAF_CODE) !== (qr.modules[y * qr.size + x] === '1') || (tat(x, y) !== LEAF_CODE && tat(x, y) !== LEAF_PAPER) : tat(x, y) !== LEAF_PAPER) thinRight = false
+}
+check(thinRight, 'thin: the real code sits in it unchanged, with one empty square all round it')
+check(thin.size === blend.size && thin.size < leaf.size && thin.cells !== blend.cells, `thin: the leaf takes as few squares as with no margin (${thin.size})`)
+check([21, 25, 29, 33, 37, 41, 45].every(size => leafQr(code(size), 'x', 'thin').code.size === size), 'thin: codes from the smallest to a long link all fit')
+
 console.log('leafQr: all passed')

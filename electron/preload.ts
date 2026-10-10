@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('maplecord', {
   isElectron: true,
   platform: process.platform,
   oauthLogin: (serverUrl: string, provider: string): Promise<string> => ipcRenderer.invoke('oauth-login', serverUrl, provider),
+  oauthSignIn: (serverUrl: string, provider: string): Promise<{ code?: string; pending?: string; email?: string; error?: string }> => ipcRenderer.invoke('oauth-sign-in', serverUrl, provider),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('open-external', url),
   onHotkey: (handler: (key: Action) => void) => subscribe<Action>('hotkey', handler),
 

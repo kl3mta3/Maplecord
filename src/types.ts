@@ -60,6 +60,12 @@ export interface UserProfileDto {
 export interface ConnectionServiceDto { key: string; name: string }
 /** One of one's own linked accounts. */
 export interface ConnectionDto { id: string; service: string; serviceName: string; name: string; url: string | null; shown: boolean; linkedAt: string }
+/** One of the ways an account can be signed in to: the service, and the address it gave. */
+export interface SignInMethodDto { id: number; service: string; serviceName: string; email: string | null }
+/** One's own ways to sign in, and the services that could be added as another. */
+export interface SignInMethodsDto { methods: SignInMethodDto[]; canAdd: ConnectionServiceDto[] }
+/** The address one is written to: whether it is one's own choice, a change still waiting to be confirmed, and whether the server can confirm one. */
+export interface ContactEmailDto { email: string | null; changed: boolean; pending: string | null; canChange: boolean }
 /** A linked account as a profile shows it. */
 export interface ProfileConnectionDto { service: string; serviceName: string; name: string; url: string | null }
 /** Each field: undefined leaves it alone, '' clears it. */

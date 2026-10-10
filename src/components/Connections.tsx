@@ -3,6 +3,23 @@ import type { Store } from '../store'
 import type { ConnectionDto, ConnectionServiceDto, ProfileConnectionDto } from '../types'
 import { bridge } from '../platform'
 
+/**
+ * Opens an address the server hands out (another service's sign-in page) outside the app: the system browser from the
+ * desktop app, a new tab in a browser. True if it was opened.
+ */
+export async function openOutside(store: Store, address: () => Promise<string | null>): Promise<boolean> {
+  // In a browser the new tab has to be opened by the click itself, before the address is known, or it is blocked.
+  const desktop = bridge()
+  const tab = desktop ? null : window.open('about:blank', '_blank')
+  const url = await address()
+  if (!url) { tab?.close(); return false }
+  if (desktop) { void desktop.openExternal(url); return true }
+  if (!tab) { store.setError('Your browser blocked the new tab. Allow pop-ups for Maplecord and try again.'); return false }
+  tab.opener = null
+  tab.location.href = url
+  return true
+}
+
 /** How many linked accounts a profile shows before the rest are folded away. */
 const SHOWN_FIRST = 3
 
@@ -43,17 +60,7 @@ export function ConnectionsPane({ store }: { store: Store }) {
     return () => { alive = false }
   }, [loadConnections, connectionsEpoch])
 
-  const link = async (service: ConnectionServiceDto) => {
-    // In a browser the new tab has to be opened by the click itself, before the address is known, or it is blocked.
-    const desktop = bridge()
-    const tab = desktop ? null : window.open('about:blank', '_blank')
-    const url = await store.startConnection(service.key)
-    if (!url) { tab?.close(); return }
-    setWaiting(service.key)
-    if (desktop) void desktop.openExternal(url)
-    else if (tab) { tab.opener = null; tab.location.href = url }
-    else store.setError('Your browser blocked the new tab. Allow pop-ups for Maplecord and try again.')
-  }
+  const link = async (service: ConnectionServiceDto) => { if (await openOutside(store, () => store.startConnection(service.key))) setWaiting(service.key) }
   const show = async (c: ConnectionDto, shown: boolean) => { const saved = await store.setConnectionShown(c.id, shown); if (saved) setMine(all => all.map(x => (x.id === c.id ? saved : x))) }
   const unlink = async (c: ConnectionDto) => { if (await store.removeConnection(c.id)) setMine(all => all.filter(x => x.id !== c.id)) }
 

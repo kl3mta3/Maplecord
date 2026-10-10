@@ -6,6 +6,7 @@ import { isElectron } from '../platform'
 import { shownName } from '../profile'
 import { Dialog } from './Dialogs'
 import { ConnectionsPane } from './Connections'
+import { AccountSignIn } from './SignIn'
 import { askToInstall, installWay } from '../install'
 import { MyBots } from './Integrations'
 import { VoiceAudioSettings } from './VoiceAudio'
@@ -64,7 +65,7 @@ export function UserSettingsDialog({ store, initial, onOpen, onAllowDirect, onSi
                 <button onClick={() => onOpen('profile')}>Edit profile</button>
                 <button onClick={() => setSection('voice')}>Voice &amp; audio</button>
               </div>
-              <div className="muted">You sign in with Google or GitHub; Maplecord has no password of yours to change.</div>
+              <AccountSignIn store={store} />
               <h4>Leaving</h4>
               <div className="row"><button className="danger" onClick={() => { onClose(); store.openDeleteAccount() }}>Delete account…</button></div>
             </>

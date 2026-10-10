@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { PENDING_SIGN_IN } from './components/Login'
+import { signInProblem } from './components/SignIn'
 import Login from './components/Login'
 import Overlay from './components/Overlay'
 import Shell from './components/Shell'
@@ -35,6 +37,14 @@ function MainApp() {
 
       const params = new URLSearchParams(window.location.search)
       const code = params.get('code')
+      // The sign-in did not go through, or a new person has to confirm their email first: the sign-in screen says which.
+      const refused = params.get('error')
+      const pendingTicket = params.get('pending')
+      if (refused || pendingTicket) {
+        if (refused) store.setError(signInProblem(refused))
+        try { if (pendingTicket) sessionStorage.setItem(PENDING_SIGN_IN, JSON.stringify({ ticket: pendingTicket, email: params.get('email') ?? '' })) } catch { /* private browsing */ }
+        window.history.replaceState({}, '', window.location.pathname)
+      }
       // Set when this page left for the sign-in provider only to prove who is here, so that P2P could be allowed.
       const provingFor = sessionStorage.getItem(PENDING_DIRECT)
       sessionStorage.removeItem(PENDING_DIRECT)

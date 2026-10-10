@@ -59,7 +59,8 @@ one.
 
 - A desktop app, and the same thing in a browser. On a phone it can be added to the home screen.
 - Colour themes
-- Sign in with Google or GitHub. There is no password.
+- Sign in with Google or GitHub, and with Microsoft or Twitch where the server offers them. There is no password.
+  In Settings you can add another way to sign in, and change the address Maplecord writes to.
 
 ### Quality of life, for everyone
 
@@ -197,10 +198,12 @@ as `.wav`, `.mp3` or `.ogg`. Missing ones fall back to the default.
 Maplecord is free and runs on a small server with limited storage. We are more interested in letting go of your data
 than holding on to it.
 
-- **Your email address,** which Google or GitHub hands over when you sign in. It is only for account notices and
-  support, and nobody else is shown it.
-- **That you signed in with Google or GitHub.** They know you use Maplecord because you chose them to sign in with.
-  They give the server your name, picture and email, never your password.
+- **Your email address,** which the service you sign in with hands over. It is only for account notices and
+  support, and nobody else is shown it. You can give a different address to be written to, in Settings; the one from
+  your sign-in is kept too.
+- **Which service you signed in with.** It knows you use Maplecord because you chose it to sign in with. It gives
+  the server your name, picture and email, never your password. If you add another way to sign in, the same is kept
+  for that one.
 - **Accounts you link, if you link any.** Linking an account on another service (in Settings, under Connections)
   keeps that account's name and ID there, encrypted, so the name can show on your profile. Nothing else is asked for,
   the server keeps no access to that account, and unlinking removes both.

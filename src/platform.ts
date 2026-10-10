@@ -65,6 +65,8 @@ export interface MaplecordBridge {
   isElectron: true
   platform: string
   oauthLogin(serverUrl: string, provider: string): Promise<string>
+  /** Signs in through the system browser: a code to exchange, a ticket to wait with while an email is confirmed, or why it did not go through. */
+  oauthSignIn(serverUrl: string, provider: string): Promise<{ code?: string; pending?: string; email?: string; error?: string }>
   openExternal(url: string): Promise<void>
   onHotkey(handler: (key: OverlayAction) => void): () => void
   /**
