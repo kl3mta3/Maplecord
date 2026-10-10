@@ -90,6 +90,11 @@ export function ConnectionsPane({ store }: { store: Store }) {
                 <button className="accent" onClick={() => void link(s)}>Link</button>
               </>
             )}
+            {linked?.renewBy && (
+              <div className="muted renew">
+                {s.name} lets its names be kept for 30 days at a time. This one is removed on {new Date(linked.renewBy).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })} unless you press "Link again" before then.
+              </div>
+            )}
           </div>
         )
       })}

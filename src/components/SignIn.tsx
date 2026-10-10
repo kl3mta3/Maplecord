@@ -12,14 +12,16 @@ export function signInProblem(code: string): string {
     case 'account_too_new': return 'That account is too new to start a Maplecord account with. Sign in another way, or try again when it is older.'
     case 'email_unverified': return 'The email address on that account has not been confirmed with its service. Confirm it there, then try again.'
     case 'email_needed': return 'That account has no email address, and a new Maplecord account needs one here.'
-    case 'signup_not_offered': return 'Steam cannot start a Maplecord account. Sign in another way first, then add Steam in Settings, under My account.'
+    case 'signup_not_offered': return 'Steam and Battle.net cannot start a Maplecord account. Sign in another way first, then add it in Settings, under My account.'
     case 'mail_failed': return 'The confirmation email could not be sent. Try again later.'
     default: return code
   }
 }
 
 /** What each sign-in service is called on a button. */
-export const SIGN_IN_NAMES: Record<string, string> = { google: 'Google', github: 'GitHub', microsoft: 'Microsoft', twitch: 'Twitch', steam: 'Steam' }
+export const SIGN_IN_NAMES: Record<string, string> = { google: 'Google', github: 'GitHub', microsoft: 'Microsoft', twitch: 'Twitch', steam: 'Steam', battlenet: 'Battle.net' }
+/** The services that give no email address: they cannot start an account, only be added to one. */
+export const ADD_ONLY_SIGN_INS = ['steam', 'battlenet']
 
 /** What the button that signs in with a service says. */
 export const signInLabel = (provider: string) => (SIGN_IN_NAMES[provider] ? `Sign in with ${SIGN_IN_NAMES[provider]}` : provider)
@@ -70,7 +72,7 @@ export function AccountSignIn({ store }: { store: Store }) {
       {ways.canAdd.map(s => (
         <div key={s.key} className="connectionrow">
           <b>{s.name}</b>
-          <span className="grow muted">{waiting === s.key ? 'Finish in your browser, then come back here.' : s.key === 'steam' ? 'Anyone who can get into that Steam account could then get into this one.' : 'Not added'}</span>
+          <span className="grow muted">{waiting === s.key ? 'Finish in your browser, then come back here.' : ADD_ONLY_SIGN_INS.includes(s.key) ? `Anyone who can get into that ${s.name} account could then get into this one.` : 'Not added'}</span>
           <button onClick={() => void add(s)}>Add</button>
         </div>
       ))}

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { bridge, DEFAULT_SERVER_URL } from '../platform'
 import { usesCustomServer } from '../settings'
 import type { Store } from '../store'
-import { SIGN_IN_NAMES, signInProblem } from './SignIn'
+import { ADD_ONLY_SIGN_INS, SIGN_IN_NAMES, signInProblem } from './SignIn'
 
 /** Where a browser keeps the ticket of a sign-in that is waiting on an email, across the trip to the sign-in service and back. */
 export const PENDING_SIGN_IN = 'maplecord.pendingSignIn'
@@ -113,9 +113,9 @@ export default function Login({ store, onSignedIn }: { store: Store; onSignedIn:
             <button className="provider" onClick={() => void checkWaiting()} disabled={busy}>I have opened the link</button>
             <button className="subtle" onClick={() => { setWaiting(null); setStatus('') }}>Start again</button>
           </>
-        ) : (['google', 'github', 'microsoft', 'twitch', 'steam'] as const).filter(p => providers?.includes(p)).map(p => (
+        ) : (['google', 'github', 'microsoft', 'twitch', 'steam', 'battlenet'] as const).filter(p => providers?.includes(p)).map(p => (
           <button key={p} className="provider" onClick={() => loginWith(p)} disabled={busy}
-            title={p === 'steam' ? 'For accounts that have added Steam as a way to sign in. Steam cannot start a new account.' : undefined}>Sign in with {SIGN_IN_NAMES[p]}</button>
+            title={ADD_ONLY_SIGN_INS.includes(p) ? `For accounts that have added ${SIGN_IN_NAMES[p]} as a way to sign in. It cannot start a new account.` : undefined}>Sign in with {SIGN_IN_NAMES[p]}</button>
         ))}
         {!waiting && providers?.includes('dev') && (
           <>

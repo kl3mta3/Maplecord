@@ -59,7 +59,7 @@ export interface UserProfileDto {
 /** A service an account can be linked on ("discord", "twitch", "steam", "battlenet"), and what it is called. */
 export interface ConnectionServiceDto { key: string; name: string }
 /** One of one's own linked accounts. */
-export interface ConnectionDto { id: string; service: string; serviceName: string; name: string; url: string | null; shown: boolean; linkedAt: string }
+export interface ConnectionDto { id: string; service: string; serviceName: string; name: string; url: string | null; shown: boolean; linkedAt: string; /** Where the service limits how long a name may be kept: when this one is removed unless linked again first. */ renewBy?: string | null }
 /** One of the ways an account can be signed in to: the service, and the address it gave. */
 export interface SignInMethodDto { id: number; service: string; serviceName: string; email: string | null }
 /** One's own ways to sign in, and the services that could be added as another. */

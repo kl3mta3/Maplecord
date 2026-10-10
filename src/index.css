@@ -818,4 +818,5 @@ button.chip { cursor: pointer; }
 .connections button { padding: 0 6px; font-size: 12px; }
 .connectionrow { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; flex-wrap: wrap; }
 .connectionrow b { min-width: 84px; }
+.connectionrow .renew { flex-basis: 100%; font-size: 12px; }
 .connectionrow .grow { min-width: 0; overflow-wrap: anywhere; }

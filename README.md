@@ -61,8 +61,8 @@ one.
 - A desktop app, and the same thing in a browser. On a phone it can be added to the home screen.
 - Colour themes
 - Sign in with Google or GitHub, and with Microsoft or Twitch where the server offers them. There is no password.
-- Add a second way to sign in to your account (Steam included, where the server offers it), so you are not left
-  with one. You can also change the address Maplecord writes to.
+- Add a second way to sign in to your account (Steam and Battle.net included, where the server offers them), so you
+  are not left with one. You can also change the address Maplecord writes to.
 
 ### Quality of life, for everyone
 
@@ -208,7 +208,8 @@ than holding on to it.
   for that one.
 - **Accounts you link, if you link any.** Linking an account on another service (in Settings, under Connections)
   keeps that account's name and ID there, encrypted, so the name can show on your profile. Nothing else is asked for,
-  the server keeps no access to that account, and unlinking removes both.
+  the server keeps no access to that account, and unlinking removes both. A Battle.net name is removed by itself
+  after 30 days unless you link it again.
 - **Your profile, friends, servers, settings, and the messages and files you post.** These are the things you and
   the people you talk to will ask for again, so they are kept: for every device you use, and for anyone who was
   offline when something was sent. They travel encrypted. Uploaded files are cleared out after 30 days.
