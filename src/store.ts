@@ -14,7 +14,7 @@ import { type DirectTextPeer, P2PTextEngine, P2PFileUnavailable, describeFile, M
 import { foldP2p, foldP2pChat, isP2pNoteText, p2pShape, packP2p, searchP2pChat, searchP2pGallery, type P2PMeta } from './p2pPosts'
 import { mayManageMessagesIn } from './channelViewers'
 import { forgetFile, holds, keep, keepFile, kept, keptBefore, keptFile, keyPrint, knownKeys, loadIdentity, p2pTextSupported, rememberKey, sha256Hex } from './p2pIdentity'
-import { friendCodeFrom, inviteCodeFrom, inviteIsForAnotherServer, takeRememberedFriendLink, takeRememberedInvite } from './invites'
+import { forgetRememberedServer, friendCodeFrom, inviteCodeFrom, inviteIsForAnotherServer, rememberedServer, takeRememberedFriendLink, takeRememberedInvite } from './invites'
 import { DEFAULT_PUSH_KEY, PUSH_RELEASE_MS, isChoosingPushKey, isPushKey, type PushKey } from './pushToTalk'
 import { VoiceHub } from './voiceHub'
 import { TransferEngine, fileSource, rememberedSource, openSink, type TransferView } from './transfer'
@@ -222,7 +222,7 @@ export function useMaplecord() {
       const s = settingsRef.current
       const viaRelay = !!s.p2pViaRelay
       const agreed = !!s.p2pBotsAccepted?.[peer.userId] && !viaRelay
-      if (!agreed) queueMicrotask(() => setP2pBotsWaiting(all => (all.some(x => x.channelId === channelId && x.userId === peer.userId) ? all : [...all, { channelId, userId: peer.userId, username: peer.username, viaRelay }])))
+      if (!agreed) queueMicrotask(() => setP2pBotsWaiting(all => (all.some(x => !x.voice && x.channelId === channelId && x.userId === peer.userId) ? all : [...all, { channelId, userId: peer.userId, username: peer.username, viaRelay }])))
       return agreed
     },
     leave: async channelId => { await hub.leaveDirectText(channelId) },
@@ -294,7 +294,13 @@ export function useMaplecord() {
     setP2pNewApps(all => all.filter(x => !(x.userId === userId && x.print === print)))
   }, [])
   /** Bots in a P2P channel that this app is not connected to: the person has not agreed to them, or joins through the relay. */
-  const [p2pBotsWaiting, setP2pBotsWaiting] = useState<{ channelId: string; userId: string; username: string; viaRelay: boolean }[]>([])
+  const [p2pBotsWaiting, setP2pBotsWaiting] = useState<{ channelId: string; userId: string; username: string; viaRelay: boolean; voice?: boolean }[]>([])
+  /**
+   * In a P2P voice channel, a bot this app does not connect to: one this person has not agreed to by name, and any
+   * bot while they keep their own address behind the relay. (Nowhere else: an ordinary channel's voice is relayed.)
+   */
+  const [refusesVoiceBot] = useState(() => (p: VoiceParticipantDto, direct: boolean) =>
+    !!p.bot && direct && !(settingsRef.current.p2pBotsAccepted?.[p.userId] && !settingsRef.current.p2pViaRelay))
   /** The most a file may be to cross the relay in a P2P channel: what this server takes as an upload. */
   const p2pRelayedLimit = useRef(32 * 1024 * 1024)
   /** The files on the P2P messages on screen, by channel and hash. */
@@ -796,14 +802,21 @@ export function useMaplecord() {
         if (cur?.channelId === c && !cur.participants.some(x => x.connectionId === p.connectionId))
           playSound('join', settingsRef.current.soundProfile, settingsRef.current.soundEnabled)
         voiceEngine.setPeerSilenced(p.connectionId, !!p.silenced)
+        // A bot arriving in a P2P call: nothing it sends is answered unless this person has agreed to it.
+        const keptAway = cur?.channelId === c && refusesVoiceBot(p, !!cur.directSince)
+        if (keptAway) {
+          voiceEngine.refuse(p.connectionId)
+          setP2pBotsWaiting(all => (all.some(x => x.voice && x.channelId === c && x.userId === p.userId) ? all : [...all, { channelId: c, userId: p.userId, username: p.username, viaRelay: !!settingsRef.current.p2pViaRelay, voice: true }]))
+        }
         setVoice(v => (v && v.channelId === c && !v.participants.some(x => x.connectionId === p.connectionId)
-          ? { ...v, participants: [...v.participants, { ...p, state: 'connecting', speaking: false }] } : v))
+          ? { ...v, participants: [...v.participants, { ...p, state: keptAway ? 'not connected' : 'connecting', speaking: false }] } : v))
       },
       ParticipantLeft: (c, _userId, id) => {
         const cur = voiceRef.current
         if (cur?.channelId === c && cur.participants.some(x => x.connectionId === id))
           playSound('leave', settingsRef.current.soundProfile, settingsRef.current.soundEnabled)
         void voiceEngine.removePeer(id)
+        setP2pBotsWaiting(all => (all.some(x => x.voice && x.channelId === c && x.userId === _userId) ? all.filter(x => !(x.voice && x.channelId === c && x.userId === _userId)) : all))
         streamEngine.viewerLeft(id)
         streamEngine.unwatch(id)
         setVoice(v => (v && v.channelId === c ? { ...v, participants: v.participants.filter(p => p.connectionId !== id) } : v))
@@ -1712,6 +1725,17 @@ export function useMaplecord() {
     if (invite) await joinGuild(invite.code)
   }, [joinGuild, pendingInvite])
 
+  // The browser version was opened at one server (?server=…): go to it as soon as it is among the person's servers.
+  // If it is not there shortly after connecting, they are not in it, and the address is forgotten.
+  useEffect(() => {
+    if (!ready) return
+    const wanted = rememberedServer()
+    if (!wanted) return
+    if (guilds.some(g => g.guild.id === wanted)) { forgetRememberedServer(); selectGuild(wanted); return }
+    const giveUp = window.setTimeout(forgetRememberedServer, 15_000)
+    return () => window.clearTimeout(giveUp)
+  }, [ready, guilds, selectGuild])
+
   // Once connected: the invite the browser version was opened with, the one the desktop app was started by, and any
   // link clicked while the desktop app is running (it is told there is one, and takes it).
   useEffect(() => {
@@ -1990,12 +2014,15 @@ export function useMaplecord() {
       // An ordinary channel may answer with a pass: its voice then goes through the stream server, not app to app.
       const answer = directSince ? { others: await voiceHub.joinDirect(channelId), pass: null } : await voiceHub.joinVia(channelId)
       const others = answer.others
+      // Bots already in a P2P channel: this app offers them nothing until this person agrees to each by name.
+      const keptAway = others.filter(p => refusesVoiceBot(p, !!directSince))
+      setP2pBotsWaiting(all => [...all.filter(x => !x.voice), ...keptAway.map(p => ({ channelId, userId: p.userId, username: p.username, viaRelay, voice: true }))])
       const user = s.user!
       const selfId = voiceHub.connectionId ?? 'self'
       const joined: VoiceState = {
         channelId, guildId, directSince, policy, status: '',
         participants: [
-          ...others.map(p => ({ ...p, state: 'connecting', speaking: false })),
+          ...others.map(p => ({ ...p, state: keptAway.includes(p) ? 'not connected' : 'connecting', speaking: false })),
           { userId: user.id, username: user.username, connectionId: selfId, muted: isMuted, state: '', speaking: false, silenced: voiceHub.selfSilenced },
         ],
       }
@@ -2012,7 +2039,7 @@ export function useMaplecord() {
         } catch { /* not worth an error banner */ }
       })()
       if (isMuted) void voiceHub.setMuted(true)
-      try { await voiceEngine.join(others, answer.pass, voiceHub.selfSilenced) }
+      try { await voiceEngine.join(others, answer.pass, voiceHub.selfSilenced, keptAway.map(p => p.connectionId)) }
       catch (e) {
         // No way in at all is different from no microphone: we are not in the call, and the server is told so.
         if (e instanceof VoiceConnectError) { await leaveVoice(); throw e }
@@ -2438,7 +2465,7 @@ export function useMaplecord() {
       window.clearTimeout(failed?.timer)
       p2pJoining.current.add(channelId)
       // Who is there is learned afresh on connecting, the bots among them too.
-      setP2pBotsWaiting(all => (all.some(x => x.channelId === channelId) ? all.filter(x => x.channelId !== channelId) : all))
+      setP2pBotsWaiting(all => (all.some(x => !x.voice && x.channelId === channelId) ? all.filter(x => x.voice || x.channelId !== channelId) : all))
       p2pEngine.join(channelId).then(
         () => {
           p2pJoining.current.delete(channelId)
@@ -2485,10 +2512,16 @@ export function useMaplecord() {
   const acceptP2pBot = useCallback(async (channelId: string, userId: string, username: string) => {
     updateSettings({ p2pBotsAccepted: { ...(settingsRef.current.p2pBotsAccepted ?? {}), [userId]: username } })
     setP2pBotsWaiting(all => all.filter(x => x.userId !== userId))
+    // In the voice channel we are in, the bot is there already: this app offers it a connection now.
+    const inVoice = voiceRef.current?.channelId === channelId ? voiceRef.current.participants.filter(p => p.userId === userId) : []
+    if (inVoice.length > 0) {
+      setVoice(v => (v && v.channelId === channelId ? { ...v, participants: v.participants.map(p => (p.userId === userId ? { ...p, state: 'connecting' } : p)) } : v))
+      for (const p of inVoice) await voiceEngine.connectTo(p.connectionId)
+    }
     await p2pEngine.leave(channelId)
     setP2pRetry(n => n + 1)
-  }, [p2pEngine, updateSettings])
-  const dismissP2pBot = useCallback((channelId: string, userId: string) => setP2pBotsWaiting(all => all.filter(x => !(x.channelId === channelId && x.userId === userId))), [])
+  }, [p2pEngine, updateSettings, voiceEngine])
+  const dismissP2pBot = useCallback((channelId: string, userId: string, voice = false) => setP2pBotsWaiting(all => all.filter(x => !(!!x.voice === voice && x.channelId === channelId && x.userId === userId))), [])
 
   /** Subscribe to a P2P channel (stay connected to it whenever the app is open), or stop. */
   const setP2pSubscribed = useCallback((channelId: string, on: boolean) => {

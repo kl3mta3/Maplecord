@@ -1257,7 +1257,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
           <button className="subtle" onClick={() => void store.acceptP2pApp(x.userId, x.print)}>That is fine</button>
         </div>
       ))}
-      {p2pChat && channel && store.p2pBotsWaiting.filter(x => x.channelId === channel.id).map(x => (
+      {p2pChat && channel && store.p2pBotsWaiting.filter(x => !x.voice && x.channelId === channel.id).map(x => (
         <div key={x.userId} className="p2pbar wide">
           {x.viaRelay ? (
             <span className="grow">
@@ -1275,6 +1275,26 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
             </>
           )}
           <button className="subtle" title="Not now" onClick={() => store.dismissP2pBot(channel.id, x.userId)}>×</button>
+        </div>
+      ))}
+      {/* A bot in the P2P voice channel we are in. Shown wherever this is, like the notices about apps above. */}
+      {store.voice?.directSince && store.p2pBotsWaiting.filter(x => x.voice && x.channelId === store.voice?.channelId).map(x => (
+        <div key={'voice' + x.userId} className="p2pbar wide">
+          {x.viaRelay ? (
+            <span className="grow">
+              <b>{nameIn(x.userId, x.username)}</b> is a bot in your voice channel. You join P2P channels through the relay, and a bot is never reached through it,
+              so your app is not connected to it: you do not hear it, and it does not hear you.
+            </span>
+          ) : (
+            <>
+              <span className="grow">
+                <b>{nameIn(x.userId, x.username)}</b> is a bot in your voice channel. Your app is not connected to it: you do not hear it, and it does not hear you.{' '}
+                Connecting to it lets whoever runs it find your IP address, and it then hears what you say here. What it does with that is up to whoever runs it.
+              </span>
+              <button className="accent" onClick={() => void store.acceptP2pBot(x.channelId, x.userId, x.username)}>Connect to it</button>
+            </>
+          )}
+          <button className="subtle" title="Not now" onClick={() => store.dismissP2pBot(x.channelId, x.userId, true)}>×</button>
         </div>
       ))}
       {kept && store.viewingPast && !thread && (

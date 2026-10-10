@@ -330,8 +330,30 @@ export class VoiceEngine {
    * Opening the microphone can take as long as the person takes to answer the browser's question. If the call is left
    * (or another one joined) in that time, the microphone is closed again and nothing is sent anywhere.
    */
-  async join(existing: VoiceParticipantDto[], pass: SfuPassDto | null = null, silenced = false) {
+  /**
+   * The connections this app must not make: a bot in a P2P call that this person has not agreed to connect to. It is
+   * offered nothing, and what it sends to set a connection up is ignored.
+   */
+  private refused = new Set<string>()
+
+  /** Stop, or never start, connecting to someone in the call. */
+  refuse(connectionId: string) {
+    this.refused.add(connectionId)
+    this.dropPeer(connectionId)
+  }
+
+  /** Connect to someone who was refused until now. */
+  async connectTo(connectionId: string) {
+    this.refused.delete(connectionId)
+    if (!this.joined || this.viaServer) return
+    if (this.opening) { await this.opening; if (!this.joined || this.viaServer) return }
+    try { await this.offer(connectionId) }
+    catch (e) { this.events.log('Offer failed: ' + (e instanceof Error ? e.message : e)) }
+  }
+
+  async join(existing: VoiceParticipantDto[], pass: SfuPassDto | null = null, silenced = false, refused: readonly string[] = []) {
     await this.leave()
+    this.refused = new Set(refused)
     this.silencedSelf = silenced
     for (const p of existing) if (p.silenced) this.silencedPeers.add(p.connectionId)
     const sitting = ++this.sitting
@@ -378,6 +400,7 @@ export class VoiceEngine {
     } else {
       for (const p of existing) {
         if (this.sitting !== sitting) return
+        if (this.refused.has(p.connectionId)) continue
         try { await this.offer(p.connectionId) }
         catch (e) { this.events.log(`Offer to ${p.username} failed: ${e instanceof Error ? e.message : e}`) }
       }
@@ -615,12 +638,14 @@ export class VoiceEngine {
   async removePeer(connectionId: string) {
     this.wanted.delete(connectionId)
     this.silencedPeers.delete(connectionId)
+    this.refused.delete(connectionId)
     this.dropPeer(connectionId)
   }
 
   async handleSignal(s: VoiceSignalDto) {
     // Through a stream server no app sets anything up with another.
     if (!this.joined || this.viaServer) return
+    if (this.refused.has(s.fromConnectionId)) return
     // We may have only just joined, with our own microphone still opening. The connection is made once it is open, so
     // that it carries our voice as well as theirs. (Messages that wait here are handled in the order they came.)
     if (this.opening) { await this.opening; if (!this.joined || this.viaServer) return }

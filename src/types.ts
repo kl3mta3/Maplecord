@@ -88,6 +88,11 @@ export interface WebhookDto { id: string; channelId: string; guildId: string; na
 export interface ApplicationDto { id: string; name: string; description: string | null; ownerId: string; botUserId: string; botUsername: string; interactionsUrl: string | null; createdAt: string; token?: string | null; interactionsSecret?: string | null
   /** A P2P bot: it connects straight to people's apps in the P2P channels it was let into, and does nothing else. Fixed when the bot is made. */
   direct?: boolean
+  /** Its owner lets it join voice channels: ordinary ones for an ordinary bot, P2P ones for a P2P bot. Never video. */
+  voice?: boolean
+  /** Stopped by whoever runs this Maplecord: for now (suspended), or for good and taken out of its servers (banned). */
+  suspended?: boolean
+  banned?: boolean
 }
 /** A P2P bot added to the server, and whether it has been let into one P2P channel. */
 export interface ChannelBotDto { applicationId: string; botUserId: string; name: string; granted: boolean }
@@ -208,6 +213,8 @@ export interface VoiceParticipantDto {
   publicKey?: string | null; seal?: string | null
   /** They cannot be heard here: they may not speak in this channel, or a moderator muted them. */
   silenced?: boolean
+  /** A bot. In a P2P call this app connects to one only if the person agreed to that bot by name. */
+  bot?: boolean
 }
 /** The server's rules for sharing video. Minutes of 0 mean never. */
 export interface StreamSettingsDto {

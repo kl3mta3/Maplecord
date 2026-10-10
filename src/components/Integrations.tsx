@@ -192,8 +192,9 @@ export function MyBots({ api }: { api: Api }) {
     if (saved.token) setFresh({ id: saved.id, token: saved.token, secret: saved.interactionsSecret ?? null })
   }
   const [direct, setDirect] = useState(false)
-  const create = () => run(async () => { keep(await api.createApplication(name.trim(), direct)); setName(''); setDirect(false) })
-  const patch = (id: string, change: { name?: string; description?: string; interactionsUrl?: string }) => run(async () => keep(await api.updateApplication(id, change)))
+  const [inVoice, setInVoice] = useState(false)
+  const create = () => run(async () => { keep(await api.createApplication(name.trim(), direct, inVoice)); setName(''); setDirect(false); setInVoice(false) })
+  const patch = (id: string, change: { name?: string; description?: string; interactionsUrl?: string; voice?: boolean }) => run(async () => keep(await api.updateApplication(id, change)))
   const renew = (id: string) => run(async () => keep(await api.regenerateApplication(id)))
   const remove = (id: string) => run(async () => {
     await api.deleteApplication(id)
@@ -218,6 +219,12 @@ export function MyBots({ api }: { api: Api }) {
           ? 'A P2P bot connects straight to people\'s apps in the P2P channels it is let into, one channel at a time, in private servers only. It has no commands, cannot read or post in ordinary channels, and each person is asked before their app connects to it. This cannot be changed after the bot is made.'
           : 'An ordinary bot talks to the server: slash commands, messages in ordinary channels. It is never in a P2P channel. This cannot be changed after the bot is made.'}
       </div>
+      <label className="row"><input type="checkbox" checked={inVoice} onChange={e => setInVoice(e.target.checked)} /> <span>{direct ? 'Let it join P2P voice channels' : 'Let it join voice channels'}</span></label>
+      <div className="muted">
+        {direct
+          ? 'Only the P2P voice channels it is let into, never an ordinary one. It can be heard there and can never share video. Each person is asked before their app connects to it. You can change this later.'
+          : 'Ordinary voice channels only, never a P2P one. It can be heard there and can never share video. You can change this later.'}
+      </div>
 
       {bots === null && !problem && <div className="muted">Loading…</div>}
       {bots?.length === 0 && <div className="muted">You have not made any bots.</div>}
@@ -233,6 +240,17 @@ export function MyBots({ api }: { api: Api }) {
             <ConfirmButton label="Delete" sure="Delete this bot?" onConfirm={() => void remove(b.id)} />
           </div>
           <Secret label="Bot ID" value={b.id} />
+          {(b.banned || b.suspended) && (
+            <div className="muted bad">
+              {b.banned
+                ? 'Whoever runs this Maplecord has banned this bot. It was taken out of its servers and cannot connect or be added to one.'
+                : 'Whoever runs this Maplecord has suspended this bot. It cannot connect until they restore it.'}
+            </div>
+          )}
+          <label className="row">
+            <input type="checkbox" checked={!!b.voice} onChange={e => void patch(b.id, { voice: e.target.checked })} />
+            <span>{b.direct ? 'May join the P2P voice channels it is let into' : 'May join voice channels'}</span>
+          </label>
           {!b.direct && (
             <div className="row">
               <input className="grow" defaultValue={b.interactionsUrl ?? ''} placeholder="Web address to send its slash commands to (optional)" aria-label="Slash command address"

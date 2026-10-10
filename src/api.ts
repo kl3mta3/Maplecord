@@ -122,11 +122,11 @@ export class Api {
 
   /** The bots this person has made. */
   applications() { return this.request<ApplicationDto[]>('GET', '/api/applications') }
-  createApplication(name: string, direct = false) { return this.request<ApplicationDto>('POST', '/api/applications', { name, direct }) }
+  createApplication(name: string, direct = false, voice = false) { return this.request<ApplicationDto>('POST', '/api/applications', { name, direct, voice }) }
   /** The P2P bots in a P2P channel; for someone who may decide that, also the ones that could be let in. */
   channelBots(channelId: string) { return this.request<ChannelBotDto[]>('GET', `/api/channels/${channelId}/p2p-bots`) }
   letBotIn(channelId: string, applicationId: string, on: boolean) { return this.request<void>(on ? 'PUT' : 'DELETE', `/api/channels/${channelId}/p2p-bots/${applicationId}`) }
-  updateApplication(id: string, patch: { name?: string; description?: string; interactionsUrl?: string }) { return this.request<ApplicationDto>('PATCH', `/api/applications/${id}`, patch) }
+  updateApplication(id: string, patch: { name?: string; description?: string; interactionsUrl?: string; voice?: boolean }) { return this.request<ApplicationDto>('PATCH', `/api/applications/${id}`, patch) }
   /** Gives it a new token; the old one stops working. */
   regenerateApplication(id: string) { return this.request<ApplicationDto>('POST', `/api/applications/${id}/regenerate`) }
   deleteApplication(id: string) { return this.request<void>('DELETE', `/api/applications/${id}`) }
