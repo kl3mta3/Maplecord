@@ -150,7 +150,7 @@ export function ServerBotsTab({ api, guildId, canManage, onRoles, onManage, full
       <div className="muted">
         A bot joins the server as a member. What it may see and do is set with roles, like anyone else: it starts with
         what everyone has, and you can give it more or less. Bots are made under Settings, My bots; whoever made one
-        can give you its ID. Manage sets who can use a bot's slash commands, and where.
+        can give you its ID. Manage sets who can use a bot's commands, and where.
       </div>
       <div className="muted">
         {fullP2P
@@ -179,8 +179,8 @@ export function ServerBotsTab({ api, guildId, canManage, onRoles, onManage, full
               <b>{b.name}</b> <span className="muted">@{b.botUsername}</span>
               {b.description && <div className="muted">{b.description}</div>}
             </div>
-            {/* A P2P bot has no commands, so there is nothing to manage. */}
-            {onManage && !b.direct && <button className="subtle" onClick={() => onManage(b)}>Manage</button>}
+            {/* For an ordinary bot, its slash commands; for a P2P bot, the commands people type to it. */}
+            {onManage && <button className="subtle" onClick={() => onManage(b)}>Manage</button>}
             {onRoles && <button className="subtle" onClick={() => onRoles(b.botUserId)}>Roles</button>}
             {canManage && <ConfirmButton label="Remove" sure="Remove it from this server?" onConfirm={() => void remove(b.id)} />}
           </div>
@@ -274,8 +274,10 @@ export function BotCommandsDialog({ api, guildId, bot, roles, members, channels,
   onClose: () => void
 }) {
   const people = members.filter(m => !m.isBot)
-  // Where a command can be typed at all: not a P2P channel, where nothing typed goes to the server.
-  const places = channels.filter(c => c.type !== ChannelType.Category && !c.directSince)
+  // Where a command can be used at all. An ordinary bot's slash commands go through the server, so not in a P2P
+  // channel; what is typed to a P2P bot goes straight to it, so only in one.
+  const typed = !!bot.direct
+  const places = channels.filter(c => c.type !== ChannelType.Category && !!c.directSince === typed)
   const [saved, setSaved] = useState<CommandRulesDto | null>(null)
   const [whole, setWhole] = useState<CommandRuleDto>(OPEN_RULE)
   const [own, setOwn] = useState<Record<string, CommandRuleDto | null>>({})
@@ -320,8 +322,9 @@ export function BotCommandsDialog({ api, guildId, bot, roles, members, channels,
     <Dialog title={`Manage ${bot.name}`} onClose={onClose} wide scrolls>
       <div className="integrations">
         <div className="muted">
-          Who can use this bot's slash commands in this server, and where. People are only offered the commands they
-          can use. Anyone who can manage the server can use all of them everywhere.
+          {typed
+            ? 'Who can use the commands people type to this bot in this server, and where. What is typed to a P2P bot goes straight to it and never through the server, so the bot is told what you set here and applies it itself. Anyone who can manage the server can use all of them everywhere.'
+            : 'Who can use this bot\'s slash commands in this server, and where. People are only offered the commands they can use. Anyone who can manage the server can use all of them everywhere.'}
         </div>
         {saved === null && !problem && <div className="muted">Loading…</div>}
         {saved && (
@@ -330,14 +333,14 @@ export function BotCommandsDialog({ api, guildId, bot, roles, members, channels,
               <b>All of its commands</b>
               <RuleEditor rule={whole} onChange={next => edit(() => setWhole(next))} roles={roles} people={people} places={places} />
             </div>
-            {saved.commands.length === 0 && <div className="muted">This bot has no slash commands here yet. What is set above applies to any it adds.</div>}
+            {saved.commands.length === 0 && <div className="muted">{typed ? 'This bot has not listed any commands yet. What is set above applies to any it lists.' : 'This bot has no slash commands here yet. What is set above applies to any it adds.'}</div>}
             {saved.commands.map(c => {
               const mine = own[c.name] ?? null
               return (
                 <div className="entry" key={c.name}>
                   <div className="row">
-                    <div className="grow"><b>/{c.name}</b>{c.description && <div className="muted">{c.description}</div>}</div>
-                    <select value={mine ? 'own' : 'bot'} aria-label={`Settings for /${c.name}`}
+                    <div className="grow"><b>{typed ? '' : '/'}{c.name}</b>{c.description && <div className="muted">{c.description}</div>}</div>
+                    <select value={mine ? 'own' : 'bot'} aria-label={`Settings for ${c.name}`}
                       onChange={e => edit(() => setOwn(all => ({ ...all, [c.name]: e.target.value === 'own' ? { ...whole } : null })))}>
                       <option value="bot">Same as all of its commands</option>
                       <option value="own">Its own settings</option>
@@ -399,14 +402,14 @@ export function MyBots({ api }: { api: Api }) {
       <label className="row"><input type="checkbox" checked={direct} onChange={e => setDirect(e.target.checked)} /> <span>Make it a P2P bot</span></label>
       <div className="muted">
         {direct
-          ? 'A P2P bot connects straight to people\'s apps in the P2P channels it is let into, one channel at a time, in one full P2P server only. It has no commands, cannot read or post in ordinary channels, and each person is asked before their app connects to it. This cannot be changed after the bot is made.'
+          ? 'A P2P bot connects straight to people\'s apps in the P2P channels it is let into, one channel at a time, in one full P2P server only. It has no slash commands, cannot read or post in ordinary channels, and each person is asked before their app connects to it. This cannot be changed after the bot is made.'
           : 'An ordinary bot talks to the server: slash commands, messages in ordinary channels. It is never in a P2P channel, and cannot be added to a full P2P server. This cannot be changed after the bot is made.'}
       </div>
       <label className="row"><input type="checkbox" checked={inVoice} onChange={e => setInVoice(e.target.checked)} /> <span>{direct ? 'Let it join P2P voice channels' : 'Let it join voice channels'}</span></label>
       <div className="muted">
         {direct
-          ? 'Only the P2P voice channels it is let into, never an ordinary one. It can be heard there and can never share video. Each person is asked before their app connects to it. You can change this later.'
-          : 'Ordinary voice channels only, never a P2P one, and not in a server that has P2P channels. It listens there. It is heard only where whoever runs this Maplecord lets bots be heard, and then for a short time at once. It can never share video. You can change this later.'}
+          ? 'Only the P2P voice channels it is let into, never an ordinary one. It is heard there, and shares video only if whoever runs this Maplecord lets bots. Each person is asked before their app connects to it. You can change this later.'
+          : 'Ordinary voice channels only, never a P2P one, and not in a server that has P2P channels. It listens there. It is heard only where whoever runs this Maplecord lets bots be heard, and then for a short time at once; the same goes for sharing video. You can change this later.'}
       </div>
 
       {bots === null && !problem && <div className="muted">Loading…</div>}

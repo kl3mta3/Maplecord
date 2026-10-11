@@ -47,6 +47,8 @@ export interface VoiceEngineEvents {
   log: (message: string) => void
   /** The stream server carrying this channel's voice was lost and could not be reached again: we are out of the call. */
   lost: (reason: string) => void
+  /** A bot is sending more sound than it may (see setPeerCap). It is no longer played here. */
+  overCap?: (connectionId: string, kbps: number) => void
 }
 
 interface Peer {
@@ -56,6 +58,8 @@ interface Peer {
   meter?: Meter
   /** Whether our connection to them goes through the relay; null until it is connected and we can tell. */
   relayed?: boolean | null
+  /** Where their voice arrives when it comes from the stream server, for counting what they send. */
+  receiver?: RTCRtpReceiver
 }
 
 interface Meter { ctx: AudioContext; analyser: AnalyserNode; buf: Float32Array<ArrayBuffer>; speaking: boolean; lastAbove: number; src: MediaStreamAudioSourceNode; gain?: GainNode }
@@ -440,7 +444,7 @@ export class VoiceEngine {
     room.on(RoomEvent.TrackPublished, (publication, who) => { if (mine()) want(publication, who) })
     room.on(RoomEvent.TrackSubscribed, (track, _publication, who) => {
       const id = voiceOf(who.identity)
-      if (id && mine() && track.kind === Track.Kind.Audio) this.hear(id, track.mediaStreamTrack)
+      if (id && mine() && track.kind === Track.Kind.Audio) this.hear(id, track.mediaStreamTrack, track.receiver)
     })
     room.on(RoomEvent.TrackUnsubscribed, (track, _publication, who) => {
       const id = voiceOf(who.identity)
@@ -513,10 +517,10 @@ export class VoiceEngine {
   }
 
   /** Someone's voice arrived from the stream server: play it, meter it, at the volume chosen for them. */
-  private hear(connectionId: string, track: MediaStreamTrack) {
+  private hear(connectionId: string, track: MediaStreamTrack, receiver?: RTCRtpReceiver) {
     this.dropPeer(connectionId)
     const audio = this.makeAudio()
-    const peer: Peer = { pc: null, audio }
+    const peer: Peer = { pc: null, audio, receiver }
     const stream = new MediaStream([track])
     audio.srcObject = stream
     void audio.play().catch(() => {})
@@ -557,6 +561,7 @@ export class VoiceEngine {
     void room?.disconnect()
     for (const id of [...this.peers.keys()]) await this.removePeer(id)
     window.clearInterval(this.meterTimer)
+    window.clearInterval(this.capTimer)
     if (this.localMeter) { this.localMeter.src.disconnect(); void this.localMeter.ctx.close(); this.localMeter = null }
     if (this.local) { for (const t of this.local.getTracks()) t.stop(); this.local = null }
     this.detector = null
@@ -564,6 +569,7 @@ export class VoiceEngine {
     this.silencedSelf = false
     this.silencedPeers.clear()
     this.musicPeers.clear()
+    this.caps.clear(); this.capSeen.clear(); this.overCap.clear()
     // With push to talk on, nothing is sent until the key is held, from the first moment of the next call.
     this.sending = !this.push
     this.events.speaking(null, false)
@@ -600,6 +606,47 @@ export class VoiceEngine {
     if (music) this.musicPeers.add(connectionId); else this.musicPeers.delete(connectionId)
   }
 
+  // ---- A bot's sound limit ----
+  // A bot being heard in an ordinary voice channel may send only so much sound. The server cannot measure it: sound
+  // is encrypted between the apps. So each app listening counts what arrives from the bot, and one that finds it
+  // over the limit stops playing it and says so, which ends the bot's turn for everyone.
+  private caps = new Map<string, number>()
+  private capSeen = new Map<string, { bytes: number; at: number; over: number }>()
+  private overCap = new Set<string>()
+  private capTimer: number | undefined
+
+  /** The most sound someone in the call may send, in kilobits a second, or null for no limit. Counting starts afresh. */
+  setPeerCap(connectionId: string, kbps: number | null) {
+    if (kbps && kbps > 0) this.caps.set(connectionId, kbps); else this.caps.delete(connectionId)
+    this.capSeen.delete(connectionId)
+    const peer = this.peers.get(connectionId)
+    if (this.overCap.delete(connectionId) && peer) this.applyAudio(connectionId, peer)
+  }
+
+  private async checkCaps() {
+    for (const [id, cap] of this.caps) {
+      const peer = this.peers.get(id)
+      if (!peer || this.overCap.has(id) || this.silencedPeers.has(id)) { this.capSeen.delete(id); continue }
+      const receiver = peer.receiver ?? peer.pc?.getReceivers().find(r => r.track?.kind === 'audio')
+      if (!receiver) continue
+      let bytes = 0
+      try { (await receiver.getStats()).forEach(s => { if (s.type === 'inbound-rtp') bytes += (s as { bytesReceived?: number }).bytesReceived ?? 0 }) }
+      catch { continue }
+      const now = performance.now(), before = this.capSeen.get(id)
+      if (!before) { this.capSeen.set(id, { bytes, at: now, over: 0 }); continue }
+      if (now - before.at < 1000) continue
+      // Bytes of sound alone (no packet headers), over the time since the last look.
+      const kbps = (bytes - before.bytes) * 8 / (now - before.at)
+      // A quarter over, twice running: a codec's rate wanders, and one busy moment is not a bot breaking the rule.
+      const over = kbps > cap * 1.25 + 4 ? before.over + 1 : 0
+      if (over < 2) { this.capSeen.set(id, { bytes, at: now, over }); continue }
+      this.capSeen.delete(id)
+      this.overCap.add(id)
+      this.applyAudio(id, peer)
+      this.events.overCap?.(id, Math.round(kbps))
+    }
+  }
+
   /** Whether someone else in the call can be heard. When not, nothing of theirs is played here. */
   setPeerSilenced(connectionId: string, silenced: boolean) {
     if (silenced) this.silencedPeers.add(connectionId); else this.silencedPeers.delete(connectionId)
@@ -624,7 +671,7 @@ export class VoiceEngine {
 
   private applyAudio(connectionId: string, peer: Peer) {
     const chosen = this.wanted.get(connectionId) ?? { volume: 1, muted: false }
-    const want = { volume: chosen.volume * this.master, muted: chosen.muted || this.deafened || this.silencedPeers.has(connectionId) }
+    const want = { volume: chosen.volume * this.master, muted: chosen.muted || this.deafened || this.silencedPeers.has(connectionId) || this.overCap.has(connectionId) }
     const meter = peer.meter
     // An iPhone ignores the element's volume altogether (see volume.ts), so there quieter goes the same way as louder,
     // as long as the context is allowed to make a sound; if it is not, full volume beats silence.
@@ -652,6 +699,7 @@ export class VoiceEngine {
     this.wanted.delete(connectionId)
     this.silencedPeers.delete(connectionId)
     this.musicPeers.delete(connectionId)
+    this.caps.delete(connectionId); this.capSeen.delete(connectionId); this.overCap.delete(connectionId)
     this.refused.delete(connectionId)
     this.dropPeer(connectionId)
   }
@@ -762,6 +810,8 @@ export class VoiceEngine {
       }
       for (const [id, peer] of this.peers) if (peer.meter) this.measure(peer.meter, id)
     }, 80)
+    window.clearInterval(this.capTimer)
+    this.capTimer = window.setInterval(() => { if (this.caps.size > 0) void this.checkCaps() }, 2500)
   }
 
   private measure(m: Meter, id: string | null) {

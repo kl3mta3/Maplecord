@@ -255,6 +255,8 @@ export class VoiceHub {
   setMuted(muted: boolean) { return this.c.invoke('SetMuted', muted) }
   /** Says whether we hear anyone, for the others to see. A server from before it kept that simply does not answer. */
   setDeafened(deafened: boolean) { return this.c.invoke('SetDeafened', deafened).catch(() => { /* an older server: nobody is told */ }) }
+  /** A bot in our voice channel is sending more sound than it may: the server ends its turn. */
+  reportBotSound(connectionId: string, kbps: number) { return this.c.invoke('ReportBotSound', connectionId, kbps).catch(() => { /* an older server, or the bot has gone */ }) }
   /**
    * Tell the channel we are sharing. Where the channel has a stream server the reply is a pass to send the video
    * there once; otherwise null, and each viewer is connected to one by one. A server from before stream servers

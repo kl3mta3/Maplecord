@@ -319,6 +319,8 @@ export function useMaplecord() {
     level: () => { /* used by the audio settings meter */ },
     log: m => console.debug('[voice]', m),
     lost: reason => voiceLostRef.current(reason),
+    // A bot sending more sound than it may: it is no longer played here, and the server is told, which ends its turn.
+    overCap: (id, kbps) => { void voiceHub.reportBotSound(id, kbps) },
   }))
 
   // ---- Shared video (see stream.ts). The engine holds the live MediaStreams; `streamTick` re-renders when it changes.
@@ -836,6 +838,7 @@ export function useMaplecord() {
         if (cur?.channelId === c && !cur.participants.some(x => x.connectionId === p.connectionId))
           playSound('join', settingsRef.current.soundProfile, settingsRef.current.soundEnabled)
         voiceEngine.setPeerSilenced(p.connectionId, !!p.silenced)
+        voiceEngine.setPeerCap(p.connectionId, p.bot ? p.kbps ?? null : null)
         // A bot in a P2P call is asked for stereo: it may be there to play music.
         voiceEngine.setPeerMusic(p.connectionId, !!p.bot && cur?.channelId === c && !!cur.directSince)
         // A bot arriving in a P2P call: nothing it sends is answered unless this person has agreed to it.
@@ -862,7 +865,11 @@ export function useMaplecord() {
         if (!p.stream) streamEngine.unwatch(p.connectionId)
         // Whether they can be heard: ourselves (our app stops sending) or someone else (our app stops playing them).
         if (p.connectionId === voiceHub.connectionId) voiceEngine.setSilenced(!!p.silenced)
-        else voiceEngine.setPeerSilenced(p.connectionId, !!p.silenced)
+        else {
+          voiceEngine.setPeerSilenced(p.connectionId, !!p.silenced)
+          // A bot beginning a turn of being heard comes with the most it may send; counting starts afresh with each turn.
+          if (p.bot) voiceEngine.setPeerCap(p.connectionId, p.silenced ? null : p.kbps ?? null)
+        }
         setVoice(v => (v && v.channelId === c
           ? { ...v, participants: v.participants.map(x => (x.connectionId === p.connectionId ? { ...x, muted: p.muted, stream: p.stream ?? null, silenced: !!p.silenced, deafened: !!p.deafened } : x)) } : v))
       },
@@ -2088,7 +2095,11 @@ export function useMaplecord() {
         } catch { /* not worth an error banner */ }
       })()
       if (isMuted) void voiceHub.setMuted(true)
-      try { await voiceEngine.join(others, answer.pass, voiceHub.selfSilenced, keptAway.map(p => p.connectionId), directSince ? others.filter(p => p.bot).map(p => p.connectionId) : []) }
+      try {
+        await voiceEngine.join(others, answer.pass, voiceHub.selfSilenced, keptAway.map(p => p.connectionId), directSince ? others.filter(p => p.bot).map(p => p.connectionId) : [])
+        // Any bot being heard among them comes with the most it may send (joining starts by clearing every limit).
+        for (const p of others) if (p.bot && !p.silenced && p.kbps) voiceEngine.setPeerCap(p.connectionId, p.kbps)
+      }
       catch (e) {
         // No way in at all is different from no microphone: we are not in the call, and the server is told so.
         if (e instanceof VoiceConnectError) { await leaveVoice(); throw e }

@@ -208,6 +208,8 @@ export interface MediaItem { key: string; messageId: string; threadId: string | 
 export interface RollStatsDto { rolls: number; sum: number; hundreds: number; ones: number; wins: number; losses: number }
 /** stream: what they are sharing with the channel, if anything ("screen", "window" or "camera"). */
 export interface VoiceParticipantDto {
+  /** For a bot being heard in an ordinary voice channel: the most sound it may send, in kilobits a second. This app holds it to that. */
+  kbps?: number | null
   userId: string; username: string; connectionId: string; muted: boolean; stream?: string | null
   /** In a P2P call only: the signing key of their app, and its one-off key for sealing set-up messages to them. */
   publicKey?: string | null; seal?: string | null
