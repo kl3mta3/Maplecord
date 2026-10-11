@@ -587,7 +587,10 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
                                       onClick={() => void (on ? store.unwatchStream(p.connectionId) : store.watchStream(p.connectionId))}>{on ? 'WATCHING' : 'LIVE'}</button>
                                   : <span className="livebadge still" title={mineHere ? `You are sharing your ${what}` : `Sharing their ${what}. Join the channel to watch.`}>LIVE</span>
                               })()}
-                              {p.silenced
+                              {p.silenced && p.bot
+                                // A bot in an ordinary voice channel listens, and is heard only for a turn it asked for.
+                                ? <span className="vstate" title="A bot, listening. It is not being heard right now."><MicOff size={13} /></span>
+                                : p.silenced
                                 ? <span title={g.members.find(m => m.userId === p.userId)?.voiceMuted ? 'Muted by a moderator' : 'May not speak in this channel'}>🚫</span>
                                 : p.muted && <span className="vstate" title="Microphone muted"><MicOff size={13} /></span>}
                               {p.deafened && <span className="vstate" title="Deafened: not hearing anyone"><HeadphoneOff size={13} /></span>}
@@ -723,7 +726,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       {dialog?.kind === 'addGuild' && <AddServerDialog onCreate={() => setDialog({ kind: 'createGuild' })} onJoin={() => setDialog({ kind: 'joinGuild' })} onDiscover={() => setDialog({ kind: 'discover' })} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'joinGuild' && <JoinServerDialog example={inviteBase} onJoin={store.joinGuild} onBack={() => setDialog({ kind: 'addGuild' })} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'discover' && <DiscoverDialog api={store.api} onJoin={store.joinPublicGuild} onOpen={store.selectGuild} onBack={() => setDialog({ kind: 'addGuild' })} onClose={() => setDialog(null)} />}
-      {dialog?.kind === 'createChannel' && g && <CreateChannelDialog initialType={dialog.category ? ChannelType.Category : ChannelType.Text} categories={g.channels.filter(c => c.type === ChannelType.Category)} canDirect={can(Permission.ManageDirectChannels) && !g.guild.isPublic} onSubmit={store.createChannel} onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'createChannel' && g && <CreateChannelDialog initialType={dialog.category ? ChannelType.Category : ChannelType.Text} categories={g.channels.filter(c => c.type === ChannelType.Category)} canDirect={can(Permission.ManageDirectChannels) && !g.guild.isPublic} allDirect={!!g.guild.fullP2P} onSubmit={store.createChannel} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'startRoll' && <StartRollDialog kind={dialog.rollKind} onSubmit={store.startRoll} onClose={() => setDialog(null)} searchItems={store.plugins.some(x => x.items.length > 0) ? store.searchItems : undefined} />}
       {dialog?.kind === 'plugins' && <PluginsDialog store={store} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'leaveGuild' && g && (
@@ -767,7 +770,8 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           })),
         } as MenuEntry] : []),
         // A public server has no P2P channels; one that somehow has can still be turned back into a relayed one.
-        ...(menu.voice && can(Permission.ManageChannels) && can(Permission.ManageDirectChannels) && (menu.direct || !g?.guild.isPublic)
+        // In a full P2P server every channel is P2P and stays so.
+        ...(menu.voice && !g?.guild.fullP2P && can(Permission.ManageChannels) && can(Permission.ManageDirectChannels) && (menu.direct || !g?.guild.isPublic)
           ? [{ kind: 'item', label: menu.direct ? 'Make it a relayed channel' : 'Make it a P2P channel', icon: '⇄', onClick: () => setDialog({ kind: 'channelKind', channelId: menu.channelId, name: menu.name, direct: !menu.direct }) } as MenuEntry] : []),
         ...(can(Permission.ManageChannels) ? [
           { kind: 'sep' } as MenuEntry,
@@ -963,8 +967,10 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
     if (!text.startsWith('/')) return []
     const typed = text.slice(1).split(/\s/)[0].toLowerCase()
     const builtin = BUILTIN_COMMANDS.filter(c => c.name.startsWith(typed)).map(c => ({ id: 'builtin:' + c.name, name: c.name, description: c.description, applicationName: 'Maplecord', options: [] as CommandDto['options'] }))
-    return [...builtin, ...store.commands.filter(c => c.name.startsWith(typed))].slice(0, 8)
-  }, [text, store.commands])
+    // A command the server keeps to certain channels is only offered in those.
+    const here = store.selectedChannel?.id
+    return [...builtin, ...store.commands.filter(c => c.name.startsWith(typed) && (!c.channelIds || (!!here && c.channelIds.includes(here))))].slice(0, 8)
+  }, [text, store.commands, store.selectedChannel?.id])
 
   /**
    * Header buttons: with a roll already open, left-click rolls *in* it (Roll → roll, Need/Greed → need) so there is

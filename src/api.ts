@@ -1,5 +1,5 @@
 import type {
-  AccountDeletionDto, ApplicationDto, QrDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto, RollStatsDto, SearchResultDto, MediaItemDto, SignInMethodsDto, ContactEmailDto, ConnectionDto, ConnectionServiceDto, FriendLinkDto, FriendLinkOwnerDto } from './types'
+  AccountDeletionDto, ApplicationDto, CommandRuleDto, CommandRulesDto, QrDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto, RollStatsDto, SearchResultDto, MediaItemDto, SignInMethodsDto, ContactEmailDto, ConnectionDto, ConnectionServiceDto, FriendLinkDto, FriendLinkOwnerDto } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -137,6 +137,10 @@ export class Api {
   guildApplications(guildId: string) { return this.request<ApplicationDto[]>('GET', `/api/guilds/${guildId}/applications`) }
   addGuildApplication(guildId: string, appId: string) { return this.request<ApplicationDto>('POST', `/api/guilds/${guildId}/applications/${encodeURIComponent(appId)}`) }
   removeGuildApplication(guildId: string, appId: string) { return this.request<void>('DELETE', `/api/guilds/${guildId}/applications/${appId}`) }
+  /** Who may use a bot's slash commands in a server, and where. Needs Manage Server. */
+  commandRules(guildId: string, appId: string) { return this.request<CommandRulesDto>('GET', `/api/guilds/${guildId}/applications/${appId}/command-rules`) }
+  /** Sets the rule for the bot as a whole (no command) or for one command; no rule takes it away. Answers with all of them. */
+  setCommandRule(guildId: string, appId: string, command: string | null, rule: CommandRuleDto | null) { return this.request<CommandRulesDto>('PUT', `/api/guilds/${guildId}/applications/${appId}/command-rules`, { command, rule }) }
 
   /** What deleting the account would take with it (the servers it owns, its bots). */
   deletionPreview() { return this.request<AccountDeletionDto>('GET', '/api/me/deletion') }

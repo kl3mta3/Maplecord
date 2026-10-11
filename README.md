@@ -60,6 +60,8 @@ one.
 ### Everywhere
 
 - A desktop app, and the same thing in a browser. On a phone it can be added to the home screen.
+- Closing the desktop app's window leaves it running beside the clock. Its icon there shows a red dot when there is
+  something new to read; click it to open the window, right-click it to mute Maplecord, open the website or quit.
 - Colour themes
 - Sign in with Google or GitHub, and with Microsoft or Twitch where the server offers them. There is no password.
 - Add a second way to sign in to your account (Steam and Battle.net included, where the server offers them), so you
@@ -157,7 +159,8 @@ The desktop app updates itself on Windows. When it starts it asks the Maplecord 
 (`VITE_SERVER_URL`) whether there is a newer release; the server asks GitHub, the app does not. If there is one, the
 app downloads it from that release, checks it against its size and digest, and puts it in place before its window
 opens: an installed copy runs the new installer silently, a portable copy unpacks the new zip over its own folder.
-Then it starts again.
+Then it starts again. The check is made only as the app starts, so a copy left running beside the clock gets a new
+release the next time it is quit and started.
 
 An update is only ever taken from the releases of the repository named in `package.json` (`repository`). If
 anything goes wrong the app opens as it was and says so, and it does not try the same version again for a week.
@@ -242,7 +245,7 @@ No ads. No trackers. The app loads nothing from anyone but the Maplecord server.
 ## Layout
 
 ```
-electron/   main process: windows, overlay, hotkeys, plugins, sound packs
+electron/   main process: windows, the icon beside the clock, overlay, hotkeys, plugins, sound packs
 src/        UI (React + TypeScript)
 plugins/    plugin format + example
 tools/      sound generator

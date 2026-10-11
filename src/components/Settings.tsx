@@ -1,10 +1,10 @@
 import { TagSettings } from './Tags'
 import { useEffect, useRef, useState } from 'react'
 import { isElectron } from '../platform'
-import { ChannelType, Permission, hasPermission, type ChannelDto, type GuildDto, type MemberDto, type RoleDto } from '../types'
+import { ChannelType, Permission, hasPermission, type ApplicationDto, type ChannelDto, type GuildDto, type MemberDto, type RoleDto } from '../types'
 import type { Api } from '../api'
 import { Dialog } from './Dialogs'
-import { ServerBotsTab, WebhooksTab } from './Integrations'
+import { BotCommandsDialog, ServerBotsTab, WebhooksTab } from './Integrations'
 import { ListingSettings } from './Servers'
 
 // ---- Overlay / roll settings ---------------------------------------------------
@@ -107,7 +107,10 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, myP
   useEffect(() => { setDraft(role ? { name: role.name, color: role.color, permissions: role.permissions } : null) }, [role])
   const [memberId, setMemberId] = useState<string>('')
   const member = members.find(m => m.userId === memberId) ?? null
+  /** The bot whose command permissions are open. It takes the place of this dialog, and closing it comes back here. */
+  const [managing, setManaging] = useState<ApplicationDto | null>(null)
 
+  if (managing) return <BotCommandsDialog api={api} guildId={guild.id} bot={managing} roles={sorted.filter(r => !r.isEveryone)} members={members} channels={channels} onClose={() => setManaging(null)} />
   return (
     <Dialog title={`Server settings — ${guild.name}`} onClose={onClose} wide scrolls>
       <div className="tabs">
@@ -119,7 +122,8 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, myP
       </div>
 
       {tab === 'webhooks' && <WebhooksTab api={api} guildId={guild.id} channels={channels} />}
-      {tab === 'bots' && <ServerBotsTab api={api} guildId={guild.id} canManage={canGuild}
+      {tab === 'bots' && <ServerBotsTab api={api} guildId={guild.id} canManage={canGuild} onManage={canGuild ? setManaging : undefined}
+        fullP2P={!!guild.fullP2P} hasP2PChannels={channels.some(c => !!c.directSince)}
         onRoles={canRoles ? botUserId => { setMemberId(botUserId); setTab('members') } : undefined} />}
 
       {tab === 'overview' && (

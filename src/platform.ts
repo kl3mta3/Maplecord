@@ -78,6 +78,10 @@ export interface MaplecordBridge {
   onPushKey(handler: (held: boolean) => void): () => void
   /** A newer version of the app that could not install itself at start-up, once; null when there is none to mention. */
   takeUpdateNotice(): Promise<{ version: string; reason: string } | null>
+  /** Says whether there is something new to read, which puts a red dot on the app's icon beside the clock. */
+  setUnread(has: boolean): void
+  /** Brings the window back when it has been put away beside the clock. */
+  showWindow(): void
   /** The maplecord:// invite link the app was started or woken by, once; null when there is none waiting. */
   takeInviteLink(): Promise<string | null>
   /** Told when such a link arrives while the app is running; take it with takeInviteLink. */

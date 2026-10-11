@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useId, useState } from 'react'
 import type { Api } from '../api'
-import { ChannelType, type ApplicationDto, type ChannelDto, type WebhookDto } from '../types'
+import { ChannelType, type ApplicationDto, type ChannelDto, type CommandRuleDto, type CommandRulesDto, type MemberDto, type RoleDto, type WebhookDto } from '../types'
+import { Dialog } from './Dialogs'
 
 /** Something shown once and never again (a webhook's address, a bot's token), with a button to copy it. */
 function Secret({ label, value }: { label: string; value: string }) {
@@ -112,10 +113,16 @@ export function WebhooksTab({ api, guildId, channels }: { api: Api; guildId: str
 }
 
 /** Server settings: the bots that have been added to this server. Adding or removing one needs Manage Server. */
-export function ServerBotsTab({ api, guildId, canManage, onRoles }: {
+export function ServerBotsTab({ api, guildId, canManage, onRoles, onManage, fullP2P = false, hasP2PChannels = false }: {
   api: Api; guildId: string; canManage: boolean
+  /** The kind of server decides the kind of bot: a full P2P server takes P2P bots only, any other ordinary bots only. */
+  fullP2P?: boolean
+  /** A server with P2P channels in it (and not a full P2P one) keeps its bots out of its voice channels. */
+  hasP2PChannels?: boolean
   /** Opens the roles of one bot (by its member id), when the person may manage roles. */
   onRoles?: (botUserId: string) => void
+  /** Opens who may use one bot's slash commands, and where. */
+  onManage?: (bot: ApplicationDto) => void
 }) {
   const [bots, setBots] = useState<ApplicationDto[] | null>(null)
   const [mine, setMine] = useState<ApplicationDto[]>([])
@@ -136,14 +143,19 @@ export function ServerBotsTab({ api, guildId, canManage, onRoles }: {
     await api.removeGuildApplication(guildId, appId)
     setBots(list => (list ?? []).filter(b => b.id !== appId))
   })
-  const addable = mine.filter(m => !(bots ?? []).some(b => b.id === m.id))
+  const addable = mine.filter(m => !!m.direct === fullP2P && !(bots ?? []).some(b => b.id === m.id))
 
   return (
     <div className="integrations">
       <div className="muted">
         A bot joins the server as a member. What it may see and do is set with roles, like anyone else: it starts with
         what everyone has, and you can give it more or less. Bots are made under Settings, My bots; whoever made one
-        can give you its ID.
+        can give you its ID. Manage sets who can use a bot's slash commands, and where.
+      </div>
+      <div className="muted">
+        {fullP2P
+          ? 'This is a full P2P server, so only P2P bots can be added to it. A P2P bot sees nothing until it is let into a channel (right-click the channel).'
+          : 'Only ordinary bots can be added to this server. A P2P bot is for a full P2P server.' + (hasP2PChannels ? ' This server has P2P channels, so its bots are kept out of its voice channels.' : '')}
       </div>
       {canManage && (
         <div className="row">
@@ -167,6 +179,8 @@ export function ServerBotsTab({ api, guildId, canManage, onRoles }: {
               <b>{b.name}</b> <span className="muted">@{b.botUsername}</span>
               {b.description && <div className="muted">{b.description}</div>}
             </div>
+            {/* A P2P bot has no commands, so there is nothing to manage. */}
+            {onManage && !b.direct && <button className="subtle" onClick={() => onManage(b)}>Manage</button>}
             {onRoles && <button className="subtle" onClick={() => onRoles(b.botUserId)}>Roles</button>}
             {canManage && <ConfirmButton label="Remove" sure="Remove it from this server?" onConfirm={() => void remove(b.id)} />}
           </div>
@@ -174,6 +188,175 @@ export function ServerBotsTab({ api, guildId, canManage, onRoles }: {
       ))}
       {problem && <div className="muted bad">{problem}</div>}
     </div>
+  )
+}
+
+const OPEN_RULE: CommandRuleDto = { everyone: true, roleIds: [], userIds: [], allChannels: true, channelIds: [] }
+
+/** A rule as the server keeps it: nothing named where everyone or everywhere is chosen, and in one order, so two can be compared. */
+function tidy(rule: CommandRuleDto | null): string {
+  if (!rule) return ''
+  return JSON.stringify([rule.everyone, rule.everyone ? [] : [...rule.roleIds].sort(), rule.everyone ? [] : [...rule.userIds].sort(), rule.allChannels, rule.allChannels ? [] : [...rule.channelIds].sort()])
+}
+/** What is missing from a rule before it can be saved, if anything. */
+function lacking(rule: CommandRuleDto | null): string | null {
+  if (!rule) return null
+  if (!rule.everyone && rule.roleIds.length + rule.userIds.length === 0) return 'Choose at least one role or person, or let everyone use it.'
+  if (!rule.allChannels && rule.channelIds.length === 0) return 'Choose at least one channel, or allow it in all of them.'
+  return null
+}
+
+/** One rule being edited: everyone or only these roles and people, every channel or only these. */
+function RuleEditor({ rule, onChange, roles, people, places }: {
+  rule: CommandRuleDto; onChange: (next: CommandRuleDto) => void
+  roles: RoleDto[]; people: MemberDto[]; places: ChannelDto[]
+}) {
+  const group = useId()
+  const flip = (list: string[], id: string, on: boolean) => (on ? [...list.filter(x => x !== id), id] : list.filter(x => x !== id))
+  const nameOf = (id: string) => { const m = people.find(p => p.userId === id); return m ? m.nickname || m.username : 'Someone' }
+  const missing = lacking(rule)
+  return (
+    <div className="ruleedit">
+      <div className="muted">Who can use it</div>
+      <label className="choice"><input type="radio" name={group + 'who'} checked={rule.everyone} onChange={() => onChange({ ...rule, everyone: true })} /> Everyone</label>
+      <label className="choice"><input type="radio" name={group + 'who'} checked={!rule.everyone} onChange={() => onChange({ ...rule, everyone: false })} /> Only these roles and people</label>
+      {!rule.everyone && (
+        <div className="picks">
+          {roles.map(r => (
+            <label key={r.id} className="choice">
+              <input type="checkbox" checked={rule.roleIds.includes(r.id)} onChange={e => onChange({ ...rule, roleIds: flip(rule.roleIds, r.id, e.target.checked) })} />
+              <span className="swatch" style={{ background: r.color ?? 'var(--muted)' }} /><span style={{ color: r.color ?? undefined }}>{r.name}</span>
+            </label>
+          ))}
+          {roles.length === 0 && <div className="muted">This server has no roles yet.</div>}
+          <select value="" aria-label="Add a person" onChange={e => { if (e.target.value) onChange({ ...rule, userIds: flip(rule.userIds, e.target.value, true) }) }}>
+            <option value="">Add a person…</option>
+            {people.filter(p => !rule.userIds.includes(p.userId)).map(p => <option key={p.userId} value={p.userId}>{p.nickname ? `${p.nickname} (@${p.username})` : p.username}</option>)}
+          </select>
+          {rule.userIds.length > 0 && (
+            <div className="named">
+              {rule.userIds.map(id => (
+                <span key={id} className="person">{nameOf(id)}
+                  <button className="subtle" aria-label={`Remove ${nameOf(id)}`} onClick={() => onChange({ ...rule, userIds: flip(rule.userIds, id, false) })}>✕</button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      <div className="muted">Where</div>
+      <label className="choice"><input type="radio" name={group + 'where'} checked={rule.allChannels} onChange={() => onChange({ ...rule, allChannels: true })} /> All channels</label>
+      <label className="choice"><input type="radio" name={group + 'where'} checked={!rule.allChannels} onChange={() => onChange({ ...rule, allChannels: false })} /> Only these channels</label>
+      {!rule.allChannels && (
+        <div className="picks">
+          {places.map(c => (
+            <label key={c.id} className="choice">
+              <input type="checkbox" checked={rule.channelIds.includes(c.id)} onChange={e => onChange({ ...rule, channelIds: flip(rule.channelIds, c.id, e.target.checked) })} />
+              <span>{c.type === ChannelType.Voice ? '🔊 ' : '#'}{c.name}</span>
+            </label>
+          ))}
+          {places.length === 0 && <div className="muted">This server has no channel a command can be typed in.</div>}
+        </div>
+      )}
+      {missing && <div className="muted bad">{missing}</div>}
+    </div>
+  )
+}
+
+/**
+ * Server settings, Bots, Manage: who may use one bot's slash commands in this server, and where. There is one
+ * setting for the bot as a whole, and any command can be given its own instead.
+ */
+export function BotCommandsDialog({ api, guildId, bot, roles, members, channels, onClose }: {
+  api: Api; guildId: string; bot: ApplicationDto
+  /** The server's roles, without the one everyone has. */
+  roles: RoleDto[]; members: MemberDto[]; channels: ChannelDto[]
+  onClose: () => void
+}) {
+  const people = members.filter(m => !m.isBot)
+  // Where a command can be typed at all: not a P2P channel, where nothing typed goes to the server.
+  const places = channels.filter(c => c.type !== ChannelType.Category && !c.directSince)
+  const [saved, setSaved] = useState<CommandRulesDto | null>(null)
+  const [whole, setWhole] = useState<CommandRuleDto>(OPEN_RULE)
+  const [own, setOwn] = useState<Record<string, CommandRuleDto | null>>({})
+  const [done, setDone] = useState(false)
+  const { problem, run } = useRun()
+
+  /** A role since deleted, someone who has left, a channel that is gone: left out, so what is saved names only what is here. */
+  const here = useCallback((rule: CommandRuleDto): CommandRuleDto => ({
+    ...rule,
+    roleIds: rule.roleIds.filter(id => roles.some(r => r.id === id)),
+    userIds: rule.userIds.filter(id => members.some(m => m.userId === id)),
+    channelIds: rule.channelIds.filter(id => channels.some(c => c.id === id)),
+  }), [roles, members, channels])
+  const take = useCallback((r: CommandRulesDto) => {
+    const clean: CommandRulesDto = { bot: here(r.bot), commands: r.commands.map(c => ({ ...c, rule: c.rule ? here(c.rule) : null })) }
+    setSaved(clean); setWhole(clean.bot); setOwn(Object.fromEntries(clean.commands.map(c => [c.name, c.rule])))
+  }, [here])
+  // Asked once, when the dialog opens: what is being edited must not be replaced because a member list changed.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { void run(async () => take(await api.commandRules(guildId, bot.id))) }, [api, guildId, bot.id, run])
+
+  const changedWhole = !!saved && tidy(whole) !== tidy(saved.bot)
+  const changedOwn = (saved?.commands ?? []).filter(c => tidy(own[c.name] ?? null) !== tidy(c.rule))
+  const missing = lacking(whole) ?? (saved?.commands ?? []).map(c => lacking(own[c.name] ?? null)).find(x => x) ?? null
+  const save = () => run(async () => {
+    if (!saved) return
+    setDone(false)
+    let latest: CommandRulesDto | null = null
+    try {
+      if (changedWhole) latest = await api.setCommandRule(guildId, bot.id, null, whole)
+      for (const c of changedOwn) latest = await api.setCommandRule(guildId, bot.id, c.name, own[c.name] ?? null)
+      if (latest) { take(latest); setDone(true) }
+    } catch (e) {
+      // Whatever was saved before the one that failed stays saved; what is on screen is kept to be put right.
+      if (latest) setSaved(latest)
+      throw e
+    }
+  })
+  const edit = (change: () => void) => { setDone(false); change() }
+
+  return (
+    <Dialog title={`Manage ${bot.name}`} onClose={onClose} wide scrolls>
+      <div className="integrations">
+        <div className="muted">
+          Who can use this bot's slash commands in this server, and where. People are only offered the commands they
+          can use. Anyone who can manage the server can use all of them everywhere.
+        </div>
+        {saved === null && !problem && <div className="muted">Loading…</div>}
+        {saved && (
+          <>
+            <div className="entry">
+              <b>All of its commands</b>
+              <RuleEditor rule={whole} onChange={next => edit(() => setWhole(next))} roles={roles} people={people} places={places} />
+            </div>
+            {saved.commands.length === 0 && <div className="muted">This bot has no slash commands here yet. What is set above applies to any it adds.</div>}
+            {saved.commands.map(c => {
+              const mine = own[c.name] ?? null
+              return (
+                <div className="entry" key={c.name}>
+                  <div className="row">
+                    <div className="grow"><b>/{c.name}</b>{c.description && <div className="muted">{c.description}</div>}</div>
+                    <select value={mine ? 'own' : 'bot'} aria-label={`Settings for /${c.name}`}
+                      onChange={e => edit(() => setOwn(all => ({ ...all, [c.name]: e.target.value === 'own' ? { ...whole } : null })))}>
+                      <option value="bot">Same as all of its commands</option>
+                      <option value="own">Its own settings</option>
+                    </select>
+                  </div>
+                  {mine && <RuleEditor rule={mine} onChange={next => edit(() => setOwn(all => ({ ...all, [c.name]: next })))} roles={roles} people={people} places={places} />}
+                </div>
+              )
+            })}
+          </>
+        )}
+        {problem && <div className="muted bad">{problem}</div>}
+      </div>
+      <div className="buttons">
+        {done && <span className="muted" style={{ alignSelf: 'center' }}>Saved</span>}
+        <button onClick={onClose}>Close</button>
+        <button className="accent" disabled={!saved || !!missing || (!changedWhole && changedOwn.length === 0)} onClick={() => void save()}>Save</button>
+      </div>
+    </Dialog>
   )
 }
 
@@ -216,14 +399,14 @@ export function MyBots({ api }: { api: Api }) {
       <label className="row"><input type="checkbox" checked={direct} onChange={e => setDirect(e.target.checked)} /> <span>Make it a P2P bot</span></label>
       <div className="muted">
         {direct
-          ? 'A P2P bot connects straight to people\'s apps in the P2P channels it is let into, one channel at a time, in private servers only. It has no commands, cannot read or post in ordinary channels, and each person is asked before their app connects to it. This cannot be changed after the bot is made.'
-          : 'An ordinary bot talks to the server: slash commands, messages in ordinary channels. It is never in a P2P channel. This cannot be changed after the bot is made.'}
+          ? 'A P2P bot connects straight to people\'s apps in the P2P channels it is let into, one channel at a time, in one full P2P server only. It has no commands, cannot read or post in ordinary channels, and each person is asked before their app connects to it. This cannot be changed after the bot is made.'
+          : 'An ordinary bot talks to the server: slash commands, messages in ordinary channels. It is never in a P2P channel, and cannot be added to a full P2P server. This cannot be changed after the bot is made.'}
       </div>
       <label className="row"><input type="checkbox" checked={inVoice} onChange={e => setInVoice(e.target.checked)} /> <span>{direct ? 'Let it join P2P voice channels' : 'Let it join voice channels'}</span></label>
       <div className="muted">
         {direct
           ? 'Only the P2P voice channels it is let into, never an ordinary one. It can be heard there and can never share video. Each person is asked before their app connects to it. You can change this later.'
-          : 'Ordinary voice channels only, never a P2P one. It can be heard there and can never share video. You can change this later.'}
+          : 'Ordinary voice channels only, never a P2P one, and not in a server that has P2P channels. It listens there. It is heard only where whoever runs this Maplecord lets bots be heard, and then for a short time at once. It can never share video. You can change this later.'}
       </div>
 
       {bots === null && !problem && <div className="muted">Loading…</div>}

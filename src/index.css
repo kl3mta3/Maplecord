@@ -600,6 +600,14 @@ button.danger:hover { background: var(--red); color: #fff; }
 .integrations .idrow code, .integrations .muted code { background: var(--bg0); padding: 3px 6px; border-radius: 4px; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .integrations .bad { color: var(--red); }
 .integrations .row > input.grow { flex: 1 1 160px; }
+.integrations .choice { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.integrations .row > select { max-width: 100%; min-width: 0; }
+.ruleedit { display: flex; flex-direction: column; gap: 6px; }
+.ruleedit .picks { display: flex; flex-direction: column; gap: 6px; margin-left: 24px; padding: 8px 10px; border-left: 2px solid var(--border); max-height: 220px; overflow-y: auto; }
+.ruleedit .picks select { align-self: flex-start; max-width: 100%; }
+.ruleedit .named { display: flex; flex-wrap: wrap; gap: 4px; }
+.ruleedit .person { display: inline-flex; align-items: center; gap: 4px; background: var(--bg3); border-radius: 4px; padding: 2px 4px 2px 8px; font-size: 12px; }
+.ruleedit .person button { padding: 0 4px; font-size: 11px; }
 .tabs { flex-wrap: wrap; }
 .bottag { font-size: 9px; font-weight: 700; letter-spacing: .04em; padding: 1px 4px; border-radius: 4px; background: var(--accent); color: #fff; }
 

@@ -24,6 +24,10 @@ contextBridge.exposeInMainWorld('maplecord', {
   // a newer version that could not install itself (see electron/updater.ts), once
   takeUpdateNotice: (): Promise<{ version: string; reason: string } | null> => ipcRenderer.invoke('take-update-notice'),
 
+  // the icon beside the clock: whether it shows the dot for something new, and bringing the window back
+  setUnread: (has: boolean) => ipcRenderer.send('unread', has),
+  showWindow: () => ipcRenderer.send('show-window'),
+
   // invite links (maplecord://invite/CODE)
   takeInviteLink: (): Promise<string | null> => ipcRenderer.invoke('take-invite-link'),
   onInviteLink: (handler: () => void) => subscribe<void>('invite-link', handler),

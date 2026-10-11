@@ -49,7 +49,7 @@ export function CreateServerDialog({ onCreate, onClose }: { onCreate: (name: str
             <div className="muted">Kind of server</div>
             <label className="choice"><input type="radio" name="newkind" checked={kind === 'standard'} onChange={() => setKind('standard')} /><span><b>Standard</b> <span className="muted">Voice and video go through the relay. Nobody sees anyone's IP address.</span></span></label>
             <label className="choice"><input type="radio" name="newkind" checked={kind === 'hybrid'} onChange={() => setKind('hybrid')} /><span><b>Hybrid</b> <span className="muted">Text is kept by the server. Voice and video are P2P: people in the voice channel connect straight to each other and can find each other's IP address.</span></span></label>
-            <label className="choice"><input type="radio" name="newkind" checked={kind === 'p2p'} onChange={() => setKind('p2p')} /><span><b>Full P2P</b> <span className="muted">Text, voice and video are all P2P. What is typed is kept only on people's own devices: the server keeps none of it, so someone who was not connected at the time does not get it.</span></span></label>
+            <label className="choice"><input type="radio" name="newkind" checked={kind === 'p2p'} onChange={() => setKind('p2p')} /><span><b>Full P2P</b> <span className="muted">Text, voice and video are all P2P, and stay so: every channel made in it later is P2P too. What is typed is kept only on people's own devices: the server keeps none of it, so someone who was not connected at the time does not get it.</span></span></label>
           </>
         )}
         <div className="muted">You can add and change channels afterwards.</div>

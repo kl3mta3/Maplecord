@@ -6,7 +6,7 @@ import { makeSealer, seal, unseal, type Sealer } from './p2pIdentity'
 /** The set-up messages that carry addresses. */
 const CARRIES_ADDRESSES = new Set(['offer', 'answer', 'ice'])
 import type {
-  ChannelDto, GuildDto, InteractionDto, MemberDto, MessageDto, RoleDto, RollChoice, RollItemDto, RollKind, RollResultDto, RollSessionDto,
+  ButtonDto, ChannelDto, EmbedDto, GuildDto, InteractionDto, MemberDto, MessageDto, RoleDto, RollChoice, RollItemDto, RollKind, RollResultDto, RollSessionDto,
   RpsChoice, RpsResultDto, RpsSessionDto, VoiceParticipantDto, FriendDto, DmChannelDto, UserDto, SystemMessageDto, PostRequest, RollStatsDto,
 } from './types'
 
@@ -19,6 +19,8 @@ export interface ChatEvents {
   ThreadChanged: (channelId: string, rootId: string, count: number, lastAt: string | null) => void
   MessageEdited: (channelId: string, messageId: string, content: string, title: string | null, editedAt: string) => void
   MessagePinned: (channelId: string, messageId: string, pinnedAt: string | null) => void
+  /** A bot changed one of its own messages when a button on it was pressed: its text, embeds and buttons are these now. */
+  MessageChanged: (channelId: string, messageId: string, content: string, embeds: EmbedDto[] | null, buttons: ButtonDto[] | null) => void
   ReactionChanged: (channelId: string, messageId: string, emoji: string, userId: string, on: boolean, count: number) => void
   PollChanged: (channelId: string, messageId: string, userId: string, theirs: number[], counts: number[], voters: number, closed: boolean) => void
   MessagesRemoved: (channelId: string, authorId: string, since: string | null) => void

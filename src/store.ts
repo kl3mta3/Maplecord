@@ -349,6 +349,8 @@ export function useMaplecord() {
   const [friends, setFriends] = useState<FriendsDto>(EMPTY_FRIENDS)
   const [dms, setDms] = useState<DmChannelDto[]>([])
   const [dmUnread, setDmUnread] = useState<Record<string, number>>({})
+  /** Something arrived while the window was not in front (it may be put away beside the clock), and it has not been in front since. */
+  const [awayNews, setAwayNews] = useState(false)
   const dmsRef = useRef<DmChannelDto[]>([])
   const homeRef = useRef(false)
   /** Walking back into a call after the connection dropped is not a coming or a going: no sound is made for it. */
@@ -473,6 +475,7 @@ export function useMaplecord() {
    */
   const messageSound = (channelId: string) => {
     if (selected.current.channel === channelId && !homeRef.current && !document.hidden && document.hasFocus()) return
+    if (document.hidden || !document.hasFocus()) setAwayNews(true)
     const now = Date.now()
     if (now - lastMessageSound.current < 1500) return
     lastMessageSound.current = now
@@ -483,7 +486,7 @@ export function useMaplecord() {
     if (document.hasFocus() || !('Notification' in window) || Notification.permission !== 'granted') return
     try {
       const n = new Notification(title, { body: body.length > 140 ? body.slice(0, 140) + '…' : body, silent: !settingsRef.current.soundEnabled })
-      n.onclick = () => { window.focus(); selectChannelRef.current(channelId); n.close() }
+      n.onclick = () => { bridge()?.showWindow?.(); window.focus(); selectChannelRef.current(channelId); n.close() }
     } catch { /* notifications unavailable */ }
   }
   const selectChannelRef = useRef<(channelId: string) => void>(() => { /* set below */ })
@@ -688,6 +691,7 @@ export function useMaplecord() {
       ThreadChanged: (_channelId, rootId, count, lastAt) => patchMessage(rootId, m => ({ ...m, threadCount: count, threadLastAt: lastAt })),
       MessageEdited: (_channelId, messageId, content, title, editedAt) => patchMessage(messageId, m => ({ ...m, content, title: title ?? m.title, editedAt })),
       MessagePinned: (_channelId, messageId, pinnedAt) => patchMessage(messageId, m => ({ ...m, pinnedAt })),
+      MessageChanged: (_channelId, messageId, content, embeds, buttons) => patchMessage(messageId, m => ({ ...m, content, embeds, buttons })),
       // Whose reaction it was says whether "mine" changes; the count is the server's.
       ReactionChanged: (_channelId, messageId, emoji, userId, on, count) => patchMessage(messageId, m => {
         const had = m.reactions ?? []
@@ -740,7 +744,11 @@ export function useMaplecord() {
         if (cur && cur.channelId === c.id && (c.directSince ?? null) !== cur.directSince) dropForKindChange(c.directSince ?? null)
       },
       ChannelDeleted: (guildId, channelId) => patchGuild(guildId, g => ({ ...g, channels: g.channels.filter(x => x.id !== channelId) })),
-      PermissionsChanged: async guildId => { try { const fresh = await api.guild(guildId); patchGuild(guildId, g => ({ ...g, ...fresh })) } catch { /* lost access; MemberLeft handles it */ } },
+      PermissionsChanged: async guildId => {
+        try { const fresh = await api.guild(guildId); patchGuild(guildId, g => ({ ...g, ...fresh })) } catch { /* lost access; MemberLeft handles it */ }
+        // Which bot commands someone is offered can go by their roles, so those are asked for again too.
+        if (selected.current.guild === guildId) setCommands(await api.commands(guildId).catch(() => []))
+      },
       CommandsChanged: async guildId => { if (selected.current.guild === guildId) setCommands(await api.commands(guildId).catch(() => [])) },
       RoleCreated: r => patchGuild(r.guildId, g => ({ ...g, roles: [...(g.roles ?? []).filter(x => x.id !== r.id), r] })),
       RoleUpdated: r => patchGuild(r.guildId, g => ({ ...g, roles: (g.roles ?? []).map(x => (x.id === r.id ? r : x)) })),
@@ -2762,6 +2770,16 @@ export function useMaplecord() {
   }, [acceptDrop, coinFlip, dismissDrop, dismissRoll, dismissRps, joinVoice, roll, rpsThrow, selectChannel, startRoll])
   useEffect(() => bridge()?.onHotkey(hotkey), [hotkey])
   useEffect(() => bridge()?.onOverlayAction(hotkey), [hotkey])
+
+  // The app's icon beside the clock (Electron only) carries a red dot while there is something new to read: a badge
+  // on a server or a conversation, or anything that arrived while the window was not in front.
+  useEffect(() => {
+    const seen = () => setAwayNews(false)
+    window.addEventListener('focus', seen)
+    return () => window.removeEventListener('focus', seen)
+  }, [])
+  const somethingNew = ready && (awayNews || guilds.some(g => g.unread > 0) || Object.values(dmUnread).some(n => n > 0))
+  useEffect(() => { bridge()?.setUnread?.(somethingNew) }, [somethingNew])
 
   // Mirror game state to the in-game overlay window (Electron only). Idle = the small pill with the launcher.
   useEffect(() => {

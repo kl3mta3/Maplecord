@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, net, powerMonitor, protocol, screen, session, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, powerMonitor, protocol, screen, session, shell, Tray, type IpcMainEvent, type IpcMainInvokeEvent, type NativeImage } from 'electron'
 import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
@@ -10,6 +10,7 @@ import { SaveStreams } from './saveStreams'
 import { OfferedFiles } from './offeredFiles'
 import { updateAtStartup, type UpdateNotice } from './updater'
 import { stopPushKey, watchPushKey } from './pushKey'
+import { TRAY_SIZES, withDot } from './trayIcon'
 import { PLUGIN_ICON_SCHEME, type PluginRuntimeConfig } from '../src/pluginTypes'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -93,11 +94,18 @@ function createWindow() {
     child.removeMenu()
     child.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     child.webContents.on('will-navigate', event => event.preventDefault())
+    child.webContents.setAudioMuted(appMuted)
   })
 
   stayOnApp(win)
+  win.webContents.setAudioMuted(appMuted)
   if (VITE_DEV_SERVER_URL) win.loadURL(VITE_DEV_SERVER_URL)
   else win.loadFile(path.join(RENDERER_DIST, 'index.html'))
+  // The ✕ puts the window away and leaves Maplecord running beside the clock, where its icon brings it back. Quit,
+  // in that icon's menu, is what ends it. Without the icon (a desktop that has no place for one) the ✕ quits.
+  win.on('close', event => { if (!quitting && tray) { event.preventDefault(); win?.hide() } })
+  // Windows is shutting down or signing out: nothing is kept open for that.
+  win.on('session-end', () => { quitting = true })
   win.on('closed', () => {
     win = null
     overlay?.close()
@@ -105,6 +113,75 @@ function createWindow() {
     for (const other of BrowserWindow.getAllWindows()) other.close()
   })
 }
+
+// ---- The icon beside the clock --------------------------------------------------
+// Closing the window leaves the app running here, so messages and calls carry on. A click on the icon opens the
+// window again; a right-click gives a short menu. The icon carries a red dot while there is something new to read,
+// which the window says (see the store's unread signal): the main process knows nothing of messages itself.
+
+const WEBSITE = 'https://maplecord.app'
+let tray: Tray | null = null
+let trayPictures: { plain: NativeImage; dotted: NativeImage } | null = null
+/** Set once the app is really ending, so that closing the window is no longer turned into putting it away. */
+let quitting = false
+let somethingNew = false
+/** Everything the app plays is silenced, from the icon's menu. It is not remembered: the app always starts audible. */
+let appMuted = false
+
+function showWindow() {
+  if (!win) { createWindow(); return }
+  if (win.isMinimized()) win.restore()
+  win.show(); win.focus()
+}
+
+/** The app's picture at the sizes the icon is shown in, without and with the dot. */
+function makeTrayPictures(logo: string): { plain: NativeImage; dotted: NativeImage } {
+  const source = nativeImage.createFromPath(logo)
+  const plain = nativeImage.createEmpty(), dotted = nativeImage.createEmpty()
+  for (const { size, scaleFactor } of TRAY_SIZES) {
+    const pixels = source.resize({ width: size, height: size, quality: 'best' }).toBitmap()
+    plain.addRepresentation({ scaleFactor, dataURL: nativeImage.createFromBitmap(pixels, { width: size, height: size }).toDataURL() })
+    dotted.addRepresentation({ scaleFactor, dataURL: nativeImage.createFromBitmap(Buffer.from(withDot(pixels, size)), { width: size, height: size }).toDataURL() })
+  }
+  return { plain, dotted }
+}
+
+function refreshTray() {
+  if (!tray || !trayPictures) return
+  tray.setImage(somethingNew ? trayPictures.dotted : trayPictures.plain)
+  tray.setToolTip('Maplecord' + (somethingNew ? ': new messages' : '') + (appMuted ? ' (muted)' : ''))
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Open Maplecord', click: showWindow },
+    { type: 'separator' },
+    { label: 'Mute Maplecord', type: 'checkbox', checked: appMuted, click: item => setAppMuted(item.checked) },
+    { label: 'Maplecord website', click: () => { void shell.openExternal(WEBSITE) } },
+    { type: 'separator' },
+    { label: 'Quit Maplecord', click: () => { quitting = true; app.quit() } },
+  ]))
+}
+
+function setAppMuted(muted: boolean) {
+  appMuted = muted
+  // The overlay plays nothing; every other window is the app's own or a stream popped out of it.
+  for (const window of BrowserWindow.getAllWindows()) window.webContents.setAudioMuted(muted)
+  refreshTray()
+}
+
+function createTray(logo: string) {
+  try {
+    trayPictures = makeTrayPictures(logo)
+    tray = new Tray(trayPictures.plain)
+    tray.on('click', showWindow)
+    refreshTray()
+  } catch (e) {
+    // No icon, then: the window's ✕ quits, as it always did.
+    tray = null
+    console.error('[tray]', e)
+  }
+}
+
+on('unread', (_event, has: boolean) => { somethingNew = has === true; refreshTray() })
+on('show-window', () => showWindow())
 
 // ---- In-game overlay ----------------------------------------------------------
 // A small always-on-top window that never takes focus from the game (focusable: false ⇒ WS_EX_NOACTIVATE
@@ -387,19 +464,19 @@ handle('take-update-notice', () => { const notice = updateNotice; updateNotice =
 app.whenReady().then(async () => {
   if (!onlyCopy) return
   // Before anything opens: is there a newer version? (See updater.ts. A development run skips this.)
-  const update = await updateAtStartup({
-    server: __UPDATE_SERVER__, repo: __UPDATE_REPO__,
-    logo: path.join(VITE_DEV_SERVER_URL ? path.join(RENDERER_DIST, '..', 'public') : RENDERER_DIST, 'logo.png'),
-  })
+  const logo = path.join(VITE_DEV_SERVER_URL ? path.join(RENDERER_DIST, '..', 'public') : RENDERER_DIST, 'logo.png')
+  const update = await updateAtStartup({ server: __UPDATE_SERVER__, repo: __UPDATE_REPO__, logo })
   if (update.quitting) { app.quit(); return }
   updateNotice = update.notice
   registerPluginProtocol()
   registerDisplayCapture()
   try { plugins.reload() } catch (e) { console.error('[plugins]', e) }
+  createTray(logo)
   createWindow()
   update.done()
   registerHotkeys()
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
 })
-app.on('will-quit', () => { globalShortcut.unregisterAll(); stopPushKey(); plugins.stopAll(); void saves.abortAll(); offered.closeAll() })
+app.on('before-quit', () => { quitting = true })
+app.on('will-quit', () => { globalShortcut.unregisterAll(); stopPushKey(); plugins.stopAll(); void saves.abortAll(); offered.closeAll(); tray?.destroy(); tray = null })
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
