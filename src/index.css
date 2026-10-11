@@ -817,6 +817,11 @@ button.chip { cursor: pointer; }
 .qrpanel .actions { display: flex; flex-direction: column; gap: 6px; }
 .qrpanel .actions label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
 .qrcard { display: block; max-width: 100%; height: auto; border-radius: 14px; }
+/* Beside a name in a voice channel: microphone off, hearing off. */
+.vstate { display: inline-flex; align-items: center; color: var(--red, #e5484d); flex: none; }
+/* A web address in a message. It opens in the browser. */
+.msglink { color: var(--accent2, #6aa9ff); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.msglink:hover { filter: brightness(1.2); }
 .qrcode { border-radius: 10px; display: block; }
 
 .qrcode.leaf { border-radius: 0; }

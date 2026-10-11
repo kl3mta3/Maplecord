@@ -589,7 +589,8 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
                               })()}
                               {p.silenced
                                 ? <span title={g.members.find(m => m.userId === p.userId)?.voiceMuted ? 'Muted by a moderator' : 'May not speak in this channel'}>🚫</span>
-                                : p.muted && <span title="Microphone muted">🔇</span>}
+                                : p.muted && <span className="vstate" title="Microphone muted"><MicOff size={13} /></span>}
+                              {p.deafened && <span className="vstate" title="Deafened: not hearing anyone"><HeadphoneOff size={13} /></span>}
                               {p.userId !== me?.id && prefsOf(p.userId).muted && <span title="You muted them">🔕</span>}
                               {voice?.channelId === c.id && p.userId !== me?.id && p.state !== 'connected' && <span style={{ fontSize: 10 }}>{p.state}</span>}
                             </div>
@@ -823,7 +824,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       )}
       {dialog?.kind === 'server' && g && (
         <ServerSettingsDialog api={store.api} channels={g.channels} guild={g.guild} roles={g.roles ?? []} members={g.members} myPermissions={myPerms} meId={me?.id ?? ''}
-          onRename={store.renameGuild} onIcon={store.setGuildIcon} onListing={store.setGuildListing} tagSymbols={store.tagSymbols} onSetTag={store.setGuildTag} onRemoveTag={store.removeGuildTag} onCountRolls={store.setGuildCountRolls} onCreateRole={store.createRole} onUpdateRole={store.updateRole} onDeleteRole={store.deleteRole} onSetMemberRoles={store.setMemberRoles}
+          onRename={store.renameGuild} onIcon={store.setGuildIcon} onListing={store.setGuildListing} tagSymbols={store.tagSymbols} onSetTag={store.setGuildTag} onRemoveTag={store.removeGuildTag} onCountRolls={store.setGuildCountRolls} onWelcome={store.setGuildWelcome} onCreateRole={store.createRole} onUpdateRole={store.updateRole} onDeleteRole={store.deleteRole} onSetMemberRoles={store.setMemberRoles}
           onClose={() => setDialog(null)} />
       )}
       {store.directPrompt && (
@@ -1375,18 +1376,37 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
 /** An invite link somewhere in a message: this server's invite page, or the app's own kind of link. */
 const INVITE_LINK = /(https?:\/\/[^\s<>"']+\/(?:invite|add)\/[A-Za-z0-9]{4,32}(?:\?[^\s<>"']*)?|maplecord:\/\/(?:invite|add)\/[^\s<>"']+)/g
 
+/** A web address in running text. What usually ends a sentence is not taken as its last character. */
+const WEB_LINK = /(https?:\/\/[^\s<>"']+)/g
+const TRAILING = /[.,;:!?)\]}'"]+$/
+
 /**
- * A message's text, with any invite link in it made into something to press: it opens the same "join this server?"
- * prompt as an invite opened from outside the app. Nothing else in a message is a link, and nothing is fetched.
+ * A message's text, with the addresses in it made into something to press. An invite or friend link opens the same
+ * "join this server?" prompt as one opened from outside the app. Any other web address (http or https, nothing
+ * else) opens in the person's browser, without telling the site where they came from. What is shown is the address
+ * itself, so it leads where it says. Nothing is fetched by showing it: there are no previews.
  */
 function withInviteLinks(text: string, open?: (link: string) => void): React.ReactNode {
-  if (!open || !(text.includes('invite/') || text.includes('add/'))) return text
-  const parts = text.split(INVITE_LINK)
-  if (parts.length === 1) return text
-  // split() with one capturing group puts the links at the odd places.
-  return parts.map((part, i) => (i % 2 === 1
-    ? <button key={i} className="invitelink" title={/\/add\//.test(part) ? 'Open this friend link' : 'Open this invite'} onClick={() => open(part)}>{part}</button>
-    : part))
+  if (!text.includes('://')) return text
+  const out: React.ReactNode[] = []
+  // split() with one capturing group puts the invite links at the odd places.
+  ;(open ? text.split(INVITE_LINK) : [text]).forEach((part, i) => {
+    if (i % 2 === 1) {
+      out.push(<button key={'i' + i} className="invitelink" title={/\/add\//.test(part) ? 'Open this friend link' : 'Open this invite'} onClick={() => open!(part)}>{part}</button>)
+      return
+    }
+    part.split(WEB_LINK).forEach((piece, j) => {
+      if (j % 2 === 0) { if (piece) out.push(piece); return }
+      const tail = TRAILING.exec(piece)?.[0] ?? ''
+      const address = tail ? piece.slice(0, -tail.length) : piece
+      let ok = false
+      try { ok = ['http:', 'https:'].includes(new URL(address).protocol) } catch { /* not an address after all */ }
+      if (!ok) { out.push(piece); return }
+      out.push(<a key={'w' + i + '-' + j} className="msglink" href={address} target="_blank" rel="noopener noreferrer" title="Opens in your browser">{address}</a>)
+      if (tail) out.push(tail)
+    })
+  })
+  return out
 }
 
 /** What a message of a kept channel has besides its text. Each part is drawn by whoever knows what to do with it. */

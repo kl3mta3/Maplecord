@@ -253,6 +253,8 @@ export class VoiceHub {
   declineCall(callId: string) { return this.c.invoke('DeclineCall', callId) }
   signal(targetConnectionId: string, kind: 'offer' | 'answer' | 'ice', payload: string) { return this.send('Signal', 'voice', targetConnectionId, kind, payload) }
   setMuted(muted: boolean) { return this.c.invoke('SetMuted', muted) }
+  /** Says whether we hear anyone, for the others to see. A server from before it kept that simply does not answer. */
+  setDeafened(deafened: boolean) { return this.c.invoke('SetDeafened', deafened).catch(() => { /* an older server: nobody is told */ }) }
   /**
    * Tell the channel we are sharing. Where the channel has a stream server the reply is a pass to send the video
    * there once; otherwise null, and each viewer is connected to one by one. A server from before stream servers

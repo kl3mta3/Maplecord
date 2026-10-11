@@ -5,6 +5,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const RATE = 44100
+// With names after the command, only those are made again: the rattles have chance in them, so making every sound
+// again changes files that did not need to change.   node tools/make-sounds.mjs message
+const only = process.argv.slice(2)
 const out = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../public/sounds/default')
 fs.mkdirSync(out, { recursive: true })
 
@@ -38,6 +41,7 @@ function thump(buf, { at = 0, dur, gain = 0.5, tone: cutoff = 0.2 }) {
 }
 
 function write(name, buf) {
+  if (only.length > 0 && !only.includes(name)) return
   const peak = buf.reduce((m, v) => Math.max(m, Math.abs(v)), 0) || 1
   const data = Buffer.alloc(buf.length * 2)
   for (let i = 0; i < buf.length; i++) data.writeInt16LE(Math.round((buf[i] / peak) * 0.8 * 32767), i * 2)
@@ -111,6 +115,30 @@ function write(name, buf) {
   thump(b, { at: 0.01, dur: 0.09, gain: 0.9, tone: 0.07 }); thump(b, { at: 0.17, dur: 0.09, gain: 0.8, tone: 0.07 })
   tone(b, { at: 0.01, dur: 0.07, freq: 190, slideTo: 120, gain: 0.5, shape: 'soft' }); tone(b, { at: 0.17, dur: 0.07, freq: 180, slideTo: 115, gain: 0.45, shape: 'soft' })
   write('join', b)
+}
+// message: something new to read. Two soft, quick notes going up: there, and not in the way.
+{
+  const b = buffer(0.42)
+  tone(b, { at: 0, dur: 0.16, freq: note(79), gain: 0.42 })
+  tone(b, { at: 0.085, dur: 0.32, freq: note(86), gain: 0.36 })
+  write('message', b)
+}
+// drop: loot has dropped and is waiting to be rolled for. A coin landing: a click, then a bright ring.
+{
+  const b = buffer(0.7)
+  thump(b, { at: 0.005, dur: 0.03, gain: 0.5, tone: 0.6 })
+  tone(b, { at: 0.02, dur: 0.6, freq: note(91), gain: 0.4 })
+  tone(b, { at: 0.02, dur: 0.6, freq: note(98), gain: 0.22 })
+  tone(b, { at: 0.11, dur: 0.5, freq: note(95), gain: 0.3 })
+  write('drop', b)
+}
+// removed: you were taken out of a voice channel, not by your own doing. Two low notes falling, and a soft thud.
+{
+  const b = buffer(0.6)
+  tone(b, { at: 0, dur: 0.22, freq: note(62), gain: 0.5, shape: 'soft', attack: 0.02 })
+  tone(b, { at: 0.2, dur: 0.36, freq: note(55), slideTo: note(52), gain: 0.5, shape: 'soft', attack: 0.02 })
+  thump(b, { at: 0.2, dur: 0.12, gain: 0.5, tone: 0.05 })
+  write('removed', b)
 }
 // leave: a door closing: one dull thud and a latch
 {

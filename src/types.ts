@@ -76,7 +76,7 @@ export interface ServerMetaDto { protocol: number; minClientProtocol: number; ve
 /** What an invite leads to, shown before joining. */
 export interface InvitePreviewDto { code: string; guild: GuildDto; memberCount: number }
 export interface TokenResponse { accessToken: string; expiresAt: string; user: UserDto }
-export interface GuildDto { id: string; name: string; iconUrl: string | null; ownerId: string; createdAt: string; /** Listed for anyone to find and join. */ isPublic?: boolean; description?: string | null; topics?: string[] | null; /** The tag its members may wear, and whether tags are turned off for it. */ tagText?: string | null; tagSymbol?: string | null; noTag?: boolean; /** Rolls in this server's P2P channels are not added to people's roll totals. */ noRollStats?: boolean }
+export interface GuildDto { id: string; name: string; iconUrl: string | null; ownerId: string; createdAt: string; /** Listed for anyone to find and join. */ isPublic?: boolean; description?: string | null; topics?: string[] | null; /** The tag its members may wear, and whether tags are turned off for it. */ tagText?: string | null; tagSymbol?: string | null; noTag?: boolean; /** Rolls in this server's P2P channels are not added to people's roll totals. */ noRollStats?: boolean; /** The text channel a line is posted in when someone joins, and whether one is posted. */ welcomeChannelId?: string | null; welcomeMessages?: boolean }
 /** A public server as the list of them shows it. */
 export interface DiscoverGuildDto { id: string; name: string; iconUrl: string | null; description: string | null; topics: string[]; memberCount: number; joined: boolean }
 export interface ChannelOverrideDto { id: string; channelId: string; roleId: string | null; userId: string | null; allow: number; deny: number }
@@ -215,6 +215,8 @@ export interface VoiceParticipantDto {
   silenced?: boolean
   /** A bot. In a P2P call this app connects to one only if the person agreed to that bot by name. */
   bot?: boolean
+  /** They have switched off hearing everyone. */
+  deafened?: boolean
 }
 /** The server's rules for sharing video. Minutes of 0 mean never. */
 export interface StreamSettingsDto {

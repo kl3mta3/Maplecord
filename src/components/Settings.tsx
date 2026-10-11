@@ -1,7 +1,7 @@
 import { TagSettings } from './Tags'
 import { useEffect, useRef, useState } from 'react'
 import { isElectron } from '../platform'
-import { Permission, hasPermission, type ChannelDto, type GuildDto, type MemberDto, type RoleDto } from '../types'
+import { ChannelType, Permission, hasPermission, type ChannelDto, type GuildDto, type MemberDto, type RoleDto } from '../types'
 import type { Api } from '../api'
 import { Dialog } from './Dialogs'
 import { ServerBotsTab, WebhooksTab } from './Integrations'
@@ -33,7 +33,7 @@ export function OverlaySettingsDialog({ settings, onChange, packs, onOpenSounds,
         <select className="grow" value={chosen} onChange={e => onChange({ soundProfile: e.target.value })}>
           {packs.map(p => <option key={p}>{p}</option>)}
         </select>
-        {desktop && <button className="subtle" onClick={onOpenSounds} title="Each folder in here is a pack: roll.wav, win.wav, lose.wav, you100.wav, one.wav, sixtyNine.wav, they100.wav, emo.wav, join.wav, leave.wav">Open sounds folder</button>}
+        {desktop && <button className="subtle" onClick={onOpenSounds} title="Each folder in here is a pack: roll.wav, win.wav, lose.wav, you100.wav, one.wav, sixtyNine.wav, they100.wav, emo.wav, join.wav, leave.wav, message.wav, drop.wav, removed.wav">Open sounds folder</button>}
         {desktop && <button className="subtle" onClick={onReloadSounds}>Reload</button>}
       </div>
       {desktop && <div className="muted">Add your own: put a folder of sounds in the sounds folder and press Reload. They stay on this computer.</div>}
@@ -73,7 +73,7 @@ export const PERMISSION_LABELS: { bit: number; name: string; hint: string }[] = 
 
 const ROLE_SWATCHES = ['#9000ff', '#00ddff', '#ff008c', '#2cfc00', '#f19511', '#ff3b3b', '#ffd700', '#1abc9c', '#e91e63', '#3498db', '#95a5a6', '#ffffff']
 
-export function ServerSettingsDialog({ api, channels, guild, roles, members, myPermissions, meId, onRename, onIcon, onListing, tagSymbols, onSetTag, onRemoveTag, onCountRolls, onCreateRole, onUpdateRole, onDeleteRole, onSetMemberRoles, onClose }: {
+export function ServerSettingsDialog({ api, channels, guild, roles, members, myPermissions, meId, onRename, onIcon, onListing, tagSymbols, onSetTag, onRemoveTag, onCountRolls, onWelcome, onCreateRole, onUpdateRole, onDeleteRole, onSetMemberRoles, onClose }: {
   api: Api; channels: ChannelDto[]
   guild: GuildDto; roles: RoleDto[]; members: MemberDto[]; myPermissions: number; meId: string
   onRename: (name: string) => Promise<void>
@@ -85,6 +85,8 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, myP
   onRemoveTag: (guildId: string) => Promise<void>
   /** Whether rolls in this server's P2P channels add to people's roll totals. */
   onCountRolls: (guildId: string, countRolls: boolean) => Promise<void>
+  /** The channel a line is posted in when someone joins (null for none), and whether one is posted. */
+  onWelcome: (guildId: string, channelId: string | null, messages: boolean) => Promise<void>
   onCreateRole: (name: string, color: string | null, permissions: number) => Promise<void>
   onUpdateRole: (roleId: string, patch: { name?: string; color?: string | null; permissions?: number }) => Promise<void>
   onDeleteRole: (roleId: string) => Promise<void>
@@ -143,6 +145,34 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, myP
           <ListingSettings key={`${guild.isPublic}|${guild.description ?? ''}|${(guild.topics ?? []).join(',')}`} isPublic={!!guild.isPublic} description={guild.description ?? ''} topics={guild.topics ?? []} onSave={onListing} />
           <TagSettings guild={guild} people={members.filter(m => !m.isBot).length} symbols={tagSymbols}
             onSave={(text, symbol) => onSetTag(guild.id, text, symbol)} onRemove={() => onRemoveTag(guild.id)} />
+          {/* Where newcomers are greeted. Only an ordinary text channel can be it: nothing can be posted for anyone in a P2P one. */}
+          {(() => {
+            const places = channels.filter(c => c.type === ChannelType.Text && !c.directSince)
+            const picked = places.find(c => c.id === guild.welcomeChannelId)?.id ?? ''
+            return (
+              <div className="tagsettings">
+                <div className="muted">Welcome</div>
+                {places.length === 0 ? <div className="muted">This server has no ordinary text channel to welcome people in.</div> : (
+                  <>
+                    <label className="row">
+                      <span>Welcome channel</span>
+                      <select value={picked} onChange={e => void onWelcome(guild.id, e.target.value || null, !!e.target.value && !!guild.welcomeMessages)} aria-label="Welcome channel">
+                        <option value="">None</option>
+                        {places.map(c => <option key={c.id} value={c.id}># {c.name}</option>)}
+                      </select>
+                    </label>
+                    <div className="muted">Someone who has just joined is taken to this channel first, if they can see it.</div>
+                    <label className="row" style={{ alignItems: 'flex-start' }}>
+                      <input type="checkbox" disabled={!picked} checked={!!picked && !!guild.welcomeMessages} onChange={e => void onWelcome(guild.id, picked || null, e.target.checked)} />
+                      <span>Post a welcome message there when someone joins
+                        <span className="muted" style={{ display: 'block' }}>A line such as "@Name has joined the server.", one of a few picked at random. Bots are not welcomed.</span>
+                      </span>
+                    </label>
+                  </>
+                )}
+              </div>
+            )
+          })()}
           {/* Only a server with P2P channels has this to decide: everywhere else rolls are counted, as their results are kept. */}
           {channels.some(c => c.directSince) && (
             <div className="tagsettings">

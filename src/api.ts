@@ -84,6 +84,8 @@ export class Api {
   revokeInvite(code: string) { return this.request<void>('DELETE', `/api/invites/${encodeURIComponent(code)}`) }
   updateGuildListing(id: string, patch: { isPublic: boolean; description: string; topics: string[] }) { return this.request<GuildDto>('PATCH', `/api/guilds/${id}`, patch) }
   /** Whether rolls in a server's P2P channels add to people's roll totals. */
+  /** A server's welcome channel (null for none), and whether a line is posted there when someone joins. */
+  setGuildWelcome(id: string, channelId: string | null, messages: boolean) { return this.request<GuildDto>('PUT', `/api/guilds/${id}/welcome`, { channelId, messages }) }
   setGuildCountRolls(id: string, countRolls: boolean) { return this.request<GuildDto>('PATCH', `/api/guilds/${id}`, { countRolls }) }
   /** One's own roll totals. */
   rollStats() { return this.request<RollStatsDto>('GET', '/api/me/roll-stats') }

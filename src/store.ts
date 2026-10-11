@@ -351,6 +351,12 @@ export function useMaplecord() {
   const [dmUnread, setDmUnread] = useState<Record<string, number>>({})
   const dmsRef = useRef<DmChannelDto[]>([])
   const homeRef = useRef(false)
+  /** Walking back into a call after the connection dropped is not a coming or a going: no sound is made for it. */
+  const rejoining = useRef(false)
+  /** A sound about our own place in voice: the knock as we come in, the door as we go, and one of its own for being taken out. */
+  const voiceSound = (event: 'join' | 'leave' | 'removed') => { if (!rejoining.current) playSound(event, settingsRef.current.soundProfile, settingsRef.current.soundEnabled) }
+  /** When the sound of a new message was last played (see messageSound). */
+  const lastMessageSound = useRef(0)
   useEffect(() => { dmsRef.current = dms }, [dms])
   useEffect(() => { homeRef.current = home }, [home])
   const [messages, setMessages] = useState<MessageDto[]>([])
@@ -461,6 +467,17 @@ export function useMaplecord() {
     })
   }
   /** A desktop notification, only while the app is not the focused window. Clicking it opens the channel. */
+  /**
+   * The sound of a new message. Skipped for the channel on screen while this window is in front, and held to one
+   * every second and a half, so a busy channel is a sound now and then and not a drum roll.
+   */
+  const messageSound = (channelId: string) => {
+    if (selected.current.channel === channelId && !homeRef.current && !document.hidden && document.hasFocus()) return
+    const now = Date.now()
+    if (now - lastMessageSound.current < 1500) return
+    lastMessageSound.current = now
+    playSound('message', settingsRef.current.soundProfile, settingsRef.current.soundEnabled)
+  }
   const notifyDesktop = (title: string, body: string, channelId: string) => {
     if (preferencesRef.current.status === UserStatus.DoNotDisturb) return
     if (document.hasFocus() || !('Notification' in window) || Notification.permission !== 'granted') return
@@ -583,6 +600,7 @@ export function useMaplecord() {
     // A channel switched between relayed and P2P ends the call for everyone in it: the server drops them, and we stop
     // showing the call and say why. Nobody is carried from one kind of call into the other.
     const dropForKindChange = (now: string | null) => {
+      voiceSound('removed')
       void Promise.resolve(voiceEngine.leave()).catch(() => { /* nothing to stop */ })
       streamEngine.leaveAll()
       setViewerCounts({})
@@ -611,8 +629,14 @@ export function useMaplecord() {
             }))
           } else if (found) {
             setDmUnread(u => ({ ...u, [m.channelId]: (u[m.channelId] ?? 0) + 1 }))
-            if (m.authorId !== me()) playSound('join', settingsRef.current.soundProfile, settingsRef.current.soundEnabled)
           }
+        }
+        // Something new to read, from someone else, anywhere that is not muted: a sound. Not for the channel being read
+        // in a window that is in front, where it can be seen arriving.
+        if (m.authorId !== me() && !m.ephemeral && !isIgnored(m.authorId) && (m.kind === MessageKind.Text || m.kind === MessageKind.Webhook || m.kind === MessageKind.Bot)) {
+          const where = findChannel(m.channelId)
+          const quietPlace = !!where?.guild && (!!guildPrefs(where.guild.guild.id).muted || !!settingsRef.current.mutedChannels?.[m.channelId])
+          if (where && !quietPlace) messageSound(m.channelId)
         }
         // Desktop notification while the app is in the background: always for a DM, per the server's level otherwise.
         if (m.authorId !== me() && !m.ephemeral && !isIgnored(m.authorId) && (m.kind === MessageKind.Text || m.kind === MessageKind.Webhook || m.kind === MessageKind.Bot)) {
@@ -774,7 +798,8 @@ export function useMaplecord() {
       if (now !== cur.directSince) { dropForKindChange(now); return }
       void (async () => {
         const before = voiceJoins.current
-        await joinVoiceRef.current(cur.channelId, true)
+        rejoining.current = true
+        try { await joinVoiceRef.current(cur.channelId, true) } finally { rejoining.current = false }
         // Still showing the call from before the connection dropped, and no join got in: the server has forgotten
         // us and we are not in it. Stop showing that we are.
         if (voiceRef.current && voiceJoins.current === before && !voiceJoining.current && dropVoice()) setError(e => e ?? 'The connection to this voice channel was lost.')
@@ -783,6 +808,7 @@ export function useMaplecord() {
     const dropVoice = () => {
       if (callRef.current) setCall(null)
       if (!voiceRef.current) return false
+      voiceSound('removed')
       void Promise.resolve(voiceEngine.leave()).catch(() => { /* nothing to stop */ })
       streamEngine.leaveAll()
       setViewerCounts({})
@@ -828,7 +854,7 @@ export function useMaplecord() {
         if (p.connectionId === voiceHub.connectionId) voiceEngine.setSilenced(!!p.silenced)
         else voiceEngine.setPeerSilenced(p.connectionId, !!p.silenced)
         setVoice(v => (v && v.channelId === c
-          ? { ...v, participants: v.participants.map(x => (x.connectionId === p.connectionId ? { ...x, muted: p.muted, stream: p.stream ?? null, silenced: !!p.silenced } : x)) } : v))
+          ? { ...v, participants: v.participants.map(x => (x.connectionId === p.connectionId ? { ...x, muted: p.muted, stream: p.stream ?? null, silenced: !!p.silenced, deafened: !!p.deafened } : x)) } : v))
       },
       SignalReceived: (_c, s) => { void voiceEngine.handleSignal(s) },
       CallIncoming: c => {
@@ -899,7 +925,8 @@ export function useMaplecord() {
 
   // ---- Selection ----------------------------------------------------------
 
-  const selectGuild = useCallback((guildId: string) => {
+  /** `openAt`: a channel to open in it, if the person can see it; otherwise the one they were last in, or the first. */
+  const selectGuild = useCallback((guildId: string, openAt?: string | null) => {
     const g = guildsRef.current.find(x => x.guild.id === guildId)
     if (!g) return
     setHome(false)
@@ -908,7 +935,8 @@ export function useMaplecord() {
     updateSettings({ lastGuildId: guildId })
     const preferred = g.channels.find(c => c.id === settingsRef.current.lastChannelId && isChat(c))
     const first = g.channels.filter(c => c.type === ChannelType.Text).sort((a, b) => a.position - b.position)[0]
-    setSelectedChannelId((preferred ?? first)?.id ?? null)
+    const wanted = openAt ? g.channels.find(c => c.id === openAt && isChat(c)) : undefined
+    setSelectedChannelId((wanted ?? preferred ?? first)?.id ?? null)
   }, [patchGuild, updateSettings])
 
   /** Text and voice channels both have chat; voice chat opens alongside the call. */
@@ -1500,10 +1528,12 @@ export function useMaplecord() {
   const joinGuild = useCallback(async (code: string) => run(async () => {
     // A whole invite link works as well as the code in it.
     const g = await api.joinInvite(inviteCodeFrom(code) ?? code)
+    // Someone new to the server is taken to its welcome channel first; someone who was in it already goes where they were.
+    const isNew = !guildsRef.current.some(x => x.guild.id === g.guild.id)
     const state: GuildState = { ...g, unread: 0, channelUnread: {} }
     setGuilds(gs => [...gs.filter(x => x.guild.id !== g.guild.id), state])
     guildsRef.current = [...guildsRef.current.filter(x => x.guild.id !== g.guild.id), state]
-    selectGuild(g.guild.id)
+    selectGuild(g.guild.id, isNew ? g.guild.welcomeChannelId : null)
   }), [api, selectGuild])
 
   /** Joins a public server straight from the list of them. Throws what went wrong, for that list to show. */
@@ -1519,16 +1549,21 @@ export function useMaplecord() {
 
   const joinPublicGuild = useCallback(async (guildId: string) => {
     const g = await api.joinPublic(guildId)
+    const isNew = !guildsRef.current.some(x => x.guild.id === g.guild.id)
     const state: GuildState = { ...g, unread: 0, channelUnread: {} }
     setGuilds(gs => [...gs.filter(x => x.guild.id !== g.guild.id), state])
     guildsRef.current = [...guildsRef.current.filter(x => x.guild.id !== g.guild.id), state]
-    selectGuild(g.guild.id)
+    selectGuild(g.guild.id, isNew ? g.guild.welcomeChannelId : null)
   }, [api, selectGuild])
 
   /** Whether rolls in this server's P2P channels add to people's roll totals. */
   const setGuildCountRolls = useCallback(async (guildId: string, countRolls: boolean) => {
     const guild = await api.setGuildCountRolls(guildId, countRolls)
     patchGuild(guildId, x => ({ ...x, guild }))
+  }, [api, patchGuild])
+
+  const setGuildWelcome = useCallback(async (guildId: string, channelId: string | null, messages: boolean) => {
+    await run(async () => { const guild = await api.setGuildWelcome(guildId, channelId, messages); patchGuild(guildId, x => ({ ...x, guild })) })
   }, [api, patchGuild])
 
   const setGuildListing = useCallback(async (patch: { isPublic: boolean; description: string; topics: string[] }) => {
@@ -1807,6 +1842,7 @@ export function useMaplecord() {
   const leaveVoice = useCallback(async () => {
     if (!voiceRef.current) return
     const left = voiceRef.current.channelId
+    voiceSound('leave')
     streamEngine.leaveAll()
     setViewerCounts({})
     try { await voiceEngine.leave() } catch { /* nothing to stop */ }
@@ -2031,6 +2067,7 @@ export function useMaplecord() {
       voiceRef.current = joined // before the next render, so a roll that starts right now already counts as ours
       voiceJoins.current++
       setVoice(joined)
+      voiceSound('join')
       // A roll or round may already be running in the party we just walked into.
       void (async () => {
         try {
@@ -2089,6 +2126,7 @@ export function useMaplecord() {
     }
     voiceRef.current = joined
     setVoice(joined)
+    voiceSound('join')
     if (isMuted) void voiceHub.setMuted(true)
     try { await voiceEngine.join(others) }
     catch (e) { setVoice(v => (v ? { ...v, status: 'No microphone: ' + (e instanceof Error ? e.message : e) } : v)) }
@@ -2345,6 +2383,13 @@ export function useMaplecord() {
   }), [api])
 
   const toggleDeafen = useCallback(() => setDeafened(d => !d), [])
+  // The others in the call are told, so it shows beside our name; and again whenever we walk into a call deafened.
+  const voiceIn = voice?.channelId ?? null
+  useEffect(() => {
+    if (!voiceIn) return
+    void voiceHub.setDeafened(deafened)
+    setVoice(v => (v ? { ...v, participants: v.participants.map(p => (p.connectionId === voiceHub.connectionId && !!p.deafened !== deafened ? { ...p, deafened } : p)) } : v))
+  }, [deafened, voiceIn, voiceHub])
   const outputVolume = settings.outputVolume ?? 1
   useEffect(() => { voiceEngine.setOutput(outputVolume, deafened) }, [deafened, outputVolume, voiceEngine, voicePeers])
   const voiceGate = settings.voiceGate !== false
@@ -2422,6 +2467,11 @@ export function useMaplecord() {
   }
   p2pReceived.current = (message, caughtUp) => {
     void keep(p2pBox(settingsRef.current.user?.id, message.channelId), message.id, message.sentAt, { p2p: message }).catch(() => {})
+    if (!caughtUp && message.authorId !== settingsRef.current.user?.id && !isIgnored(message.authorId) && !isP2pNoteText(message.content)) {
+      const where = findChannel(message.channelId)
+      const quietPlace = !!where?.guild && (!!guildPrefs(where.guild.guild.id).muted || !!settingsRef.current.mutedChannels?.[message.channelId])
+      if (where && !quietPlace) messageSound(message.channelId)
+    }
     if (selected.current.channel === message.channelId) {
       // Something from further back arrived: there may be more behind it.
       if (caughtUp) setCanLoadOlder(true)
@@ -2607,7 +2657,7 @@ export function useMaplecord() {
     }
     setPendingDrops(q => [...q, pending].slice(-5))
     if (pending.iconUrl) void shareIcon(pending.iconUrl, png => api.uploadItemIcon(png)) // warm up, so the roll is not kept waiting
-    if (!pending.auto) playSound('join', settingsRef.current.soundProfile, settingsRef.current.soundEnabled)
+    if (!pending.auto) playSound('drop', settingsRef.current.soundProfile, settingsRef.current.soundEnabled)
   }, [api])
 
   useEffect(() => {
@@ -2790,7 +2840,7 @@ export function useMaplecord() {
 
   return {
     api, hub, settings, updateSettings, ready, status, error, setError, systemMessages, dismissSystemMessage,
-    guilds, selectedGuild, selectedChannel, selectedDm, home, friends, dms, dmUnread, messages, canLoadOlder, activeRoll, typing, commands, stats, setGuildCountRolls,
+    guilds, selectedGuild, selectedChannel, selectedDm, home, friends, dms, dmUnread, messages, canLoadOlder, activeRoll, typing, commands, stats, setGuildCountRolls, setGuildWelcome,
     thread, viewingPast, highlight, setHighlight, openThread, closeThread, loadOlderThread, createPost, editMessage, react, pinMessage, votePoll, closePoll,
     reactionChoices, loadPins, searchMessages, jumpTo, backToPresent,
     pendingFriendLink, openFriendLink, acceptFriendLink, dismissFriendLink, loadFriendLink, resetFriendLink,
