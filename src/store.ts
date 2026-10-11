@@ -836,6 +836,8 @@ export function useMaplecord() {
         if (cur?.channelId === c && !cur.participants.some(x => x.connectionId === p.connectionId))
           playSound('join', settingsRef.current.soundProfile, settingsRef.current.soundEnabled)
         voiceEngine.setPeerSilenced(p.connectionId, !!p.silenced)
+        // A bot in a P2P call is asked for stereo: it may be there to play music.
+        voiceEngine.setPeerMusic(p.connectionId, !!p.bot && cur?.channelId === c && !!cur.directSince)
         // A bot arriving in a P2P call: nothing it sends is answered unless this person has agreed to it.
         const keptAway = cur?.channelId === c && refusesVoiceBot(p, !!cur.directSince)
         if (keptAway) {
@@ -2086,7 +2088,7 @@ export function useMaplecord() {
         } catch { /* not worth an error banner */ }
       })()
       if (isMuted) void voiceHub.setMuted(true)
-      try { await voiceEngine.join(others, answer.pass, voiceHub.selfSilenced, keptAway.map(p => p.connectionId)) }
+      try { await voiceEngine.join(others, answer.pass, voiceHub.selfSilenced, keptAway.map(p => p.connectionId), directSince ? others.filter(p => p.bot).map(p => p.connectionId) : []) }
       catch (e) {
         // No way in at all is different from no microphone: we are not in the call, and the server is told so.
         if (e instanceof VoiceConnectError) { await leaveVoice(); throw e }

@@ -351,9 +351,10 @@ export class VoiceEngine {
     catch (e) { this.events.log('Offer failed: ' + (e instanceof Error ? e.message : e)) }
   }
 
-  async join(existing: VoiceParticipantDto[], pass: SfuPassDto | null = null, silenced = false, refused: readonly string[] = []) {
+  async join(existing: VoiceParticipantDto[], pass: SfuPassDto | null = null, silenced = false, refused: readonly string[] = [], music: readonly string[] = []) {
     await this.leave()
     this.refused = new Set(refused)
+    this.musicPeers = new Set(music)
     this.silencedSelf = silenced
     for (const p of existing) if (p.silenced) this.silencedPeers.add(p.connectionId)
     const sitting = ++this.sitting
@@ -562,6 +563,7 @@ export class VoiceEngine {
     this.talking = false
     this.silencedSelf = false
     this.silencedPeers.clear()
+    this.musicPeers.clear()
     // With push to talk on, nothing is sent until the key is held, from the first moment of the next call.
     this.sending = !this.push
     this.events.speaking(null, false)
@@ -585,6 +587,17 @@ export class VoiceEngine {
     // caught up yet, it is offered when it has (see ParticipantPermissionsChanged).
     const microphone = this.local?.getAudioTracks()[0]
     if (this.room && !this.roomTrack && microphone) void this.sendMicrophone(this.room, microphone).catch(() => {})
+  }
+
+  /**
+   * The bots in a P2P call. One of those is as likely to send music as speech, and what it sends never crosses the
+   * server or a relay, so it is asked for stereo at whatever rate it chooses rather than the mono a voice is asked for.
+   */
+  private musicPeers = new Set<string>()
+
+  /** Says whether someone in the call is a bot in a P2P call. It counts for a connection made after this. */
+  setPeerMusic(connectionId: string, music: boolean) {
+    if (music) this.musicPeers.add(connectionId); else this.musicPeers.delete(connectionId)
   }
 
   /** Whether someone else in the call can be heard. When not, nothing of theirs is played here. */
@@ -638,6 +651,7 @@ export class VoiceEngine {
   async removePeer(connectionId: string) {
     this.wanted.delete(connectionId)
     this.silencedPeers.delete(connectionId)
+    this.musicPeers.delete(connectionId)
     this.refused.delete(connectionId)
     this.dropPeer(connectionId)
   }
@@ -654,7 +668,7 @@ export class VoiceEngine {
         const peer = this.getOrCreatePeer(s.fromConnectionId)
         await peer.pc.setRemoteDescription({ type: 'offer', sdp: s.payload })
         const answer = await peer.pc.createAnswer()
-        await peer.pc.setLocalDescription(this.tune(answer))
+        await peer.pc.setLocalDescription(this.tune(answer, s.fromConnectionId))
         await this.hub.signal(s.fromConnectionId, 'answer', peer.pc.localDescription!.sdp)
       } else if (s.kind === 'answer') {
         const peer = this.peers.get(s.fromConnectionId)
@@ -674,7 +688,7 @@ export class VoiceEngine {
   private async offer(remote: string) {
     const peer = this.getOrCreatePeer(remote)
     const offer = await peer.pc.createOffer({ offerToReceiveAudio: true })
-    await peer.pc.setLocalDescription(this.tune(offer))
+    await peer.pc.setLocalDescription(this.tune(offer, remote))
     await this.hub.signal(remote, 'offer', peer.pc.localDescription!.sdp)
   }
 
@@ -717,10 +731,13 @@ export class VoiceEngine {
     return peer
   }
 
-  /** Opus: DTX on (silence is nearly free), 24 kbps cap, mono. Done by SDP munging, which every browser honours. */
-  private tune(desc: RTCSessionDescriptionInit): RTCSessionDescriptionInit {
-    const sdp = (desc.sdp ?? '').replace(/a=fmtp:(\d+) (.*minptime=10.*)/g, (_m, pt, rest) =>
-      `a=fmtp:${pt} ${rest};usedtx=1;maxaveragebitrate=24000;stereo=0;sprop-stereo=0`)
+  /**
+   * What we ask the other side to send us. From a person: Opus with DTX on (silence is nearly free), a 24 kbps cap,
+   * mono. From a bot in a P2P call: stereo, and no cap. Done by SDP munging, which every browser honours.
+   */
+  private tune(desc: RTCSessionDescriptionInit, remote: string): RTCSessionDescriptionInit {
+    const asked = this.musicPeers.has(remote) ? 'stereo=1;sprop-stereo=0' : 'usedtx=1;maxaveragebitrate=24000;stereo=0;sprop-stereo=0'
+    const sdp = (desc.sdp ?? '').replace(/a=fmtp:(\d+) (.*minptime=10.*)/g, (_m, pt, rest) => `a=fmtp:${pt} ${rest};${asked}`)
     return { type: desc.type, sdp }
   }
 
