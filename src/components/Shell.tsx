@@ -218,6 +218,8 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
     { kind: 'label', text: 'Rolls' },
     { kind: 'item', label: 'Roll buttons', checked: store.settings.showRollButtons !== false, onClick: () => store.updateSettings({ showRollButtons: store.settings.showRollButtons === false }) },
     { kind: 'item', label: isElectron() ? 'In-game overlay' : 'In-game overlay (desktop app only)', disabled: !isElectron(), checked: isElectron() && store.settings.overlayEnabled, onClick: () => store.updateSettings({ overlayEnabled: !store.settings.overlayEnabled }) },
+    { kind: 'sep' },
+    { kind: 'item', label: 'Overlay settings', icon: '🎲', onClick: () => setDialog({ kind: 'overlay' }) },
   ]
   const deviceEntries = (kind: 'audioinput' | 'audiooutput'): MenuEntry[] => {
     const chosen = kind === 'audioinput' ? store.settings.audioInputDeviceId : store.settings.audioOutputDeviceId

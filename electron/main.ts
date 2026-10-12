@@ -242,11 +242,15 @@ on('overlay-state', (_event, state: unknown) => {
 on('overlay-enabled', (_event, enabled: boolean) => { overlayEnabled = enabled; if (!enabled) overlay?.hide() })
 on('overlay-ready', event => event.sender.send('overlay-state', overlayState))
 on('overlay-action', (_event, action: string) => win?.webContents.send('overlay-action', action))
-// The overlay page asks for the size its current mode needs (pill / launcher / live card); keep the top-left anchored.
+// The overlay page asks for the size of what it is showing (pill / launcher / live card); keep the top-left anchored.
+// It measures in its own units, which a zoomed page has fewer of across the same window: the zoom is put back here.
 on('overlay-resize', (_event, size: { width: number; height: number }) => {
   if (!overlay) return
+  const zoom = overlay.webContents.getZoomFactor() || 1
+  const [width, height] = [Math.ceil(size.width * zoom), Math.ceil(size.height * zoom)]
+  if (!(width > 0 && height > 0 && width < 2000 && height < 2000)) return
   const [w, h] = overlay.getContentSize()
-  if (w !== size.width || h !== size.height) overlay.setContentSize(Math.round(size.width), Math.round(size.height))
+  if (w !== width || h !== height) overlay.setContentSize(width, height)
 })
 
 /**

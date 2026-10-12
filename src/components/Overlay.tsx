@@ -36,17 +36,28 @@ export default function Overlay() {
   const needParty = state?.kind === 'idle' && !state.canStart
   const view = menu === 'closed' ? 'closed' : needParty || menu === 'channels' ? 'channels' : menu
 
-  // Ask the window for the size this mode needs.
+  // The window is made the size of what is shown, measured: how tall that is depends on the text, the font and
+  // the zoom, and a size worked out beforehand cuts the bottom off whenever one of them is not what was assumed.
+  // Only the width is given: the pill is as wide as it is, everything else is one card's width.
   const mode = !state ? 'hidden' : state.kind !== 'idle' ? state.kind : view === 'closed' ? 'pill' : view
-  const channelCount = state?.kind === 'idle' ? state.channels.length : 0
   useLayoutEffect(() => {
-    const size = mode === 'pill' ? [78, 46]
-      : mode === 'open' ? [270, 118]
-      : mode === 'channels' ? [270, (needParty ? 76 : 52) + Math.max(1, Math.min(channelCount, 8)) * 26]
-      : mode === 'drop' ? [270, 118]
-      : mode === 'rps' ? [270, 176] : [270, 196]
-    bridge()?.overlayResize(size[0], size[1])
-  }, [mode, channelCount, needParty])
+    const shown = document.querySelector<HTMLElement>('.overlay')
+    if (!shown || mode === 'hidden') return
+    const ask = () => {
+      const box = shown.getBoundingClientRect()
+      if (box.height === 0) return
+      const style = getComputedStyle(shown)
+      const around = (a: string, b: string) => (parseFloat(a) || 0) + (parseFloat(b) || 0)
+      const width = mode === 'pill' ? Math.ceil(box.width + around(style.marginLeft, style.marginRight)) : 270
+      bridge()?.overlayResize(width, Math.ceil(box.height + around(style.marginTop, style.marginBottom)))
+    }
+    ask()
+    // And again whenever it changes size by itself (a line wraps, a list fills) or the zoom does.
+    const watch = new ResizeObserver(ask)
+    watch.observe(shown)
+    window.addEventListener('resize', ask)
+    return () => { watch.disconnect(); window.removeEventListener('resize', ask) }
+  })
 
   const act = (a: OverlayAction) => { bridge()?.overlayAction(a); setMenu('closed') }
   if (!state) return <div className="overlay empty" />
