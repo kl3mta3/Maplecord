@@ -1,6 +1,6 @@
 // Mirrors Maplecord.Shared/Contracts (System.Text.Json web defaults: camelCase, enums as numbers).
 
-export const ChannelType = { Category: 0, Text: 1, Voice: 2, DirectMessage: 3, Forum: 4, Gallery: 5 } as const
+export const ChannelType = { Category: 0, Text: 1, Voice: 2, DirectMessage: 3, Forum: 4, Gallery: 5, Calendar: 6 } as const
 /** A forum or a gallery: a list of posts, where what is said about a post is in its thread. */
 export const isPostsChannel = (c: { type: number } | null | undefined) => c?.type === ChannelType.Forum || c?.type === ChannelType.Gallery
 export type ChannelType = (typeof ChannelType)[keyof typeof ChannelType]
@@ -26,7 +26,7 @@ export const Permission = {
   StartRolls: 1 << 4, JoinVoice: 1 << 5, Speak: 1 << 6, Stream: 1 << 7,
   CreateInvites: 1 << 8, ManageChannels: 1 << 9, ManageRoles: 1 << 10, ManageWebhooks: 1 << 11,
   ManageGuild: 1 << 12, KickMembers: 1 << 13, BanMembers: 1 << 14, MuteMembers: 1 << 15,
-  ManageDirectChannels: 1 << 16, StreamDirect: 1 << 17, JoinDirectVoice: 1 << 18, DisconnectMembers: 1 << 19, UseRelayInDirect: 1 << 20, WearTag: 1 << 21,
+  ManageDirectChannels: 1 << 16, StreamDirect: 1 << 17, JoinDirectVoice: 1 << 18, DisconnectMembers: 1 << 19, UseRelayInDirect: 1 << 20, WearTag: 1 << 21, MoveMembers: 1 << 22, PostEvents: 1 << 23,
   Administrator: 1 << 30,
 } as const
 export const hasPermission = (held: number, required: number) =>
@@ -129,7 +129,16 @@ export interface StreamRateDto { height: number; fps: number; kbps: number }
 export interface GuildSummaryDto { guild: GuildDto; channels: ChannelDto[]; members: MemberDto[]; roles?: RoleDto[] | null; myPermissions: number; voice?: Record<string, VoiceParticipantDto[]> | null }
 export interface ItemIconDto { path: string }
 /** contentType is what the server found the file to be: image/* and video/* can be shown in place, anything else is a download. */
-export interface AttachmentDto { id: string; fileName: string; contentType: string; size: number; url: string; expired?: boolean }
+export interface AttachmentDto {
+  id: string; fileName: string; contentType: string; size: number; url: string; expired?: boolean
+  /** On a picture of a gallery post: the reactions to that picture itself, apart from those to the post. */
+  reactions?: ReactionDto[] | null
+}
+/**
+ * Something on a calendar channel. `day` is the day it is on (year-month-day). `at`, when it has a time, is the
+ * moment it starts: it is shown in each person's own time zone, where it can fall on the day before or after.
+ */
+export interface CalendarEventDto { id: string; channelId: string; authorId: string; authorName: string; title: string; note?: string | null; day: string; at?: string | null; createdAt: string; editedAt?: string | null }
 /** A file offered straight from someone's app. available = their app is still connected and has not withdrawn it. */
 /** `available`: the sender is online with the file. Not available comes back when they are, unless `withdrawn`. */
 export interface FileOfferDto { id: string; fileName: string; size: number; available: boolean; withdrawn?: boolean }

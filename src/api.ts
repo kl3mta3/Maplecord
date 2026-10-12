@@ -1,5 +1,5 @@
 import type {
-  AccountDeletionDto, ApplicationDto, CommandRuleDto, CommandRulesDto, QrDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto, RollStatsDto, SearchResultDto, MediaItemDto, SignInMethodsDto, ContactEmailDto, ConnectionDto, ConnectionServiceDto, FriendLinkDto, FriendLinkOwnerDto } from './types'
+  AccountDeletionDto, CalendarEventDto, ApplicationDto, CommandRuleDto, CommandRulesDto, QrDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto, RollStatsDto, SearchResultDto, MediaItemDto, SignInMethodsDto, ContactEmailDto, ConnectionDto, ConnectionServiceDto, FriendLinkDto, FriendLinkOwnerDto } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -266,6 +266,11 @@ export class Api {
   useFriendLink(code: string) { return this.request<FriendDto>('POST', `/api/friend-links/${encodeURIComponent(code)}`) }
   removeFriend(userId: string) { return this.request<void>('DELETE', `/api/friends/${userId}`) }
   dms() { return this.request<DmChannelDto[]>('GET', '/api/dms') }
+  /** A calendar channel's events from one day to another (year-month-day, 100 days at most). */
+  events(channelId: string, from: string, to: string) { return this.request<CalendarEventDto[]>('GET', `/api/channels/${channelId}/events?from=${from}&to=${to}`) }
+  postEvent(channelId: string, event: { title: string; note: string | null; day: string; at: string | null }) { return this.request<CalendarEventDto>('POST', `/api/channels/${channelId}/events`, event) }
+  editEvent(eventId: string, event: { title: string; note: string | null; day: string; at: string | null }) { return this.request<CalendarEventDto>('PATCH', `/api/events/${eventId}`, event) }
+  deleteEvent(eventId: string) { return this.request<void>('DELETE', `/api/events/${eventId}`) }
   openDm(userId: string) { return this.request<DmChannelDto>('POST', `/api/dms/${userId}`) }
 
   /** Raw PNG body; returns the server path to put on a roll's item so the whole party sees the icon. */

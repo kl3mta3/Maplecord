@@ -25,6 +25,8 @@ const unknownMethod = (e: unknown) => /does not exist|unknown hub method/i.test(
 export interface VoiceEvents {
   VoiceMoved: () => void
   VoiceRemoved: () => void
+  /** Someone who may move members is moving us into another voice channel. */
+  VoiceSent: (toChannelId: string) => void
   ParticipantJoined: (channelId: string, p: VoiceParticipantDto) => void
   ParticipantLeft: (channelId: string, userId: string, connectionId: string) => void
   ParticipantUpdated: (channelId: string, p: VoiceParticipantDto) => void
@@ -233,6 +235,8 @@ export class VoiceHub {
   leave() { this.shut(); return this.c.invoke('LeaveVoice') }
   /** Takes someone else out of a voice channel on a server. The server decides whether we may. */
   disconnectMember(channelId: string, userId: string) { return this.c.invoke('DisconnectMember', channelId, userId) }
+  /** Move someone from one voice channel of a server into another (neither a P2P one), for people who may move members. */
+  moveMember(fromChannelId: string, userId: string, toChannelId: string) { return this.c.invoke('MoveMember', fromChannelId, userId, toChannelId) }
   /** Call the friend we share this direct-message channel with. Relayed unless `direct`. */
   async startCall(channelId: string, direct: boolean) {
     this.shut()
@@ -255,6 +259,8 @@ export class VoiceHub {
   setMuted(muted: boolean) { return this.c.invoke('SetMuted', muted) }
   /** Says whether we hear anyone, for the others to see. A server from before it kept that simply does not answer. */
   setDeafened(deafened: boolean) { return this.c.invoke('SetDeafened', deafened).catch(() => { /* an older server: nobody is told */ }) }
+  /** Whether one of our connections in the voice channel goes through the relay. */
+  setOnRelay(onRelay: boolean) { return this.c.invoke('SetOnRelay', onRelay).catch(() => { /* an older server, or we have left */ }) }
   /** A bot in our voice channel is sending more sound than it may: the server ends its turn. */
   reportBotSound(connectionId: string, kbps: number) { return this.c.invoke('ReportBotSound', connectionId, kbps).catch(() => { /* an older server, or the bot has gone */ }) }
   /**

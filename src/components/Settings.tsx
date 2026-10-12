@@ -63,6 +63,8 @@ export const PERMISSION_LABELS: { bit: number; name: string; hint: string }[] = 
   { bit: Permission.BanMembers, name: 'Ban members', hint: '' },
   { bit: Permission.MuteMembers, name: 'Mute members', hint: '' },
   { bit: Permission.DisconnectMembers, name: 'Disconnect members', hint: 'Take someone out of a voice channel (right-click them). They can join again' },
+  { bit: Permission.PostEvents, name: 'Post events', hint: 'Put events on a calendar channel, and change or remove their own' },
+  { bit: Permission.MoveMembers, name: 'Move members', hint: 'Drag someone from one voice channel onto another. Never into or out of a P2P channel' },
   { bit: Permission.ManageDirectChannels, name: 'Create P2P channels', hint: 'Make a voice channel P2P or relayed (also needs Manage channels)' },
   { bit: Permission.JoinDirectVoice, name: 'Join P2P channels', hint: 'Join a P2P voice channel (also needs Join voice, and P2P allowed on their own account)' },
   { bit: Permission.UseRelayInDirect, name: 'Use the relay in P2P channels', hint: 'Connect through the relay there when a direct connection cannot be made, or to keep their address from the others. Relayed limits apply. Without it, P2P channels are direct only' },

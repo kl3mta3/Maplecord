@@ -1,7 +1,7 @@
 import type { LocalAudioTrack, RemoteParticipant, RemoteTrackPublication, Room } from 'livekit-client'
 import type { IceServerDto, SfuPassDto, VoiceParticipantDto, VoiceSignalDto } from './types'
 import { elementVolumeIgnored } from './volume'
-import { isRelayed } from './transfer'
+import { isRelayed, ownEndRelayed } from './transfer'
 import { detectorUrl } from './voiceDetector'
 import type { VoiceHub } from './voiceHub'
 
@@ -49,6 +49,8 @@ export interface VoiceEngineEvents {
   lost: (reason: string) => void
   /** A bot is sending more sound than it may (see setPeerCap). It is no longer played here. */
   overCap?: (connectionId: string, kbps: number) => void
+  /** Whether any of our connections to the people in the call goes through the relay has changed. */
+  onRelay?: (onRelay: boolean) => void
 }
 
 interface Peer {
@@ -58,6 +60,8 @@ interface Peer {
   meter?: Meter
   /** Whether our connection to them goes through the relay; null until it is connected and we can tell. */
   relayed?: boolean | null
+  /** Whether it is our own end of it that does (and not only theirs). */
+  ownRelay?: boolean
   /** Where their voice arrives when it comes from the stream server, for counting what they send. */
   receiver?: RTCRtpReceiver
 }
@@ -538,6 +542,7 @@ export class VoiceEngine {
     const peer = this.peers.get(connectionId)
     if (!peer) return
     this.peers.delete(connectionId)
+    this.tellRelay()
     try { peer.pc?.close() } catch { /* already closed */ }
     if (peer.meter) { peer.meter.src.disconnect(); void peer.meter.ctx.close() }
     peer.audio.srcObject = null
@@ -590,6 +595,8 @@ export class VoiceEngine {
     this.musicPeers.clear()
     this.caps.clear(); this.capSeen.clear(); this.overCap.clear()
     this.botPeers.clear()
+    // (The server forgets it with the call; a new call starts from "not on it".)
+    this.relayNow = false
     // With push to talk on, nothing is sent until the key is held, from the first moment of the next call.
     this.sending = !this.push
     this.events.speaking(null, false)
@@ -624,6 +631,18 @@ export class VoiceEngine {
   /** Says whether someone in the call is a bot in a P2P call. It counts for a connection made after this. */
   setPeerMusic(connectionId: string, music: boolean) {
     if (music) this.musicPeers.add(connectionId); else this.musicPeers.delete(connectionId)
+  }
+
+  // ---- Whether we are on the relay ----
+  // In a P2P voice channel a connection may go straight to the other person or through the relay. The server is told
+  // when it is we who are using the relay, so that whoever runs it can see how many people a relay is really carrying.
+  private relayNow = false
+
+  private tellRelay() {
+    const now = this.joined && [...this.peers.values()].some(p => p.ownRelay === true)
+    if (now === this.relayNow) return
+    this.relayNow = now
+    this.events.onRelay?.(now)
   }
 
   // ---- A bot's light ----
@@ -790,6 +809,7 @@ export class VoiceEngine {
       this.tuneSenders(pc)
       // Once connected we can tell whether this person is reached through the relay, and set the rate to match.
       void isRelayed(pc).catch(() => true).then(relayed => { const peer = this.peers.get(remote); if (peer?.pc === pc) { peer.relayed = relayed; this.tuneSenders(pc) } })
+      void ownEndRelayed(pc).catch(() => false).then(own => { const peer = this.peers.get(remote); if (peer?.pc === pc) { peer.ownRelay = own; this.tellRelay() } })
     })
 
     const audio = this.makeAudio()

@@ -403,6 +403,23 @@ export async function isRelayed(pc: RTCPeerConnection): Promise<boolean> {
   return relayed
 }
 
+/**
+ * Whether our own end of the connection goes through a relay: we are the one using it, whatever the other person
+ * does. A connection that may only be made through the relay is one, however its addresses come to be described;
+ * otherwise it is when the address of ours that was chosen is the relay's.
+ */
+export async function ownEndRelayed(pc: RTCPeerConnection): Promise<boolean> {
+  if (pc.getConfiguration().iceTransportPolicy === 'relay') return true
+  const stats = await pc.getStats()
+  let pairId: string | undefined
+  stats.forEach(r => { if (r.type === 'transport' && r.selectedCandidatePairId) pairId = r.selectedCandidatePairId })
+  let ours: string | undefined
+  stats.forEach(r => { if (r.type === 'candidate-pair' && (pairId ? r.id === pairId : r.nominated && r.state === 'succeeded')) ours = r.localCandidateId })
+  let relayed = false
+  stats.forEach(r => { if (r.id === ours && r.candidateType === 'relay') relayed = true })
+  return relayed
+}
+
 // ---- Where a received file goes ------------------------------------------------------------------------------------
 
 /** The most a browser without a way to write straight to disk will hold in memory before saving. */

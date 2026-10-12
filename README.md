@@ -24,7 +24,9 @@ one.
 - Threads, to keep a side conversation out of the channel
 - Search a channel's messages, and polls
 - Forum channels: posts with a title, each with its own thread
-- Gallery channels: every post is pictures with a title. Open one to see what is said about it, and like it
+- Gallery channels: every post is pictures with a title. Open one to see what is said about it, like it, and react
+  to each of its pictures by itself
+- Calendar channels: a month of days with events on them, shown in your own time zone
 - Files, pictures and videos in chat; pictures and videos show right there
 - Send a file by dropping it on the chat, or by pasting it into the message box
 - See only the pictures and videos of a channel or a conversation, as a grid; click one to go to its message
@@ -39,6 +41,7 @@ one.
 ### Voice and video
 
 - Voice channels: mute, deafen, a volume for each person, and switching microphone or speakers without leaving
+- With the permission, drag someone from one voice channel onto another to move them there
 - Your microphone is only sent while you are talking, so the room behind you stays out of the call, with a
   sensitivity you set. Or use push to talk, with a key or mouse button you choose; in the desktop app it works while
   a game is in front.

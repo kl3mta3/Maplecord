@@ -138,6 +138,13 @@ button.livebadge.on { background: var(--accent); }
 a.filechip:hover { border-color: var(--accent2); }
 .filechip.expired { color: var(--muted); border-style: dashed; }
 .message img.attachment { max-width: 420px; max-height: 320px; border-radius: 6px; margin-top: 6px; display: block; background: var(--bg0); }
+.message img.attachment.zoomable { cursor: zoom-in; }
+/* A picture shown large, over everything: the picture, and above it its name and the buttons. */
+.bigpicture { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,0.86); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 16px; cursor: zoom-out; }
+.bigpicture > img { max-width: 100%; max-height: calc(100% - 52px); object-fit: contain; border-radius: 6px; cursor: default; }
+.bigpicture .bar { display: flex; align-items: center; gap: 8px; width: min(100%, 900px); cursor: default; }
+.bigpicture .bar .name { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bigpicture .bar .grow { flex: 1; min-width: 0; }
 .message .card { margin-top: 4px; background: var(--bg1); border: 1px solid var(--accent); border-left-width: 4px; border-radius: 8px; padding: 8px 12px; max-width: 520px; }
 .message .card .title { font-weight: 700; color: var(--accent2); }
 .message .card .line { color: var(--muted); font-size: 12px; }
@@ -843,3 +850,21 @@ button.chip { cursor: pointer; }
 .connectionrow b { min-width: 84px; }
 .connectionrow .renew { flex-basis: 100%; font-size: 12px; }
 .connectionrow .grow { min-width: 0; overflow-wrap: anywhere; }
+
+/* ---- A calendar channel: a month of days as squares ---- */
+.chat.calendar { overflow: hidden; }
+.chat.calendar .header .calmonth { align-self: center; min-width: 150px; text-align: center; }
+.calweek { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; padding: 8px 12px 0; color: var(--muted); font-size: 12px; text-align: center; }
+.calgrid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-template-rows: repeat(6, minmax(0, 1fr)); gap: 6px; padding: 6px 12px 12px; }
+.calday { display: flex; flex-direction: column; align-items: stretch; gap: 2px; min-width: 0; min-height: 0; overflow: hidden; padding: 6px; text-align: left; background: var(--bg1); border: 1px solid var(--border); border-radius: 8px; font-weight: 400; }
+.calday:hover { border-color: var(--accent); }
+.calday.other { opacity: 0.45; }
+.calday.today { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.calday .num { font-weight: 700; font-size: 13px; }
+.calday.today .num { color: var(--accent2, var(--accent)); }
+.calday .calevent { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; padding: 1px 5px; border-radius: 4px; background: var(--bg3, rgba(255,255,255,0.08)); }
+.calday .calevent i { font-style: normal; color: var(--muted); }
+.calday .calmore { font-size: 11px; color: var(--muted); }
+.caldetail { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
+.caldetail .note { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 700px) { .calday .calevent { font-size: 10px; padding: 0 3px; } .calgrid, .calweek { gap: 3px; padding-left: 6px; padding-right: 6px; } }

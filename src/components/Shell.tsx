@@ -1,7 +1,8 @@
 import { TagCardDialog, onTagOpened } from './Tags'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { p2pMedia, type Store } from '../store'
-import type { TransferView } from '../transfer'
+import { openSink, type TransferView } from '../transfer'
 import { ChannelType, isPostsChannel, MessageKind, Permission, UserStatus, RollChoice, RollKind, RollRange, RpsChoice, hasPermission, type AttachmentDto, type ChannelBotDto, type FileOfferDto, type CommandDto, type MemberDto, type MediaItem, type MessageDto, type RoleDto } from '../types'
 
 const RPS_ICON: Record<number, string> = { [RpsChoice.Rock]: '✊', [RpsChoice.Paper]: '✋', [RpsChoice.Scissors]: '✌️' }
@@ -32,7 +33,7 @@ import { PastedDialog, AllowDirectDialog, BanDialog, ConfirmDialog, CreateChanne
 import { OverlaySettingsDialog, ServerSettingsDialog } from './Settings'
 import Friends from './Home'
 import { serverMediaUrl } from '../itemIcons'
-import { isElectron } from '../platform'
+import { bridge, isElectron } from '../platform'
 import { MAX_P2P_TEXT, P2P_PICTURE, type P2PFile } from '../p2pText'
 import { foldP2p, foldP2pChat, P2P_GALLERY_POLLS, P2P_META_ROOM, P2P_REACTIONS } from '../p2pPosts'
 import { soundPackNames } from '../sounds'
@@ -55,12 +56,13 @@ import { DropBanner, PluginsDialog } from './Plugins'
 import { SharePicker, StreamStage } from './Streams'
 import { CHAT_LEAST, COLUMNS, ColumnGrip, clampColumn, type Column } from './ColumnGrip'
 import { channelMembers, mayManageMessagesIn } from '../channelViewers'
+import { CalendarView } from './Calendar'
 import { ForumList, GalleryGrid, MediaGrid, NewPostDialog, PinsDialog, PollDialog, PollView, QUICK_REACTIONS, ReactionPicker, Reactions, ReplyQuote, SearchDialog } from './ChatExtras'
 
 type DialogState =
   | { kind: 'createGuild' } | { kind: 'joinGuild' } | { kind: 'addGuild' } | { kind: 'discover' } | { kind: 'channelAccess'; channelId: string } | { kind: 'deleteGroup'; channelId: string; name: string } | { kind: 'createChannel'; category?: boolean } | { kind: 'startRoll'; rollKind: RollKind }
   | { kind: 'leaveGuild' } | { kind: 'kick'; member: MemberDto } | { kind: 'ban'; member: MemberDto }
-  | { kind: 'audio' } | { kind: 'allowDirect' } | { kind: 'channelKind'; channelId: string; name: string; direct: boolean } | { kind: 'p2pCall'; userId: string; name: string } | { kind: 'share' } | { kind: 'settings' } | { kind: 'renameChannel'; channelId: string; name: string } | { kind: 'deleteChannel'; channelId: string; name: string } | { kind: 'renameFolder'; folderId: string } | { kind: 'overlay' } | { kind: 'server' } | { kind: 'plugins' } | { kind: 'profile' }
+  | { kind: 'audio' } | { kind: 'allowDirect' } | { kind: 'channelKind'; channelId: string; name: string; direct: boolean } | { kind: 'p2pCall'; userId: string; name: string } | { kind: 'share' } | { kind: 'settings' } | { kind: 'renameChannel'; channelId: string; name: string; group?: boolean } | { kind: 'deleteChannel'; channelId: string; name: string } | { kind: 'renameFolder'; folderId: string } | { kind: 'overlay' } | { kind: 'server' } | { kind: 'plugins' } | { kind: 'profile' }
   | { kind: 'nickname'; guildId: string; userId: string } | { kind: 'invite'; guildId: string } | null
 
 export default function Shell({ store, onSignedOut }: { store: Store; onSignedOut: () => void }) {
@@ -155,6 +157,8 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   // Channels and their groups are dragged too, by people who may manage channels: onto a group to move a channel
   // into it, onto a channel to put it in front of that one, and a group onto a group to reorder the groups.
   const CHANNEL_DRAG = 'text/maplecord-channel'
+  /** What a drag carries when it is a person being moved from one voice channel to another. */
+  const PERSON_DRAG = 'application/x-maplecord-voice-person'
   // A group of channels folds shut with a click on its heading. What is going on inside still shows: the channel
   // being read, channels with something unread, and voice channels with people in them.
   /** The P2P bots of each P2P channel whose menu has been opened, asked for as the menu opens. */
@@ -167,6 +171,33 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
     store.updateSettings({ collapsedGroups: all })
   }
   const [dropOn, setDropOn] = useState<string | null>(null)
+  // Someone in a voice channel, dragged onto another voice channel by a person who may move members. Neither channel
+  // may be a P2P one, and a bot is not moved.
+  const mayMove = can(Permission.MoveMembers)
+  const personDrag = (c: { id: string; directSince?: string | null }, p: { userId: string; bot?: boolean }) => (mayMove && !c.directSince && !p.bot ? {
+    draggable: true,
+    onDragStart: (e: React.DragEvent) => { e.stopPropagation(); e.dataTransfer.setData(PERSON_DRAG, JSON.stringify({ userId: p.userId, from: c.id })); e.dataTransfer.effectAllowed = 'move' },
+    onDragEnd: () => setDropOn(null),
+  } : {})
+  const personDrop = (c: { id: string; type: number; directSince?: string | null }) => (mayMove && c.type === ChannelType.Voice && !c.directSince ? {
+    onDragOver: (e: React.DragEvent) => { if (e.dataTransfer.types.includes(PERSON_DRAG)) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dropOn !== c.id) setDropOn(c.id) } },
+    onDragLeave: () => { if (dropOn === c.id) setDropOn(null) },
+    onDrop: (e: React.DragEvent) => {
+      const raw = e.dataTransfer.types.includes(PERSON_DRAG) ? e.dataTransfer.getData(PERSON_DRAG) : ''
+      if (!raw) return
+      e.preventDefault(); e.stopPropagation(); setDropOn(null)
+      try { const moved = JSON.parse(raw) as { userId: string; from: string }; if (moved.from !== c.id) void store.moveMember(moved.from, moved.userId, c.id) } catch { /* not one of ours */ }
+    },
+  } : {})
+  /** Two sets of drag handlers on one row: each is given every event, and takes only what is its own. */
+  const dragBoth = (a: Record<string, unknown>, b: Record<string, unknown>) => {
+    const out: Record<string, unknown> = { ...a }
+    for (const [name, handler] of Object.entries(b)) {
+      const first = a[name]
+      out[name] = typeof first === 'function' && typeof handler === 'function' ? (e: React.DragEvent) => { (first as (e: React.DragEvent) => void)(e); (handler as (e: React.DragEvent) => void)(e) } : handler
+    }
+    return out
+  }
   const channelDragged = (e: React.DragEvent) => (e.dataTransfer.types.includes(CHANNEL_DRAG) ? e.dataTransfer.getData(CHANNEL_DRAG) : '')
   const channelDrag = (id: string, overGroup: boolean, drop: (dragged: string, draggedIsGroup: boolean) => void) => ({
     draggable: true,
@@ -552,7 +583,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
                   <div key={c.id}>
                     <div
                       className={'channel' + (c.id === store.selectedChannel?.id ? ' active' : '') + ((g.channelUnread[c.id] ?? 0) > 0 ? ' unread' : '') + (c.directSince ? ' p2p' : '') + (store.settings.mutedChannels?.[c.id] ? ' mutedchannel' : '') + (dropOn === c.id ? ' dropon' : '')}
-                      {...(can(Permission.ManageChannels) ? channelDrag(c.id, false, dragged => void store.moveChannel(dragged, c.parentId ?? null, c.id)) : {})}
+                      {...dragBoth(can(Permission.ManageChannels) ? channelDrag(c.id, false, dragged => void store.moveChannel(dragged, c.parentId ?? null, c.id)) : {}, personDrop(c))}
                       style={c.id === voice?.channelId ? { color: 'var(--green)' } : undefined}
                       title={c.type !== ChannelType.Voice ? undefined : c.directSince
                         ? 'P2P voice channel: people in it connect straight to each other and can find each other\u2019s IP address. Click to join (you are asked first).'
@@ -563,7 +594,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
                         if (c.directSince) loadChannelBots(c.id)
                         setMenu({ kind: 'channel', channelId: c.id, name: c.name, direct: !!c.directSince, voice: c.type === ChannelType.Voice, x: e.clientX, y: e.clientY })
                       }}>
-                      <span className="muted">{c.type === ChannelType.Voice ? '🔊' : c.type === ChannelType.Forum ? '☰' : c.type === ChannelType.Gallery ? '🖼' : '#'}</span>
+                      <span className="muted">{c.type === ChannelType.Voice ? '🔊' : c.type === ChannelType.Forum ? '☰' : c.type === ChannelType.Gallery ? '🖼' : c.type === ChannelType.Calendar ? '📅' : '#'}</span>
                       <span className="grow" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
                       {c.directSince && <span className="p2ptag">P2P</span>}
                       {store.settings.mutedChannels?.[c.id] && <span className="muted" title="Muted">🔕</span>}
@@ -575,7 +606,8 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
                       return roster.length > 0 && (
                         <div className="voice-users">
                           {roster.map(p => (
-                            <div key={p.connectionId} className={'u' + (p.userId === me?.id ? ' me' : '')} title="Right-click for volume and more" onContextMenu={e => openUserMenu(e, p.userId, p.username)}>
+                            <div key={p.connectionId} className={'u' + (p.userId === me?.id ? ' me' : '')} title={mayMove && !c.directSince && !p.bot ? 'Right-click for volume and more. Drag onto another voice channel to move them' : 'Right-click for volume and more'}
+                              {...personDrag(c, p)} onContextMenu={e => openUserMenu(e, p.userId, p.username)}>
                               <span className={'dot' + (p.speaking ? ' speaking' : '')} />
                               <UserName who={store.appearanceOf(p.userId)} label={nameIn(p.userId, p.username)} roleColor={p.speaking ? '#ffffff' : colorOf(p.userId)} onClick={e => openCard(e, p.userId, p.username)} />
                               {p.stream && (() => {
@@ -666,6 +698,8 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       {/* ===== Chat / friends ===== */}
       {store.home && !store.selectedChannel
         ? <Friends store={store} />
+        : g && store.selectedChannel?.type === ChannelType.Calendar
+        ? <CalendarView store={store} channelId={store.selectedChannel.id} name={store.selectedChannel.name} mayPost={can(Permission.PostEvents)} mayManage={can(Permission.ManageMessages)} nameOf={nameIn} />
         : <Chat store={store} openRollDialog={(rollKind: RollKind) => setDialog({ kind: 'startRoll', rollKind })} canRoll={g ? can(Permission.StartRolls) : !!store.selectedDm} colorOf={colorOf}
           onCall={(userId, name, direct) => { if (direct) setDialog({ kind: 'p2pCall', userId, name }); else void store.startCall(userId, false) }} onUserMenu={openUserMenu} isIgnored={ignored} onUserCard={openCard} nameIn={nameIn} />}
 
@@ -753,6 +787,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       )}
       {menu && <ContextMenu x={menu.x} y={menu.y} entries={menu.kind === 'guild' ? guildEntries(menu.guildId) : menu.kind === 'user' ? userEntries(menu.userId, menu.username) : menu.kind === 'stats' ? rollEntries() : menu.kind === 'folder' ? folderEntries(menu.folderId) : menu.kind === 'status' ? statusEntries() : menu.kind === 'mic' ? deviceEntries('audioinput') : menu.kind === 'speaker' ? deviceEntries('audiooutput') : menu.kind === 'group' ? [
         { kind: 'label', text: menu.name },
+        { kind: 'item', label: 'Rename group', icon: '✎', onClick: () => setDialog({ kind: 'renameChannel', channelId: menu.channelId, name: menu.name, group: true }) },
         { kind: 'item', label: 'Who can see it', icon: '🔒', onClick: () => setDialog({ kind: 'channelAccess', channelId: menu.channelId }) },
         { kind: 'item', label: 'Delete group', icon: '🗑', danger: true, onClick: () => setDialog({ kind: 'deleteGroup', channelId: menu.channelId, name: menu.name }) },
       ] : [
@@ -800,7 +835,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           onAnswer={() => void store.answerCall()} onDecline={() => void store.declineCall()} onSettings={() => setDialog({ kind: 'audio' })} />
       )}
       {dialog?.kind === 'renameChannel' && (
-        <PromptDialog title={`Rename ${dialog.name}`} label="Channel name" initial={dialog.name} onClose={() => setDialog(null)}
+        <PromptDialog title={`Rename ${dialog.name}`} label={dialog.group ? 'Group name' : 'Channel name'} initial={dialog.name} onClose={() => setDialog(null)}
           onSubmit={name => { if (name !== dialog.name) void store.renameChannel(dialog.channelId, name) }} />
       )}
       {dialog?.kind === 'deleteGroup' && (
@@ -863,13 +898,14 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
   const [dropping, setDropping] = useState(false)
   const channel = store.selectedChannel
   // Right-click a message: copy it, or delete it if it is yours or you may manage messages here (the server decides).
-  const [messageMenu, setMessageMenu] = useState<{ m: MessageDto; x: number; y: number } | null>(null)
+  // (And, when it was a picture on it that was right-clicked, save that picture.)
+  const [messageMenu, setMessageMenu] = useState<{ m: MessageDto; x: number; y: number; picture?: { src: string; name: string } } | null>(null)
   const [deleting, setDeleting] = useState<MessageDto | null>(null)
   // What a kept channel's messages can have: an answer, an edit, reactions, a pin, a thread, a poll. A P2P channel's
   // messages are on people's own devices, where none of this reaches.
   const [replyingTo, setReplyingTo] = useState<MessageDto | null>(null)
   const [editing, setEditing] = useState<string | null>(null)
-  const [picker, setPicker] = useState<{ id: string; x: number; y: number } | null>(null)
+  const [picker, setPicker] = useState<{ id: string; x: number; y: number; picture?: string } | null>(null)
   const [panel, setPanel] = useState<'pins' | 'search' | 'poll' | 'post' | null>(null)
   // Only the channel's pictures and videos, as a grid, in place of the conversation.
   const [mediaOnly, setMediaOnly] = useState(false)
@@ -1089,6 +1125,11 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
       poll: m.poll ? <PollView poll={m.poll} mayClose={mine || mayManageMessages} onVote={options => void store.votePoll(m.id, options)} onClose={() => void store.closePoll(m.id)} /> : undefined,
       reactions: (m.reactions?.length ?? 0) > 0
         ? <Reactions reactions={m.reactions!} onToggle={(emoji, on) => void store.react(m.id, emoji, on)} onMore={e => setPicker({ id: m.id, x: e.clientX, y: e.clientY })} /> : undefined,
+      // An opened gallery post: each of its pictures can be reacted to by itself, apart from the post.
+      pictures: channel?.type === ChannelType.Gallery && thread?.root.id === m.id ? {
+        toggle: (attachmentId, emoji, on) => void store.reactToPicture(attachmentId, emoji, on),
+        more: (attachmentId, e) => setPicker({ id: m.id, picture: attachmentId, x: e.clientX, y: e.clientY }),
+      } : undefined,
       threadLink: mayThread && (m.threadCount ?? 0) > 0
         ? <button className="threadlink" onClick={() => void store.openThread(m)}>💬 {m.threadCount} {m.threadCount === 1 ? 'reply' : 'replies'} <span className="muted">· open thread</span></button> : undefined,
       tools: (
@@ -1188,7 +1229,11 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
               p2pFiles={m.p2pFiles?.map(f => <P2PFileChip key={f.hash} store={store} channelId={m.channelId} authorId={m.authorId} file={f} />)}
               author={m.webhookId ? null : store.appearanceOf(m.authorId)} name={m.webhookId ? m.authorName : nameIn(m.authorId, m.authorName)}
               mention={m.authorId !== me?.id && store.mentionsMe(m.content)}
-              onMenu={m.ephemeral ? undefined : e => { e.preventDefault(); setMessageMenu({ m, x: e.clientX, y: e.clientY }) }}
+              onMenu={m.ephemeral ? undefined : e => {
+                e.preventDefault()
+                const on = (e.target as HTMLElement).closest<HTMLImageElement>('img[data-picture]')
+                setMessageMenu({ m, x: e.clientX, y: e.clientY, picture: on ? { src: on.currentSrc || on.src, name: on.dataset.picture ?? '' } : undefined })
+              }}
               onUserMenu={m.webhookId ? undefined : e => onUserMenu(e, m.authorId, m.authorName)} onUserCard={m.webhookId ? undefined : e => onUserCard(e, m.authorId, m.authorName)} />)}
           </>
         )}
@@ -1196,6 +1241,10 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
 
       {messageMenu && (
         <ContextMenu x={messageMenu.x} y={messageMenu.y} onClose={() => setMessageMenu(null)} entries={[
+          ...(messageMenu.picture ? [
+            { kind: 'item', label: 'Download picture', icon: '⬇', onClick: () => { const p = messageMenu.picture!; void savePicture(p.src, p.name).catch(e => store.setError(e instanceof Error ? e.message : 'The picture could not be saved.')) } } as MenuEntry,
+            { kind: 'sep' } as MenuEntry,
+          ] : []),
           ...(kept ? [
             { kind: 'item', label: 'Reply', icon: '↩', onClick: () => setReplyingTo(messageMenu.m) } as MenuEntry,
             { kind: 'item', label: 'Add reaction', icon: '😀', onClick: () => setPicker({ id: messageMenu.m.id, x: messageMenu.x, y: messageMenu.y }) } as MenuEntry,
@@ -1228,7 +1277,13 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
           onConfirm={() => void store.deleteMessage(deleting.id)} onClose={() => setDeleting(null)} />
       )}
       {picker && <ReactionPicker x={picker.x} y={picker.y} choices={p2pChat ? p2pReactionChoices : store.reactionChoices} onClose={() => setPicker(null)}
-        onPick={emoji => { const m = shown.find(x => x.id === picker.id); if (m) react(m, emoji) }} />}
+        onPick={emoji => {
+          const m = shown.find(x => x.id === picker.id)
+          if (!m) return
+          // Chosen for one picture of a post: a reaction to that picture, not to the post.
+          if (picker.picture) void store.reactToPicture(picker.picture, emoji, !(m.attachments.find(a => a.id === picker.picture)?.reactions ?? []).find(r => r.emoji === emoji)?.mine)
+          else react(m, emoji)
+        }} />}
       {panel === 'pins' && <PinsDialog load={p2pChat ? store.loadP2pPins : store.loadPins} nameOf={nameOfMessage} onJump={goTo}
         onUnpin={p2pChat ? (mayManageMessages && p2p?.state === 'on' ? m => store.pinP2p(m.id, false) : undefined) : mayPin ? m => store.pinMessage(m.id, false) : undefined} onClose={() => setPanel(null)} />}
       {panel === 'search' && channel && <SearchDialog where={(channel.type === ChannelType.DirectMessage ? '@' : '#') + channel.name} search={p2pChat ? store.searchP2p : store.searchMessages} nameOf={nameOfMessage} onJump={goTo} onClose={() => setPanel(null)} />}
@@ -1429,6 +1484,8 @@ interface MessageExtras {
   editor?: React.ReactNode
   poll?: React.ReactNode
   reactions?: React.ReactNode
+  /** For an opened gallery post: reacting to each of its pictures by itself. */
+  pictures?: { toggle: (attachmentId: string, emoji: string, on: boolean) => void; more: (attachmentId: string, e: React.MouseEvent) => void }
   threadLink?: React.ReactNode
   /** The buttons that appear over a message when the pointer is on it. */
   tools?: React.ReactNode
@@ -1507,7 +1564,7 @@ function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu,
           ) : m.kind === MessageKind.CoinFlip ? (
             <div className="row"><img src={import.meta.env.BASE_URL + (m.content === 'Tails' ? 'coin_tails.png' : 'coin_heads.png')} width={40} height={40} alt="" /> flipped a coin — <b>{m.content}</b></div>
           ) : extras?.editor ?? <div className="body">{withInviteLinks(m.content, onInvite)}{m.editedAt && <span className="edited muted" title={`Edited ${new Date(m.editedAt).toLocaleString()}`}> (edited)</span>}</div>}
-        {m.attachments.map(a => <AttachmentView key={a.id} file={a} />)}
+        {m.attachments.map(a => <AttachmentView key={a.id} file={a} pictures={extras?.pictures} />)}
         {p2pFiles}
         {m.embeds?.map((e, i) => (
           <div key={i} className="card" style={{ borderLeftColor: e.color != null ? '#' + e.color.toString(16).padStart(6, '0') : undefined }}>
@@ -1635,7 +1692,7 @@ function P2PFileChip({ store, channelId, authorId, file }: { store: Store; chann
   const { loadP2pFile } = store
   useEffect(() => { void loadP2pFile(channelId, file, authorId, byItself) }, [loadP2pFile, channelId, file.hash, authorId, byItself, reachable]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (picture && view?.url) return <img className="attachment" src={view.url} alt={file.name} title={file.name} />
+  if (picture && view?.url) return <Picture src={view.url} name={file.name} />
   const fetching = view?.state === 'fetching'
   const note = fetching ? `fetching · ${Math.min(100, Math.round(view.got / file.size * 100))}%`
     : view?.state === 'nobody' ? 'nobody connected has it right now'
@@ -1653,11 +1710,58 @@ function P2PFileChip({ store, channelId, authorId, file }: { store: Store; chann
 }
 
 /**
+ * Saves a picture that is being shown to wherever the person chooses. It is fetched from where it is shown from, so
+ * what is saved is the picture as it was sent.
+ */
+async function savePicture(src: string, name: string) {
+  const reply = await fetch(src)
+  if (!reply.ok) throw new Error('The picture could not be fetched to save it.')
+  const bytes = new Uint8Array(await reply.arrayBuffer())
+  const sink = await openSink(name || 'picture', bytes.byteLength, bridge())
+  if (!sink) return
+  try {
+    for (let at = 0; at < bytes.byteLength; at += 1024 * 1024) await sink.write(bytes.subarray(at, at + 1024 * 1024))
+    await sink.close()
+  } catch (e) { await sink.abort().catch(() => {}); throw e }
+}
+
+/**
+ * A picture on a message. A click shows it as large as the window allows, with a button to save it; a click anywhere
+ * else, or Escape, puts it away. (Right-clicking it offers saving too: see the message menu.)
+ */
+function Picture({ src, name, onError }: { src: string; name: string; onError?: () => void }) {
+  const [big, setBig] = useState(false)
+  const [failed, setFailed] = useState('')
+  useEffect(() => {
+    if (!big) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setBig(false) } }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [big])
+  const save = () => { setFailed(''); void savePicture(src, name).catch(e => setFailed(e instanceof Error ? e.message : 'The picture could not be saved.')) }
+  return (
+    <>
+      <img className="attachment zoomable" src={src} alt={name} title={name} data-picture={name} onClick={() => setBig(true)} onError={onError} />
+      {big && createPortal(
+        <div className="bigpicture" role="dialog" aria-label={name} onClick={() => setBig(false)}>
+          <div className="bar" onClick={e => e.stopPropagation()}>
+            <span className="grow name">{name}</span>
+            {failed && <span className="muted">{failed}</span>}
+            <button onClick={save} title="Save this picture">⬇ Download</button>
+            <button className="subtle" onClick={() => setBig(false)} title="Close">✕</button>
+          </div>
+          <img src={src} alt={name} onClick={e => e.stopPropagation()} />
+        </div>, document.body)}
+    </>
+  )
+}
+
+/**
  * One file on a message. Pictures and videos show in place; anything else is a download.
  * The server only keeps a file for a while. The desktop app shows pictures and videos through its own copies
  * (see electron/fileCache.ts), so one it has shown before still shows after the server has let it go.
  */
-function AttachmentView({ file }: { file: AttachmentDto }) {
+function AttachmentView({ file, pictures }: { file: AttachmentDto; pictures?: MessageExtras['pictures'] }) {
   const [gone, setGone] = useState(false)
   const desktop = isElectron()
   const kind = file.contentType.startsWith('image/') ? 'image' : file.contentType.startsWith('video/') ? 'video' : file.contentType.startsWith('audio/') ? 'audio' : 'file'
@@ -1666,7 +1770,12 @@ function AttachmentView({ file }: { file: AttachmentDto }) {
 
   // Without a copy of our own (the web version, or any plain download) an expired file is simply gone.
   if (gone || (file.expired && (!desktop || kind === 'file'))) return expired
-  if (kind === 'image') return <img className="attachment" src={src} alt={file.fileName} title={file.fileName} onError={() => setGone(true)} />
+  if (kind === 'image') return (
+    <>
+      <Picture src={src} name={file.fileName} onError={() => setGone(true)} />
+      {pictures && <Reactions reactions={file.reactions ?? []} onToggle={(emoji, on) => pictures.toggle(file.id, emoji, on)} onMore={e => pictures.more(file.id, e)} />}
+    </>
+  )
   if (kind === 'video') return <video className="attachment" src={src} controls preload={desktop ? 'none' : 'metadata'} title={file.fileName} onError={() => setGone(true)} />
   if (kind === 'audio') return (
     <div className="soundchip" title={file.fileName}>

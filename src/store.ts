@@ -25,7 +25,7 @@ import {
   type ChannelDto, type CommandDto, type GuildSummaryDto, type MemberDto, type MessageDto, type RollItemDto, type RollResultDto, type RollSessionDto,
   type VoiceParticipantDto, type RpsSessionDto, type RpsResultDto, RpsChoice, type FriendsDto, type DmChannelDto, type RoleDto,
   type DecorationDto, type QrDto, type UpdateProfileRequest, type UserDto, type UserProfileDto, type SystemMessageDto, type SignInMethodsDto, type ContactEmailDto, type ConnectionDto, type ConnectionServiceDto, type FriendLinkDto, type MediaItem, type SearchResultDto, type NewPollDto, isPostsChannel, type RollStatsDto, type FileOfferDto, type TokenResponse, type StreamSettingsDto,
-  type SfuPassDto, type InviteDto,
+  type SfuPassDto, type InviteDto, type CalendarEventDto,
 } from './types'
 
 /** A DM rendered as a channel so chat, rolls and the overlay treat it like any other. */
@@ -321,6 +321,8 @@ export function useMaplecord() {
     lost: reason => voiceLostRef.current(reason),
     // A bot sending more sound than it may: it is no longer played here, and the server is told, which ends its turn.
     overCap: (id, kbps) => { void voiceHub.reportBotSound(id, kbps) },
+    // Whether we reach anyone in the call through the relay: said to the server, which counts who is on each relay.
+    onRelay: on => { void voiceHub.setOnRelay(on) },
   }))
 
   // ---- Shared video (see stream.ts). The engine holds the live MediaStreams; `streamTick` re-renders when it changes.
@@ -379,6 +381,8 @@ export function useMaplecord() {
   viewingPastRef.current = viewingPast
   /** The message to bring into view and mark, after jumping to it. */
   const [highlight, setHighlight] = useState<string | null>(null)
+  /** The last thing heard about a calendar channel's events, for whichever calendar is on screen to take in. */
+  const [calendarChange, setCalendarChange] = useState<{ n: number; channelId: string; changed?: CalendarEventDto; deleted?: string } | null>(null)
   /** Changes a message wherever it is held: in the channel's list, in the open thread, or as that thread's first message. */
   const patchMessage = useCallback((messageId: string, change: (m: MessageDto) => MessageDto) => {
     setMessages(ms => (ms.some(m => m.id === messageId) ? ms.map(m => (m.id === messageId ? change(m) : m)) : ms))
@@ -702,6 +706,18 @@ export function useMaplecord() {
           : had.some(r => r.emoji === emoji) ? had.map(r => (r.emoji === emoji ? { ...r, count, mine } : r)) : [...had, { emoji, count, mine }]
         return { ...m, reactions: next.length > 0 ? next : null }
       }),
+      PictureReactionChanged: (_channelId, messageId, attachmentId, emoji, userId, on, count) => patchMessage(messageId, m => ({
+        ...m, attachments: m.attachments.map(a => {
+          if (a.id !== attachmentId) return a
+          const had = a.reactions ?? []
+          const mine = userId === me() ? on : had.find(r => r.emoji === emoji)?.mine ?? false
+          const next = count <= 0 ? had.filter(r => r.emoji !== emoji)
+            : had.some(r => r.emoji === emoji) ? had.map(r => (r.emoji === emoji ? { ...r, count, mine } : r)) : [...had, { emoji, count, mine }]
+          return { ...a, reactions: next.length > 0 ? next : null }
+        }),
+      })),
+      CalendarEventChanged: event => setCalendarChange(c => ({ n: (c?.n ?? 0) + 1, channelId: event.channelId, changed: event })),
+      CalendarEventDeleted: (channelId, eventId) => setCalendarChange(c => ({ n: (c?.n ?? 0) + 1, channelId, deleted: eventId })),
       PollChanged: (_channelId, messageId, userId, theirs, counts, voters, closed) => patchMessage(messageId, m => (!m.poll ? m : {
         ...m, poll: { ...m.poll, voters, closed, options: m.poll.options.map((o, i) => ({ ...o, votes: counts[i] ?? o.votes, mine: userId === me() ? theirs.includes(i) : o.mine })) },
       })),
@@ -832,6 +848,14 @@ export function useMaplecord() {
       VoiceMoved: () => { if (dropVoice()) setError('Voice moved to another app or device you joined from.') },
       // Someone who may disconnect members took us out of the channel. Nothing stops us joining again.
       VoiceRemoved: () => { if (dropVoice()) setError('You were disconnected from the voice channel by someone who manages this server.') },
+      // Someone who may move members moved us. We do the joining, so everything that decides whether we may still does.
+      VoiceSent: toChannelId => {
+        const to = findChannel(toChannelId)
+        // Never into a P2P channel: that is only ever our own choice (the server refuses to ask it of us, too).
+        if (!voiceRef.current || !to?.guild || to.channel.type !== ChannelType.Voice || to.channel.directSince) return
+        setError(`You were moved to ${to.channel.name} by someone who manages this server.`)
+        void joinVoiceRef.current(toChannelId, true)
+      },
       // These only arrive for the voice channel we are in, and never for ourselves: knock when someone joins, door when they leave.
       ParticipantJoined: (c, p) => {
         const cur = voiceRef.current
@@ -1007,6 +1031,8 @@ export function useMaplecord() {
     ;(async () => {
       try {
         const opened = findChannel(selectedChannelId)
+        // A calendar has no messages: its events are fetched by the calendar itself, a month at a time.
+        if (opened?.channel.type === ChannelType.Calendar) return
         // A forum or a gallery lists its posts; what is said about one is in its thread. (A P2P gallery's posts are
         // P2P messages like any other: the server has none of them.)
         const p2pHere = !!opened?.guild && !!opened.channel.directSince
@@ -1044,7 +1070,7 @@ export function useMaplecord() {
     if (hubEpoch === 0) return
     const channelId = selected.current.channel
     const reading = channelId ? findChannel(channelId) : null
-    if (!channelId || (reading?.guild && reading.channel.directSince)) return
+    if (!channelId || (reading?.guild && reading.channel.directSince) || reading?.channel.type === ChannelType.Calendar) return
     let cancelled = false
     api.messages(channelId).then(page => {
       if (cancelled || selected.current.channel !== channelId) return
@@ -1428,6 +1454,7 @@ export function useMaplecord() {
 
   const editMessage = useCallback(async (messageId: string, content: string, title: string | null = null) => { await run(() => hub.editMessage(messageId, content, title)) }, [hub])
   const react = useCallback(async (messageId: string, emoji: string, on: boolean) => { await run(() => hub.react(messageId, emoji, on)) }, [hub])
+  const reactToPicture = useCallback(async (attachmentId: string, emoji: string, on: boolean) => { await run(() => hub.reactToPicture(attachmentId, emoji, on)) }, [hub])
   const pinMessage = useCallback(async (messageId: string, on: boolean) => { await run(() => hub.pin(messageId, on)) }, [hub])
   const votePoll = useCallback(async (messageId: string, options: number[]) => { await run(() => hub.vote(messageId, options)) }, [hub])
   const closePoll = useCallback(async (messageId: string) => { await run(() => hub.closePoll(messageId)) }, [hub])
@@ -1640,6 +1667,7 @@ export function useMaplecord() {
   }, [hub, messages])
   /** Takes someone out of the voice channel they are in on a server; the server decides whether we may. */
   const disconnectMember = useCallback(async (channelId: string, userId: string) => { await run(() => voiceHub.disconnectMember(channelId, userId)) }, [voiceHub])
+  const moveMember = useCallback(async (fromChannelId: string, userId: string, toChannelId: string) => { await run(() => voiceHub.moveMember(fromChannelId, userId, toChannelId)) }, [voiceHub])
   /** Mute someone in this server's voice channels, or undo it. Everyone is told by the server. */
   const setVoiceMuted = useCallback(async (guildId: string, userId: string, muted: boolean) => { await run(() => api.setVoiceMuted(guildId, userId, muted)) }, [api])
 
@@ -2873,7 +2901,7 @@ export function useMaplecord() {
   return {
     api, hub, settings, updateSettings, ready, status, error, setError, systemMessages, dismissSystemMessage,
     guilds, selectedGuild, selectedChannel, selectedDm, home, friends, dms, dmUnread, messages, canLoadOlder, activeRoll, typing, commands, stats, setGuildCountRolls, setGuildWelcome,
-    thread, viewingPast, highlight, setHighlight, openThread, closeThread, loadOlderThread, createPost, editMessage, react, pinMessage, votePoll, closePoll,
+    thread, viewingPast, highlight, setHighlight, openThread, closeThread, loadOlderThread, createPost, editMessage, react, reactToPicture, calendarChange, pinMessage, votePoll, closePoll,
     reactionChoices, loadPins, searchMessages, jumpTo, backToPresent,
     pendingFriendLink, openFriendLink, acceptFriendLink, dismissFriendLink, loadFriendLink, resetFriendLink,
     connectionsEpoch, loadConnections, startConnection, setConnectionShown, removeConnection,
@@ -2889,7 +2917,7 @@ export function useMaplecord() {
     soundPacks, reloadSoundPacks, openSoundsFolder,
     startRoll, quickRoll, roll, voteEnd, dismissRoll, coinFlip, invokeCommand, pressButton,
     activeRps, startRps, rpsPick, rpsThrow, dismissRps,
-    createGuild, joinGuild, joinPublicGuild, tagSymbols, setGuildTag, removeGuildTag, wearTag, tagCard, setGuildListing, deleteMessage, disconnectMember, setVoiceMuted, moveChannel, inviteToServer, openInvite, pendingInvite, acceptInvite, dismissInvite: () => setPendingInvite(null), createChannel, leaveGuild, kickMember, banMember, signOut,
+    createGuild, joinGuild, joinPublicGuild, tagSymbols, setGuildTag, removeGuildTag, wearTag, tagCard, setGuildListing, deleteMessage, disconnectMember, moveMember, setVoiceMuted, moveChannel, inviteToServer, openInvite, pendingInvite, acceptInvite, dismissInvite: () => setPendingInvite(null), createChannel, leaveGuild, kickMember, banMember, signOut,
     sharing, shareQuality: streamEngine.quality, localStream: streamEngine.localStream, shareViewers: streamEngine.viaServer ? { total: viewerCounts[voiceHub.connectionId ?? ''] ?? 0, relayed: 0 } : streamEngine.viewerCounts(), watching: streamEngine.watching(),
     streamOf: (streamer: string) => streamEngine.streamOf(streamer), viewerCounts, streamRules, loadStreamRules,
     startShare, stopShare, watchStream, unwatchStream, setStreamLimit: (streamer: string, kbps: number) => streamEngine.requestLimit(streamer, kbps),

@@ -6,7 +6,7 @@ import { makeSealer, seal, unseal, type Sealer } from './p2pIdentity'
 /** The set-up messages that carry addresses. */
 const CARRIES_ADDRESSES = new Set(['offer', 'answer', 'ice'])
 import type {
-  ButtonDto, ChannelDto, EmbedDto, GuildDto, InteractionDto, MemberDto, MessageDto, RoleDto, RollChoice, RollItemDto, RollKind, RollResultDto, RollSessionDto,
+  ButtonDto, CalendarEventDto, ChannelDto, EmbedDto, GuildDto, InteractionDto, MemberDto, MessageDto, RoleDto, RollChoice, RollItemDto, RollKind, RollResultDto, RollSessionDto,
   RpsChoice, RpsResultDto, RpsSessionDto, VoiceParticipantDto, FriendDto, DmChannelDto, UserDto, SystemMessageDto, PostRequest, RollStatsDto,
 } from './types'
 
@@ -22,6 +22,11 @@ export interface ChatEvents {
   /** A bot changed one of its own messages when a button on it was pressed: its text, embeds and buttons are these now. */
   MessageChanged: (channelId: string, messageId: string, content: string, embeds: EmbedDto[] | null, buttons: ButtonDto[] | null) => void
   ReactionChanged: (channelId: string, messageId: string, emoji: string, userId: string, on: boolean, count: number) => void
+  /** Someone reacted to one picture of a gallery post, or took a reaction back. */
+  PictureReactionChanged: (channelId: string, messageId: string, attachmentId: string, emoji: string, userId: string, on: boolean, count: number) => void
+  /** An event was put on a calendar channel, or one was changed. */
+  CalendarEventChanged: (event: CalendarEventDto) => void
+  CalendarEventDeleted: (channelId: string, eventId: string) => void
   PollChanged: (channelId: string, messageId: string, userId: string, theirs: number[], counts: number[], voters: number, closed: boolean) => void
   MessagesRemoved: (channelId: string, authorId: string, since: string | null) => void
   /** P2P text channels: who connects and leaves, the set-up messages between two apps, and being taken out. */
@@ -199,6 +204,8 @@ export class ChatHub {
   post(request: PostRequest) { return this.c.invoke<MessageDto>('Post', request) }
   editMessage(messageId: string, content: string, title: string | null = null) { return this.c.invoke('EditMessage', messageId, content, title) }
   react(messageId: string, emoji: string, on: boolean) { return this.c.invoke('React', messageId, emoji, on) }
+  /** A reaction to one picture of a gallery post (where the server keeps the gallery's posts). */
+  reactToPicture(attachmentId: string, emoji: string, on: boolean) { return this.c.invoke('ReactToPicture', attachmentId, emoji, on) }
   pin(messageId: string, on: boolean) { return this.c.invoke('Pin', messageId, on) }
   vote(messageId: string, options: number[]) { return this.c.invoke('Vote', messageId, options) }
   closePoll(messageId: string) { return this.c.invoke('ClosePoll', messageId) }
