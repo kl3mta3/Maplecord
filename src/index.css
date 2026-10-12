@@ -162,6 +162,10 @@ a.filechip:hover { border-color: var(--accent2); }
 
 .members { background: var(--bg1); border-left: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
 .members .list { flex: 1; overflow-y: auto; padding: 4px 0; }
+.access h4 { margin: 12px 0 2px; font-size: 13px; }
+.access h4:first-child { margin-top: 0; }
+.membergroup { padding: 12px 14px 3px; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.membergroup span { font-weight: 400; }
 .member { display: flex; align-items: center; gap: 8px; padding: 5px 12px; margin: 1px 4px; border-radius: 4px; }
 .member:hover { background: var(--bg3); }
 .member.offline { opacity: .45; }

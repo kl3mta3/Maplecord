@@ -14,6 +14,7 @@ one.
   An invite can be made to run out, and taken back
 - Public servers anyone can find by name or topic and join; private ones are by invite
 - Private channels: only the roles and people you let in can see that they exist
+- Read-only channels: everyone can read, and only the roles and people you allow can write
 - The member list shows the people who can see the channel you are in
 - Friends and direct messages, with the conversation written in last at the top of the list
 - Your own friend link, and a QR code of it in the shape of a maple leaf (or a plain square), to hand out anywhere:

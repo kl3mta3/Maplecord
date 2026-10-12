@@ -1,5 +1,5 @@
 // Run with: node src/channelViewers.test.ts
-import { canSeeChannel, channelMembers, mayManageMessagesIn } from './channelViewers.ts'
+import { canSeeChannel, channelMembers, mayManageMessagesIn, mayWriteIn } from './channelViewers.ts'
 import { Permission, type ChannelDto, type ChannelOverrideDto, type GuildSummaryDto, type MemberDto, type RoleDto } from './types.ts'
 
 let failures = 0
@@ -46,6 +46,17 @@ const manages = (g: GuildSummaryDto, c: ChannelDto) => ['owner', 'ann', 'sam', '
 check(manages(guild(), channel()) === 'owner sam ada', 'the owner, an administrator and a role that manages messages; not a P2P bot whatever its roles, and not someone who is not a member');
 check(manages(guild(), channel([override({ roleId: 'staff' }, 0, Permission.ManageMessages), override({ userId: 'ann' }, Permission.ManageMessages, 0)])) === 'owner ann ada', 'the channel\'s own rules count: taken from a role there, given to one person there');
 check(manages(guild(null), channel()) === 'owner', 'an app that was not told the roles takes only the owner\'s word');
+
+console.log('Who may write in a channel')
+{
+  const Send = Permission.SendMessages
+  const readOnly = channel([override({ roleId: 'everyone' }, 0, Send), override({ roleId: 'staff' }, Send, 0)])
+  check(mayWriteIn(guild(), 'ann', channel()) && mayWriteIn(guild(), 'sam', channel()), 'an ordinary channel: everyone who may send messages');
+  check(!mayWriteIn(guild(), 'ann', readOnly) && mayWriteIn(guild(), 'sam', readOnly), 'a read-only channel: only the roles allowed to write');
+  check(mayWriteIn(guild(), 'owner', readOnly) && mayWriteIn(guild(), 'ada', readOnly), 'the owner and an administrator write everywhere');
+  check(!mayWriteIn(guild(), 'sam', channel([override({ userId: 'sam' }, 0, Send)])) && mayWriteIn(guild(), 'ann', channel([override({ roleId: 'everyone' }, 0, Send), override({ userId: 'ann' }, Send, 0)])), 'one person can be held to reading, or let write where nobody else may');
+  check(mayWriteIn(guild(null), 'ann', readOnly) && mayWriteIn(guild(), 'stranger', readOnly), 'with the roles unknown, or the person, the app does not guess that they may not');
+}
 
 console.log(failures === 0 ? '\nALL PASSED' : `\n${failures} FAILED`)
 // This file is checked with the app's own (browser) types, which have no `process`: failing loudly does the same job.

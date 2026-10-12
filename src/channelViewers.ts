@@ -25,6 +25,18 @@ export function mayManageMessagesIn(guild: GuildSummaryDto, userId: string, chan
   return has !== null && (has & Permission.ManageMessages) !== 0
 }
 
+/**
+ * Whether the app takes someone to be allowed to write in a channel, so that a read-only channel can say so before
+ * they try. What they may actually send is the server's decision. An app that was not told the roles, or does not
+ * know the person, takes it that they may.
+ */
+export function mayWriteIn(guild: GuildSummaryDto, userId: string, channel: ChannelDto): boolean {
+  const member = guild.members.find(m => m.userId === userId)
+  if (!member) return true
+  const has = permissionsIn(guild, member, channel)
+  return has === null || (has & Permission.SendMessages) !== 0
+}
+
 /** Everything a member may do in a channel (every permission for the owner and for an administrator), or null if the app was not told the roles. */
 export function permissionsIn(guild: GuildSummaryDto, member: MemberDto, channel: ChannelDto): number | null {
   if (member.userId === guild.guild.ownerId) return -1

@@ -55,7 +55,8 @@ import { appleTouch } from '../platform'
 import { DropBanner, PluginsDialog } from './Plugins'
 import { SharePicker, StreamStage } from './Streams'
 import { CHAT_LEAST, COLUMNS, ColumnGrip, clampColumn, type Column } from './ColumnGrip'
-import { channelMembers, mayManageMessagesIn } from '../channelViewers'
+import { channelMembers, mayManageMessagesIn, mayWriteIn } from '../channelViewers'
+import { memberGroups } from '../memberGroups'
 import { CalendarView } from './Calendar'
 import { ForumList, GalleryGrid, MediaGrid, NewPostDialog, PinsDialog, PollDialog, PollView, QUICK_REACTIONS, ReactionPicker, Reactions, ReplyQuote, SearchDialog } from './ChatExtras'
 
@@ -609,7 +610,8 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
                             <div key={p.connectionId} className={'u' + (p.userId === me?.id ? ' me' : '')} title={mayMove && !c.directSince && !p.bot ? 'Right-click for volume and more. Drag onto another voice channel to move them' : 'Right-click for volume and more'}
                               {...personDrag(c, p)} onContextMenu={e => openUserMenu(e, p.userId, p.username)}>
                               <span className={'dot' + (p.speaking ? ' speaking' : '')} />
-                              <UserName who={store.appearanceOf(p.userId)} label={nameIn(p.userId, p.username)} roleColor={p.speaking ? '#ffffff' : colorOf(p.userId)} onClick={e => openCard(e, p.userId, p.username)} />
+                              {/* Here a name is in the colours its owner chose for it. Someone with none is in their role's colour, and white while speaking. */}
+                              <UserName who={store.appearanceOf(p.userId)} label={nameIn(p.userId, p.username)} roleColor={store.appearanceOf(p.userId)?.nameColor ? undefined : p.speaking ? '#ffffff' : colorOf(p.userId)} onClick={e => openCard(e, p.userId, p.username)} />
                               {p.stream && (() => {
                                 // In my own channel a LIVE badge is a button: watch it, or stop watching.
                                 const mineHere = voice?.channelId === c.id
@@ -724,7 +726,11 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           <>
             <div className="header" title={inChannel ? `The people who can see ${inChannel.name}` : undefined}>Members <span className="muted">{listed.filter(m => m.online).length} online</span></div>
             <div className="list">
-              {g && [...listed].sort((a, b) => Number(b.online) - Number(a.online) || a.username.localeCompare(b.username)).map(m => (
+              {/* Whoever is online, under their highest role; everyone offline in one group at the bottom. */}
+              {g && memberGroups(listed, g.roles).map(group => (
+                <div key={group.key}>
+                <div className="membergroup">{group.name} <span>— {group.members.length}</span></div>
+                {group.members.map(m => (
                 <div key={m.userId} className={'member' + (m.online ? ' online' : ' offline') + (m.online && store.dndUsers.has(m.userId) ? ' dnd' : m.online && store.idleUsers.has(m.userId) ? ' idle' : '') + (ignored(m.userId) ? ' ignoredmember' : '')} title={'@' + m.username + ' — click for profile, right-click for options'}
                   onClick={e => openCard(e, m.userId, memberName(m))} onContextMenu={e => openUserMenu(e, m.userId, memberName(m))}>
                   <div className="row" style={{ gap: 0 }}><Avatar who={m} name={memberName(m)} serverUrl={serverUrl} size={28} /><div className="presence" /></div>
@@ -735,6 +741,8 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
                       : <span className="tag" style={{ fontSize: 10, background: 'var(--accent)', borderRadius: 3, padding: '0 4px', color: '#fff' }}>BOT</span>)}</div>
                     <div className="role">{roleLabel(m, g)}</div>
                   </div>
+                </div>
+                ))}
                 </div>
               ))}
             </div>
@@ -788,7 +796,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       {menu && <ContextMenu x={menu.x} y={menu.y} entries={menu.kind === 'guild' ? guildEntries(menu.guildId) : menu.kind === 'user' ? userEntries(menu.userId, menu.username) : menu.kind === 'stats' ? rollEntries() : menu.kind === 'folder' ? folderEntries(menu.folderId) : menu.kind === 'status' ? statusEntries() : menu.kind === 'mic' ? deviceEntries('audioinput') : menu.kind === 'speaker' ? deviceEntries('audiooutput') : menu.kind === 'group' ? [
         { kind: 'label', text: menu.name },
         { kind: 'item', label: 'Rename group', icon: '✎', onClick: () => setDialog({ kind: 'renameChannel', channelId: menu.channelId, name: menu.name, group: true }) },
-        { kind: 'item', label: 'Who can see it', icon: '🔒', onClick: () => setDialog({ kind: 'channelAccess', channelId: menu.channelId }) },
+        { kind: 'item', label: 'Permissions', icon: '🔒', onClick: () => setDialog({ kind: 'channelAccess', channelId: menu.channelId }) },
         { kind: 'item', label: 'Delete group', icon: '🗑', danger: true, onClick: () => setDialog({ kind: 'deleteGroup', channelId: menu.channelId, name: menu.name }) },
       ] : [
         { kind: 'label', text: menu.name },
@@ -813,7 +821,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           ? [{ kind: 'item', label: menu.direct ? 'Make it a relayed channel' : 'Make it a P2P channel', icon: '⇄', onClick: () => setDialog({ kind: 'channelKind', channelId: menu.channelId, name: menu.name, direct: !menu.direct }) } as MenuEntry] : []),
         ...(can(Permission.ManageChannels) ? [
           { kind: 'sep' } as MenuEntry,
-          { kind: 'item', label: 'Who can see it', icon: '🔒', onClick: () => setDialog({ kind: 'channelAccess', channelId: menu.channelId }) } as MenuEntry,
+          { kind: 'item', label: 'Permissions', icon: '🔒', onClick: () => setDialog({ kind: 'channelAccess', channelId: menu.channelId }) } as MenuEntry,
           { kind: 'item', label: 'Rename channel', icon: '✎', onClick: () => setDialog({ kind: 'renameChannel', channelId: menu.channelId, name: menu.name }) } as MenuEntry,
           { kind: 'item', label: 'Delete channel', icon: '🗑', danger: true, onClick: () => setDialog({ kind: 'deleteChannel', channelId: menu.channelId, name: menu.name }) } as MenuEntry,
         ] : []),
@@ -932,6 +940,9 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
   const p2pRoot = !store.p2pPost ? null : folded ? folded.posts.find(p => p.id === store.p2pPost) ?? null : p2pTalk ? p2pTalk.main.find(m => m.id === store.p2pPost && !m.threadId) ?? null : null
   /** A forum or gallery with no post open: its posts are what is on screen, not a conversation. */
   const postsList = (kept && isPostsChannel(channel) && !thread) || (p2pGallery && !p2pRoot)
+  // A channel this person may read but not write in, as far as the app can tell: it says so in place of the message
+  // box. Only the server decides what is actually sent. What is written in a P2P channel never passes it.
+  const readOnly = kept && !!channel && channel.type !== ChannelType.DirectMessage && !!store.selectedGuild && !mayWriteIn(store.selectedGuild, store.me()?.id ?? '', channel)
   const mayPin = kept && (channel?.type === ChannelType.DirectMessage || mayManageMessages)
   const shown = thread ? [thread.root, ...thread.messages]
     : p2pRoot ? [p2pRoot, ...((folded ? folded.said : p2pTalk?.threads)?.get(p2pRoot.id) ?? [])]
@@ -1400,7 +1411,11 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
         ) : postsList ? (
           <div className="composer postbar">
             <span className="muted grow">{channel?.type === ChannelType.Gallery ? 'Every post here is one or more pictures with a title. Open one to see what is said about it.' : 'Every post here has a title. Open one to read it and answer.'}</span>
-            <button className="accent" disabled={p2pGallery && p2p?.state !== 'on'} title={p2pGallery && p2p?.state !== 'on' ? 'You are not connected to this channel yet' : undefined} onClick={() => setPanel('post')}>{channel?.type === ChannelType.Gallery ? 'Post pictures' : 'New post'}</button>
+            <button className="accent" disabled={readOnly || (p2pGallery && p2p?.state !== 'on')} title={readOnly ? 'This channel is read-only for you' : p2pGallery && p2p?.state !== 'on' ? 'You are not connected to this channel yet' : undefined} onClick={() => setPanel('post')}>{channel?.type === ChannelType.Gallery ? 'Post pictures' : 'New post'}</button>
+          </div>
+        ) : readOnly ? (
+          <div className="composer postbar">
+            <span className="muted grow">🔒 This channel is read-only for you. You can read and react, but not write here.</span>
           </div>
         ) : voiceMessage && channel ? (
           <VoiceMessageBar deviceId={store.settings.audioInputDeviceId} maxBytes={voiceMessage.maxBytes} onSend={file => store.sendFile(file)} onClose={() => setVoiceMessage(null)} />
