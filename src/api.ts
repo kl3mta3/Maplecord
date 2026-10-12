@@ -276,6 +276,8 @@ export class Api {
   /** Our own answer to an event; null takes it back. */
   answerEvent(eventId: string, answer: number | null) { return this.request<CalendarEventDto>('PUT', `/api/events/${eventId}/answer`, { answer }) }
   inviteToEvent(eventId: string, userIds: string[]) { return this.request<CalendarEventDto>('POST', `/api/events/${eventId}/invited`, { userIds }) }
+  /** Who an event is for: open to all or invite only, and the roles added to it. */
+  setEventAudience(eventId: string, inviteOnly: boolean, roleIds: string[]) { return this.request<CalendarEventDto>('PUT', `/api/events/${eventId}/audience`, { inviteOnly, roleIds }) }
   uninviteFromEvent(eventId: string, userId: string) { return this.request<CalendarEventDto>('DELETE', `/api/events/${eventId}/invited/${userId}`) }
   /** Posts the event into text channels and forums: a message in each. */
   postEventTo(eventId: string, channelIds: string[]) { return this.request<MessageDto[]>('POST', `/api/events/${eventId}/post`, { channelIds }) }

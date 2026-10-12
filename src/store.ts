@@ -391,7 +391,7 @@ export function useMaplecord() {
   const [highlight, setHighlight] = useState<string | null>(null)
   /** The last thing heard about a calendar channel's events, for whichever calendar is on screen to take in. */
   const [calendarChange, setCalendarChange] = useState<{ n: number; channelId: string; changed?: CalendarEventDto; deleted?: string } | null>(null)
-  /** Events we have been asked along to and have not answered: asked for once when the app starts, then kept up as invitations and answers arrive. */
+  /** Events we have been invited to and have not answered: asked for once when the app starts, then kept up as invitations and answers arrive. */
   const [invitations, setInvitations] = useState<CalendarEventDto[]>([])
   /** An event the calendar is to open on, when it is next shown: from a link, a posted event or an invitation. */
   const [calendarTarget, setCalendarTarget] = useState<{ n: number; event: CalendarEventDto } | null>(null)
@@ -745,7 +745,7 @@ export function useMaplecord() {
         setInvitations(list => [...list.filter(e => e.id !== event.id), event])
         const by = (event.participants ?? []).find(p => p.userId === me())?.invitedById
         const who = (event.participants ?? []).find(p => p.userId === by)?.name ?? (by === event.authorId ? event.authorName : null)
-        setError(`${who ?? 'Someone'} asked you along to "${event.title}". Open the calendar to answer.`)
+        setError(`${who ?? 'Someone'} invited you to "${event.title}". Open the calendar to answer.`)
         playSound('message', settingsRef.current.soundProfile, settingsRef.current.soundEnabled)
       },
       PollChanged: (_channelId, messageId, userId, theirs, counts, voters, closed) => patchMessage(messageId, m => (!m.poll ? m : {
@@ -968,7 +968,7 @@ export function useMaplecord() {
 
     const list = await loadGuilds()
     const [fr, dmList, decos] = await Promise.all([api.friends().catch(() => EMPTY_FRIENDS), api.dms().catch(() => [] as DmChannelDto[]), api.decorations().catch(() => [] as DecorationDto[])])
-    // What we were asked along to while away. Once, here: after this it is kept up by what arrives.
+    // What we were invited to while away. Once, here: after this it is kept up by what arrives.
     void api.invitations().then(setInvitations).catch(() => {})
     setFriends(fr); setDms(dmList); dmsRef.current = dmList; setDecorations(decos)
     void api.privacy().then(p => {

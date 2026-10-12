@@ -381,7 +381,9 @@ export function MyBots({ api }: { api: Api }) {
   }
   const [direct, setDirect] = useState(false)
   const [inVoice, setInVoice] = useState(false)
-  const create = () => run(async () => { keep(await api.createApplication(name.trim(), direct, inVoice)); setName(''); setDirect(false); setInVoice(false) })
+  /** The bot that was just made, shown by itself with what it signs in with, before it is one of the list. */
+  const [made, setMade] = useState<string | null>(null)
+  const create = () => run(async () => { const bot = await api.createApplication(name.trim(), direct, inVoice); keep(bot); setMade(bot.id); setName(''); setDirect(false); setInVoice(false) })
   const patch = (id: string, change: { name?: string; description?: string; interactionsUrl?: string; voice?: boolean }) => run(async () => keep(await api.updateApplication(id, change)))
   const renew = (id: string) => run(async () => keep(await api.regenerateApplication(id)))
   const remove = (id: string) => run(async () => {
@@ -459,6 +461,24 @@ export function MyBots({ api }: { api: Api }) {
         </div>
       ))}
       {problem && <div className="muted bad">{problem}</div>}
+      {made && fresh?.id === made && bots?.find(b => b.id === made) && (() => {
+        const bot = bots.find(b => b.id === made)!
+        return (
+          <Dialog title={`Your new bot: ${bot.name}`} onClose={() => setMade(null)}>
+            <div className="integrations">
+              <div className="row"><span className="muted">@{bot.botUsername}</span>{bot.direct && <span className="p2ptag">P2P bot</span>}</div>
+              <Secret label="Bot ID" value={bot.id} />
+              <Secret label="Token" value={fresh.token} />
+              {fresh.secret && <Secret label="Signing secret" value={fresh.secret} />}
+              <div className="muted">
+                Copy these now: they are not shown again once you leave this page. The bot signs in by sending <code>Authorization: Bot &lt;token&gt;</code>.
+                {fresh.secret ? ' Slash commands sent to its web address are signed with the signing secret.' : ''} Add it to a server from that server's settings (Bots) using its ID.
+              </div>
+            </div>
+            <div className="buttons"><button className="accent" onClick={() => setMade(null)}>Done</button></div>
+          </Dialog>
+        )
+      })()}
     </div>
   )
 }

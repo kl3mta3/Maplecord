@@ -632,7 +632,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
                       {store.settings.mutedChannels?.[c.id] && <span className="muted" title="Muted">🔕</span>}
                       {(g.channelUnread[c.id] ?? 0) > 0 && <span className="badge">{g.channelUnread[c.id]}</span>}
                       {c.type === ChannelType.Calendar && store.invitations.some(e => e.channelId === c.id) && (
-                        <span className="badge" title="Events you were asked along to and have not answered">{store.invitations.filter(e => e.channelId === c.id).length}</span>
+                        <span className="badge" title="Events you were invited to and have not answered">{store.invitations.filter(e => e.channelId === c.id).length}</span>
                       )}
                     </div>
                     {c.type === ChannelType.Voice && (() => {
@@ -739,7 +739,9 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
             // Where an event can be posted: the text channels and forums this person can write in. A P2P channel's text never passes the server.
             postTo={!g ? [] : g.channels.filter(c => (c.type === ChannelType.Text || c.type === ChannelType.Forum) && !c.directSince && (!me || mayWriteIn(g, me.id, c))).sort((a, b) => a.position - b.position)
               .map(c => ({ id: c.id, name: c.name, forum: c.type === ChannelType.Forum }))}
-            members={!g ? [] : channelMembers(g, store.selectedChannel!).filter(m => !m.isBot).map(m => ({ userId: m.userId, name: memberName(m) }))} />
+            members={!g ? [] : channelMembers(g, store.selectedChannel!).filter(m => !m.isBot).map(m => ({ userId: m.userId, name: memberName(m) }))}
+            roles={(g?.roles ?? []).filter(r => !r.isEveryone).sort((a, b) => b.position - a.position).map(r => ({ id: r.id, name: r.name, color: r.color }))}
+            myRoleIds={g?.members.find(m => m.userId === me?.id)?.roleIds ?? []} />
         : <Chat store={store} openRollDialog={(rollKind: RollKind) => setDialog({ kind: 'startRoll', rollKind })} canRoll={g ? can(Permission.StartRolls) : !!store.selectedDm} colorOf={colorOf}
           onCall={(userId, name, direct) => { if (direct) setDialog({ kind: 'p2pCall', userId, name }); else void store.startCall(userId, false) }} onUserMenu={openUserMenu} isIgnored={ignored} onUserCard={openCard} nameIn={nameIn} />}
 
