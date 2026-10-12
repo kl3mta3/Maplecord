@@ -268,8 +268,8 @@ export class Api {
   dms() { return this.request<DmChannelDto[]>('GET', '/api/dms') }
   /** A calendar channel's events from one day to another (year-month-day, 100 days at most). */
   events(channelId: string, from: string, to: string) { return this.request<CalendarEventDto[]>('GET', `/api/channels/${channelId}/events?from=${from}&to=${to}`) }
-  postEvent(channelId: string, event: { title: string; note: string | null; day: string; at: string | null }) { return this.request<CalendarEventDto>('POST', `/api/channels/${channelId}/events`, event) }
-  editEvent(eventId: string, event: { title: string; note: string | null; day: string; at: string | null }) { return this.request<CalendarEventDto>('PATCH', `/api/events/${eventId}`, event) }
+  postEvent(channelId: string, event: { title: string; note: string | null; day: string; at: string | null; color: string | null }) { return this.request<CalendarEventDto>('POST', `/api/channels/${channelId}/events`, event) }
+  editEvent(eventId: string, event: { title: string; note: string | null; day: string; at: string | null; color: string | null }) { return this.request<CalendarEventDto>('PATCH', `/api/events/${eventId}`, event) }
   deleteEvent(eventId: string) { return this.request<void>('DELETE', `/api/events/${eventId}`) }
   /** One event, if we can see its calendar. */
   event(eventId: string) { return this.request<CalendarEventDto>('GET', `/api/events/${eventId}`) }

@@ -143,9 +143,9 @@ export const EventAnswer = { Invited: 0, Going: 1, NotGoing: 2, Unsure: 3, WhyMe
 export type EventAnswer = (typeof EventAnswer)[keyof typeof EventAnswer]
 /** Someone on an event's list. `invitedById` is who asked them along; missing for someone who answered without being asked. */
 export interface EventParticipantDto { userId: string; name: string; answer: EventAnswer; invitedById?: string | null }
-export interface CalendarEventDto { id: string; channelId: string; authorId: string; authorName: string; title: string; note?: string | null; day: string; at?: string | null; createdAt: string; editedAt?: string | null; participants?: EventParticipantDto[] | null }
+export interface CalendarEventDto { id: string; channelId: string; authorId: string; authorName: string; title: string; note?: string | null; day: string; at?: string | null; createdAt: string; editedAt?: string | null; participants?: EventParticipantDto[] | null; /** The colour it is shown in, as #rrggbb. */ color?: string | null }
 /** An event as it was when someone posted it into a channel. It is not kept up afterwards. */
-export interface PostedEventDto { eventId: string; calendarId: string; title: string; note?: string | null; day: string; at?: string | null }
+export interface PostedEventDto { eventId: string; calendarId: string; title: string; note?: string | null; day: string; at?: string | null; color?: string | null }
 /** A file offered straight from someone's app. available = their app is still connected and has not withdrawn it. */
 /** `available`: the sender is online with the file. Not available comes back when they are, unless `withdrawn`. */
 export interface FileOfferDto { id: string; fileName: string; size: number; available: boolean; withdrawn?: boolean }

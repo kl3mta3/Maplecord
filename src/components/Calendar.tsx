@@ -34,6 +34,13 @@ export function byShownDay(events: CalendarEventDto[]): Map<string, CalendarEven
   return days
 }
 
+/** The colours an event can be given. */
+const EVENT_COLORS = ['#9000ff', '#00ddff', '#ff008c', '#2cfc00', '#f19511', '#ff3b3b', '#ffd700', '#1abc9c', '#3498db', '#e8e8f0']
+const COLOR = /^#[0-9a-f]{6}$/i
+/** How something of an event's colour is drawn: an edge in the colour, and a wash of it behind. Nothing for an event with none. */
+const tinted = (color: string | null | undefined): React.CSSProperties | undefined =>
+  (color && COLOR.test(color) ? { borderLeft: `3px solid ${color}`, background: `color-mix(in srgb, ${color} 26%, transparent)` } : undefined)
+
 /** The four answers, in the order they are offered, each with its mark and what it says. */
 const ANSWERS: { answer: EventAnswer; mark: string; says: string }[] = [
   { answer: EventAnswer.Going, mark: '✅', says: 'I will be there' },
@@ -53,7 +60,7 @@ export const postedWhen = (event: Pick<PostedEventDto, 'day' | 'at'>) => (event.
 export function EventCard({ event, onOpen }: { event: PostedEventDto; onOpen?: () => void }) {
   const when = postedWhen(event)
   return (
-    <div className="card eventcard">
+    <div className="card eventcard" style={event.color && COLOR.test(event.color) ? { borderColor: event.color } : undefined}>
       <div className="title">📅 {event.title}</div>
       <div className="line" title={event.at ? 'Shown in your own time zone' : undefined}>{when}</div>
       {event.note && <div className="body note">{event.note}</div>}
@@ -177,7 +184,7 @@ export function CalendarView({ store, channelId, name, mayPost, mayManage, maySh
             <button key={key} className={'calday' + (d.getMonth() !== month.m ? ' other' : '') + (key === today ? ' today' : '') + (list.length > 0 ? ' has' : '')}
               onClick={() => setOpenDay(key)} title={d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }) + (list.length > 0 ? ` · ${list.length} ${list.length === 1 ? 'event' : 'events'}` : '')}>
               <span className="num">{d.getDate()}</span>
-              {list.slice(0, 3).map(e => <span key={e.id} className="calevent" onContextMenu={x => openMenu(x, e)}>{shownTime(e) && <i>{shownTime(e)} </i>}{e.title}</span>)}
+              {list.slice(0, 3).map(e => <span key={e.id} className="calevent" style={tinted(e.color)} onContextMenu={x => openMenu(x, e)}>{shownTime(e) && <i>{shownTime(e)} </i>}{e.title}</span>)}
               {list.length > 3 && <span className="calmore">+{list.length - 3} more</span>}
             </button>
           )
@@ -192,7 +199,7 @@ export function CalendarView({ store, channelId, name, mayPost, mayManage, maySh
             const people = e.participants ?? []
             const mine = people.find(p => p.userId === me)
             return (
-              <div key={e.id} className="caldetail" onContextMenu={x => openMenu(x, e)}>
+              <div key={e.id} className="caldetail" style={e.color && COLOR.test(e.color) ? { borderLeft: `4px solid ${e.color}` } : undefined} onContextMenu={x => openMenu(x, e)}>
                 <div><b>{e.title}</b>{shownTime(e) && <span className="muted"> · {shownTime(e)}</span>}</div>
                 {e.note && <div className="note">{e.note}</div>}
                 {mine?.answer === EventAnswer.Invited && <div className="calasked">✉️ You were asked along{mine.invitedById ? ` by ${nameOf(mine.invitedById, people.find(p => p.userId === mine.invitedById)?.name ?? e.authorName)}` : ''}. Are you coming?</div>}
@@ -334,7 +341,7 @@ function InviteDialog({ event, people, onInvite, onClose }: {
 /** A new event for a day, or one being changed: its title, the day, a time if it has one, and a note. */
 function EventDialog({ day, event, onSave, onClose }: {
   day: string; event?: CalendarEventDto
-  onSave: (body: { title: string; note: string | null; day: string; at: string | null }) => void | Promise<void>
+  onSave: (body: { title: string; note: string | null; day: string; at: string | null; color: string | null }) => void | Promise<void>
   onClose: () => void
 }) {
   const startsAt = event?.at ? new Date(event.at) : null
@@ -342,12 +349,13 @@ function EventDialog({ day, event, onSave, onClose }: {
   const [on, setOn] = useState(event ? shownDay(event) : day)
   const [time, setTime] = useState(startsAt ? `${two(startsAt.getHours())}:${two(startsAt.getMinutes())}` : '')
   const [note, setNote] = useState(event?.note ?? '')
+  const [color, setColor] = useState<string | null>(event?.color ?? null)
   const ready = title.trim().length > 0 && /^\d{4}-\d{2}-\d{2}$/.test(on)
   const save = () => {
     if (!ready) return
     // The time is this person's own clock on that day; it is sent as the moment it is, so everyone sees it in theirs.
     const at = time ? new Date(`${on}T${time}`) : null
-    void onSave({ title: title.trim(), note: note.trim() || null, day: on, at: at && !Number.isNaN(at.getTime()) ? at.toISOString() : null })
+    void onSave({ title: title.trim(), note: note.trim() || null, day: on, at: at && !Number.isNaN(at.getTime()) ? at.toISOString() : null, color })
   }
   return (
     <Dialog title={event ? 'Change the event' : 'Add an event'} onClose={onClose}>
@@ -360,6 +368,11 @@ function EventDialog({ day, event, onSave, onClose }: {
       <div className="muted">Note, if it needs one</div>
       <textarea value={note} maxLength={1000} rows={3} onChange={e => setNote(e.target.value)} />
       {time && <div className="muted">The time is yours. Everyone sees it in their own time zone.</div>}
+      <div className="muted">Colour, if you like</div>
+      <div className="calcolors" role="radiogroup" aria-label="Colour">
+        <button className={'none' + (color === null ? ' on' : '')} role="radio" aria-checked={color === null} title="No colour" onClick={() => setColor(null)}>∅</button>
+        {EVENT_COLORS.map(c => <button key={c} className={color === c ? 'on' : ''} role="radio" aria-checked={color === c} aria-label={c} title={c} style={{ background: c }} onClick={() => setColor(c)} />)}
+      </div>
       <div className="buttons">
         <button onClick={onClose}>Cancel</button>
         <button className="accent" disabled={!ready} onClick={save}>{event ? 'Save' : 'Add'}</button>

@@ -892,6 +892,10 @@ button.chip { cursor: pointer; }
 .calpeople .chip.waiting { opacity: .7; border-style: dashed; }
 .calpeople .chip .x { padding: 0 2px; font-size: 13px; line-height: 1; color: var(--muted); }
 .calasked { color: var(--accent2); font-size: 13px; }
+.calcolors { display: flex; flex-wrap: wrap; gap: 6px; }
+.calcolors button { width: 26px; height: 26px; padding: 0; border-radius: 50%; border: 2px solid transparent; }
+.calcolors button.none { background: var(--bg0); border-color: var(--border); color: var(--muted); font-size: 13px; line-height: 1; }
+.calcolors button.on { border-color: var(--text); box-shadow: 0 0 0 2px var(--bg1), 0 0 0 4px var(--accent2); }
 .calwaiting { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 12px 0; font-size: 13px; }
 .calday .calevent { cursor: context-menu; }
 /* A drop-down that takes several: rows with a tick. */
