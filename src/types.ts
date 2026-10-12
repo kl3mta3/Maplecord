@@ -26,7 +26,7 @@ export const Permission = {
   StartRolls: 1 << 4, JoinVoice: 1 << 5, Speak: 1 << 6, Stream: 1 << 7,
   CreateInvites: 1 << 8, ManageChannels: 1 << 9, ManageRoles: 1 << 10, ManageWebhooks: 1 << 11,
   ManageGuild: 1 << 12, KickMembers: 1 << 13, BanMembers: 1 << 14, MuteMembers: 1 << 15,
-  ManageDirectChannels: 1 << 16, StreamDirect: 1 << 17, JoinDirectVoice: 1 << 18, DisconnectMembers: 1 << 19, UseRelayInDirect: 1 << 20, WearTag: 1 << 21, MoveMembers: 1 << 22, PostEvents: 1 << 23,
+  ManageDirectChannels: 1 << 16, StreamDirect: 1 << 17, JoinDirectVoice: 1 << 18, DisconnectMembers: 1 << 19, UseRelayInDirect: 1 << 20, WearTag: 1 << 21, MoveMembers: 1 << 22, PostEvents: 1 << 23, ShareEvents: 1 << 24,
   Administrator: 1 << 30,
 } as const
 export const hasPermission = (held: number, required: number) =>
@@ -72,7 +72,7 @@ export interface ProfileConnectionDto { service: string; serviceName: string; na
 export type UpdateProfileRequest = Partial<Record<'displayName' | 'bio' | 'pronouns' | 'accentColor' | 'nameFont' | 'nameColor' | 'nameColor2' | 'decoration' | 'effect', string>>
 export interface DecorationDto { id: string; name: string; kind: 'avatar' | 'effect'; url: string; /** The colors it is drawn in ("9000ff"), each of which can be swapped for your own. */ colors?: string[] | null }
 /** What a server says about itself before sign-in: the protocol it speaks and the oldest client protocol it accepts. */
-export interface ServerMetaDto { protocol: number; minClientProtocol: number; version: string; /** The server runs as several copies: see hubConnect.ts. */ webSocketsOnly?: boolean; /** What an invite link starts with on this server; the code follows. */ inviteBase?: string | null }
+export interface ServerMetaDto { protocol: number; minClientProtocol: number; version: string; /** The server runs as several copies: see hubConnect.ts. */ webSocketsOnly?: boolean; /** What an invite link starts with on this server; the code follows. */ inviteBase?: string | null; /** What a link to an event starts with; the event's id follows. */ eventBase?: string | null }
 /** What an invite leads to, shown before joining. */
 export interface InvitePreviewDto { code: string; guild: GuildDto; memberCount: number }
 export interface TokenResponse { accessToken: string; expiresAt: string; user: UserDto }
@@ -138,7 +138,14 @@ export interface AttachmentDto {
  * Something on a calendar channel. `day` is the day it is on (year-month-day). `at`, when it has a time, is the
  * moment it starts: it is shown in each person's own time zone, where it can fall on the day before or after.
  */
-export interface CalendarEventDto { id: string; channelId: string; authorId: string; authorName: string; title: string; note?: string | null; day: string; at?: string | null; createdAt: string; editedAt?: string | null }
+/** Where someone stands on an event's list: asked along and not yet answered, or one of the four answers. */
+export const EventAnswer = { Invited: 0, Going: 1, NotGoing: 2, Unsure: 3, WhyMe: 4 } as const
+export type EventAnswer = (typeof EventAnswer)[keyof typeof EventAnswer]
+/** Someone on an event's list. `invitedById` is who asked them along; missing for someone who answered without being asked. */
+export interface EventParticipantDto { userId: string; name: string; answer: EventAnswer; invitedById?: string | null }
+export interface CalendarEventDto { id: string; channelId: string; authorId: string; authorName: string; title: string; note?: string | null; day: string; at?: string | null; createdAt: string; editedAt?: string | null; participants?: EventParticipantDto[] | null }
+/** An event as it was when someone posted it into a channel. It is not kept up afterwards. */
+export interface PostedEventDto { eventId: string; calendarId: string; title: string; note?: string | null; day: string; at?: string | null }
 /** A file offered straight from someone's app. available = their app is still connected and has not withdrawn it. */
 /** `available`: the sender is online with the file. Not available comes back when they are, unless `withdrawn`. */
 export interface FileOfferDto { id: string; fileName: string; size: number; available: boolean; withdrawn?: boolean }
@@ -181,6 +188,8 @@ export interface MessageDto {
   pinnedAt?: string | null
   reactions?: ReactionDto[] | null
   poll?: PollDto | null
+  /** On an event posted from a calendar: the event as it was then. Drawn as a card in place of the text. */
+  event?: PostedEventDto | null
   /** Buttons under a bot's message. Pressing one tells the bot who pressed which. */
   buttons?: ButtonDto[] | null
   /** Files on a message from a P2P channel. They are not on the server: their contents come from other people's apps. */

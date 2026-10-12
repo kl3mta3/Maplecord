@@ -27,12 +27,14 @@ one.
 - Forum channels: posts with a title, each with its own thread
 - Gallery channels: every post is pictures with a title. Open one to see what is said about it, like it, and react
   to each of its pictures by itself
-- Calendar channels: a month of days with events on them, shown in your own time zone
+- Calendar channels: a month of days with events on them, shown in your own time zone. Say whether you are coming,
+  ask people along, post an event into channels or a forum, or copy a link to it
 - Files, pictures and videos in chat; pictures and videos show right there
 - Send a file by dropping it on the chat, or by pasting it into the message box
 - See only the pictures and videos of a channel or a conversation, as a grid; click one to go to its message
 - Voice messages: record up to 15 minutes and post it, and it plays right in the chat (so do other sound files)
-- Unread counts, per-channel and per-server mute, and folders to group your servers
+- Unread counts, per-channel and per-server mute, and folders to group your servers. Drag servers and folders to
+  put them in the order you like
 - On a wide screen, the channel list and the member list can be dragged wider or narrower
 - Profiles with display names, avatars, banners, name fonts, animated decorations and profile effects
 - Server tags, which a server can keep to the roles it chooses

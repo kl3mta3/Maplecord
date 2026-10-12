@@ -14,7 +14,7 @@ import { type DirectTextPeer, P2PTextEngine, P2PFileUnavailable, describeFile, M
 import { foldP2p, foldP2pChat, isP2pNoteText, p2pShape, packP2p, searchP2pChat, searchP2pGallery, type P2PMeta } from './p2pPosts'
 import { mayManageMessagesIn } from './channelViewers'
 import { forgetFile, holds, keep, keepFile, kept, keptBefore, keptFile, keyPrint, knownKeys, loadIdentity, p2pTextSupported, rememberKey, sha256Hex } from './p2pIdentity'
-import { forgetRememberedServer, friendCodeFrom, inviteCodeFrom, inviteIsForAnotherServer, rememberedServer, takeRememberedFriendLink, takeRememberedInvite } from './invites'
+import { eventIdFrom, forgetRememberedServer, friendCodeFrom, inviteCodeFrom, inviteIsForAnotherServer, rememberedServer, takeRememberedEvent, takeRememberedFriendLink, takeRememberedInvite } from './invites'
 import { DEFAULT_PUSH_KEY, PUSH_RELEASE_MS, isChoosingPushKey, isPushKey, type PushKey } from './pushToTalk'
 import { VoiceHub } from './voiceHub'
 import { TransferEngine, fileSource, rememberedSource, openSink, type TransferView } from './transfer'
@@ -25,7 +25,7 @@ import {
   type ChannelDto, type CommandDto, type GuildSummaryDto, type MemberDto, type MessageDto, type RollItemDto, type RollResultDto, type RollSessionDto,
   type VoiceParticipantDto, type RpsSessionDto, type RpsResultDto, RpsChoice, type FriendsDto, type DmChannelDto, type RoleDto,
   type DecorationDto, type QrDto, type UpdateProfileRequest, type UserDto, type UserProfileDto, type SystemMessageDto, type SignInMethodsDto, type ContactEmailDto, type ConnectionDto, type ConnectionServiceDto, type FriendLinkDto, type MediaItem, type SearchResultDto, type NewPollDto, isPostsChannel, type RollStatsDto, type FileOfferDto, type TokenResponse, type StreamSettingsDto,
-  type SfuPassDto, type InviteDto, type CalendarEventDto,
+  type SfuPassDto, type InviteDto, type CalendarEventDto, EventAnswer,
 } from './types'
 
 /** A DM rendered as a channel so chat, rolls and the overlay treat it like any other. */
@@ -391,6 +391,10 @@ export function useMaplecord() {
   const [highlight, setHighlight] = useState<string | null>(null)
   /** The last thing heard about a calendar channel's events, for whichever calendar is on screen to take in. */
   const [calendarChange, setCalendarChange] = useState<{ n: number; channelId: string; changed?: CalendarEventDto; deleted?: string } | null>(null)
+  /** Events we have been asked along to and have not answered: asked for once when the app starts, then kept up as invitations and answers arrive. */
+  const [invitations, setInvitations] = useState<CalendarEventDto[]>([])
+  /** An event the calendar is to open on, when it is next shown: from a link, a posted event or an invitation. */
+  const [calendarTarget, setCalendarTarget] = useState<{ n: number; event: CalendarEventDto } | null>(null)
   /** Changes a message wherever it is held: in the channel's list, in the open thread, or as that thread's first message. */
   const patchMessage = useCallback((messageId: string, change: (m: MessageDto) => MessageDto) => {
     setMessages(ms => (ms.some(m => m.id === messageId) ? ms.map(m => (m.id === messageId ? change(m) : m)) : ms))
@@ -726,8 +730,24 @@ export function useMaplecord() {
           return { ...a, reactions: next.length > 0 ? next : null }
         }),
       })),
-      CalendarEventChanged: event => setCalendarChange(c => ({ n: (c?.n ?? 0) + 1, channelId: event.channelId, changed: event })),
-      CalendarEventDeleted: (channelId, eventId) => setCalendarChange(c => ({ n: (c?.n ?? 0) + 1, channelId, deleted: eventId })),
+      CalendarEventChanged: event => {
+        setCalendarChange(c => ({ n: (c?.n ?? 0) + 1, channelId: event.channelId, changed: event }))
+        // Answered, or taken off its list: it is no longer waiting on us.
+        setInvitations(list => (list.some(e => e.id === event.id)
+          ? (event.participants ?? []).some(p => p.userId === me() && p.answer === EventAnswer.Invited) ? list.map(e => (e.id === event.id ? event : e)) : list.filter(e => e.id !== event.id)
+          : list))
+      },
+      CalendarEventDeleted: (channelId, eventId) => {
+        setCalendarChange(c => ({ n: (c?.n ?? 0) + 1, channelId, deleted: eventId }))
+        setInvitations(list => list.filter(e => e.id !== eventId))
+      },
+      EventInvited: event => {
+        setInvitations(list => [...list.filter(e => e.id !== event.id), event])
+        const by = (event.participants ?? []).find(p => p.userId === me())?.invitedById
+        const who = (event.participants ?? []).find(p => p.userId === by)?.name ?? (by === event.authorId ? event.authorName : null)
+        setError(`${who ?? 'Someone'} asked you along to "${event.title}". Open the calendar to answer.`)
+        playSound('message', settingsRef.current.soundProfile, settingsRef.current.soundEnabled)
+      },
       PollChanged: (_channelId, messageId, userId, theirs, counts, voters, closed) => patchMessage(messageId, m => (!m.poll ? m : {
         ...m, poll: { ...m.poll, voters, closed, options: m.poll.options.map((o, i) => ({ ...o, votes: counts[i] ?? o.votes, mine: userId === me() ? theirs.includes(i) : o.mine })) },
       })),
@@ -948,6 +968,8 @@ export function useMaplecord() {
 
     const list = await loadGuilds()
     const [fr, dmList, decos] = await Promise.all([api.friends().catch(() => EMPTY_FRIENDS), api.dms().catch(() => [] as DmChannelDto[]), api.decorations().catch(() => [] as DecorationDto[])])
+    // What we were asked along to while away. Once, here: after this it is kept up by what arrives.
+    void api.invitations().then(setInvitations).catch(() => {})
     setFriends(fr); setDms(dmList); dmsRef.current = dmList; setDecorations(decos)
     void api.privacy().then(p => {
       allowDirectRef.current = p.allowDirect; setAllowDirectState(p.allowDirect)
@@ -1804,7 +1826,30 @@ export function useMaplecord() {
   const resetFriendLink = useCallback(async (): Promise<FriendLinkDto | null> => { let made: FriendLinkDto | null = null; await run(async () => { made = await api.resetFriendLink() }); return made }, [api])
 
   /** Follows an invite link: straight to the server when already a member, otherwise it asks first. A friend link goes its own way. */
+  /** Goes to an event on a calendar: the calendar opens on its day, with the event shown. Says so if we cannot see it. */
+  const openEvent = useCallback(async (eventId: string) => {
+    try {
+      const event = await api.event(eventId)
+      const where = findChannel(event.channelId)
+      if (!where?.guild) { setError('That event is on a calendar you cannot see.'); return }
+      selectGuild(where.guild.guild.id, event.channelId)
+      setCalendarTarget(t => ({ n: (t?.n ?? 0) + 1, event }))
+    } catch (e) {
+      setError(e instanceof ApiError && e.status === 404 ? 'That event is no longer there, or it is on a calendar you cannot see.' : e instanceof Error ? e.message : String(e))
+    }
+  }, [api, selectGuild])
+  /** A link to an event, to paste somewhere; null when this server gives no such links. */
+  const eventLink = useCallback(async (eventId: string): Promise<string | null> => {
+    const base = (await api.meta(settingsRef.current.serverUrl).catch(() => null))?.eventBase
+    return base ? base + eventId : null
+  }, [api])
+
   const openInvite = useCallback(async (link: string) => {
+    if (eventIdFrom(link)) {
+      if (inviteIsForAnotherServer(link, settingsRef.current.serverUrl)) { setError('That link is for a different Maplecord server than the one this app is connected to.'); return }
+      await openEvent(eventIdFrom(link)!)
+      return
+    }
     if (friendCodeFrom(link)) { await openFriendLink(link); return }
     if (inviteIsForAnotherServer(link, settingsRef.current.serverUrl)) { setError('That invite is for a different Maplecord server than the one this app is connected to.'); return }
     const code = inviteCodeFrom(link)
@@ -1816,7 +1861,7 @@ export function useMaplecord() {
     } catch (e) {
       setError(e instanceof ApiError && e.status === 404 ? 'That invite is no longer valid.' : e instanceof Error ? e.message : String(e))
     }
-  }, [api, selectGuild, openFriendLink])
+  }, [api, selectGuild, openFriendLink, openEvent])
 
   const acceptInvite = useCallback(async () => {
     const invite = pendingInvite
@@ -1843,6 +1888,8 @@ export function useMaplecord() {
     if (remembered) void openInvite(remembered)
     const rememberedFriend = takeRememberedFriendLink()
     if (rememberedFriend) void openFriendLink(rememberedFriend)
+    const rememberedEvent = takeRememberedEvent()
+    if (rememberedEvent) void openInvite(rememberedEvent)
     const desktop = bridge()
     if (!desktop) return
     void desktop.takeUpdateNotice?.().then(notice => {
@@ -2919,7 +2966,7 @@ export function useMaplecord() {
   return {
     api, hub, settings, updateSettings, ready, status, error, setError, systemMessages, dismissSystemMessage,
     guilds, selectedGuild, selectedChannel, selectedDm, home, friends, dms, dmUnread, messages, canLoadOlder, activeRoll, typing, commands, stats, setGuildCountRolls, setGuildWelcome,
-    thread, viewingPast, highlight, setHighlight, openThread, closeThread, loadOlderThread, createPost, editMessage, react, reactToPicture, calendarChange, pinMessage, votePoll, closePoll,
+    thread, viewingPast, highlight, setHighlight, openThread, closeThread, loadOlderThread, createPost, editMessage, react, reactToPicture, calendarChange, invitations, calendarTarget, openEvent, eventLink, pinMessage, votePoll, closePoll,
     reactionChoices, loadPins, searchMessages, jumpTo, backToPresent,
     pendingFriendLink, openFriendLink, acceptFriendLink, dismissFriendLink, loadFriendLink, resetFriendLink,
     connectionsEpoch, loadConnections, startConnection, setConnectionShown, removeConnection,

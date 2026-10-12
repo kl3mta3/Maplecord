@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { AttachmentDto, MediaItem, MessageDto, NewPollDto, PollDto, ReactionDto, ReplyToDto, SearchResultDto } from '../types'
 import { isElectron } from '../platform'
 import { Dialog } from './Dialogs'
+import { postedWhen } from './Calendar'
 
 // The parts of the chat that belong to one message beyond its text: what it answers, its reactions, its poll, the
 // thread hanging off it. And the lists a channel can be looked at through: its pins, a search, a forum's posts, a
@@ -278,7 +279,7 @@ export function ForumList({ posts, nameOf, onOpen }: { posts: MessageDto[]; name
       {ordered.map(m => (
         <button key={m.id} className="forumpost" onClick={() => onOpen(m)}>
           <div className="posttitle">{m.pinnedAt && <span title="Pinned">📌 </span>}{m.title ?? firstLine(m.content, 80)}</div>
-          <div className="said muted">{firstLine(m.content) || (m.attachments.length > 0 ? 'Files attached' : m.poll ? 'A poll' : '')}</div>
+          <div className="said muted">{m.event ? '📅 ' + postedWhen(m.event) : firstLine(m.content) || (m.attachments.length > 0 ? 'Files attached' : m.poll ? 'A poll' : '')}</div>
           <div className="postfoot muted">
             <span>{nameOf(m)}</span>
             <span>💬 {m.threadCount ?? 0}</span>

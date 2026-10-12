@@ -295,8 +295,8 @@ export function CreateChannelDialog({ categories, onSubmit, onClose, initialType
   const submit = () => { if (name.trim()) { onSubmit(name.trim(), type, type === ChannelType.Category ? null : parent || null, p2p); onClose() } }
   return (
     <Dialog title={type === ChannelType.Category ? 'Create category' : 'Create channel'} onClose={onClose}>
-      <div className="muted">Kind</div>
-      <select value={type} aria-label="Kind" onChange={e => { const kind = Number(e.target.value); setType(kind); if (kind === ChannelType.Forum || kind === ChannelType.Calendar) setDirect(false) }}>
+      <div className="muted">Type</div>
+      <select value={type} aria-label="Type" onChange={e => { const kind = Number(e.target.value); setType(kind); if (kind === ChannelType.Forum || kind === ChannelType.Calendar) setDirect(false) }}>
         {kinds.map(k => <option key={k.type} value={k.type}>{k.label}</option>)}
       </select>
       {kinds.find(k => k.type === type)?.what && <div className="muted">{kinds.find(k => k.type === type)!.what}</div>}

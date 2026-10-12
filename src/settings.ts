@@ -72,6 +72,8 @@ export interface Settings {
   collapsedGroups?: Record<string, boolean>
   /** Folders of servers in the rail, in no particular order: a folder sits where its first server would. */
   guildFolders?: GuildFolder[]
+  /** The order this person dragged their servers into, by id. A server not in it comes after those that are. */
+  guildOrder?: string[]
   /** Per game plugin, by plugin id. Detection and auto-rolling are both off until the user turns them on. */
   plugins: Record<string, PluginSettings>
   /** How wide this person dragged the channel list and the member list, in pixels. Unset = as the app comes. */

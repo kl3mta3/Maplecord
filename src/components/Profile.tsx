@@ -196,6 +196,29 @@ export function ProfilePopout({ store, userId, fallbackName, x, y, roles, nickna
   )
 }
 
+/**
+ * Someone's profile down a whole column: beside a direct conversation, where the friends list otherwise is. The
+ * same card as the one at the pointer, as wide as the column, with a way to that card at the bottom. Give it the
+ * person as its `key`, so that going to another conversation starts it afresh.
+ */
+export function ProfileColumn({ store, userId, fallbackName, onFull }: { store: Store; userId: string; fallbackName: string; onFull: (e: MouseEvent) => void }) {
+  const [profile, setProfile] = useState<UserProfileDto>(() =>
+    sketch(store.appearanceOf(userId) ?? { userId, username: fallbackName, displayName: null, avatarUrl: null, nameFont: null, nameColor: null, nameColor2: null, decoration: null }))
+  // Asked for once, when the conversation is opened: this stays on screen, and the store changes all the time.
+  const { loadProfile } = store
+  useEffect(() => {
+    let cancelled = false
+    void loadProfile(userId).then(p => { if (!cancelled && p) setProfile(p) })
+    return () => { cancelled = true }
+  }, [loadProfile, userId])
+  return (
+    <div className="profilecolumn">
+      <div className="scroll"><ProfileCardBody profile={profile} serverUrl={store.settings.serverUrl} /></div>
+      <button className="fullprofile" onClick={onFull}>View full profile</button>
+    </div>
+  )
+}
+
 // ---- Profile editor ---------------------------------------------------------------------
 
 const SWATCHES = ['#9000ff', '#00ddff', '#ff008c', '#2cfc00', '#f19511', '#ff3b3b', '#ffd700', '#1abc9c', '#3498db', '#e8e8f0']

@@ -424,7 +424,9 @@ handle('open-external', (_event, url: string) => { if (/^https?:/.test(url)) she
 const INVITE_LINK = 'maplecord://invite/'
 // A friend link (maplecord://add/CODE) arrives and is handed over the same way; the window tells the two apart.
 const FRIEND_LINK = 'maplecord://add/'
-const isAppLink = (text: string) => { const link = text.toLowerCase(); return link.startsWith(INVITE_LINK) || link.startsWith(FRIEND_LINK) }
+// And so does a link to an event on a calendar (maplecord://event/ID).
+const EVENT_LINK = 'maplecord://event/'
+const isAppLink = (text: string) => { const link = text.toLowerCase(); return link.startsWith(INVITE_LINK) || link.startsWith(FRIEND_LINK) || link.startsWith(EVENT_LINK) }
 const inviteLinkIn = (args: string[]) => args.find(isAppLink) ?? null
 /** The link the app was started or woken by, kept until the window takes it. */
 let waitingInviteLink: string | null = inviteLinkIn(process.argv)

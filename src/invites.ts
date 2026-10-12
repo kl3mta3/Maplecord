@@ -8,10 +8,19 @@
  * A friend link is the same three shapes with "add" in place of "invite", and a person's own code in it.
  *
  *   https://…/?server=ID             the browser version opened straight at a server the person is in
+ *
+ * A link to an event on a calendar is the same three shapes with "event" and the event's id.
  */
 const PENDING = 'maplecord.pendingInvite'
 const PENDING_FRIEND = 'maplecord.pendingFriendLink'
 const PENDING_SERVER = 'maplecord.pendingServer'
+const PENDING_EVENT = 'maplecord.pendingEvent'
+
+/** The event in a link to one (https://…/event/ID, ?event=ID or maplecord://event/ID). Null for anything else. */
+export function eventIdFrom(text: string): string | null {
+  const found = /(?:\/event\/|[?&]event=)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?![0-9a-f])/i.exec(text.trim())
+  return found ? found[1].toLowerCase() : null
+}
 
 /** The code in a friend link (https://…/add/CODE, ?add=CODE or maplecord://add/CODE). Null for anything else: a bare code is taken to be an invite. */
 export function friendCodeFrom(text: string): string | null {
@@ -49,17 +58,29 @@ export function rememberInviteFromAddress() {
   const code = inviteCodeFrom(params.get('invite') ?? '')
   const friend = friendCodeFrom('?add=' + (params.get('add') ?? ''))
   const server = /^[0-9a-f-]{36}$/i.test(params.get('server') ?? '') ? params.get('server')!.toLowerCase() : null
-  if (!params.has('invite') && !params.has('add') && !params.has('server')) return
+  const event = eventIdFrom('?event=' + (params.get('event') ?? ''))
+  if (!params.has('invite') && !params.has('add') && !params.has('server') && !params.has('event')) return
   params.delete('invite')
   params.delete('add')
   params.delete('server')
+  params.delete('event')
   const rest = params.toString()
   window.history.replaceState({}, '', window.location.pathname + (rest ? '?' + rest : ''))
   try {
     if (code) sessionStorage.setItem(PENDING, code)
     if (friend) sessionStorage.setItem(PENDING_FRIEND, friend)
     if (server) sessionStorage.setItem(PENDING_SERVER, server)
+    if (event) sessionStorage.setItem(PENDING_EVENT, event)
   } catch { /* private browsing: the link is simply not followed */ }
+}
+
+/** The event kept by {@link rememberInviteFromAddress}, once, as a link the app can follow. */
+export function takeRememberedEvent(): string | null {
+  try {
+    const id = sessionStorage.getItem(PENDING_EVENT)
+    sessionStorage.removeItem(PENDING_EVENT)
+    return id ? '?event=' + id : null
+  } catch { return null }
 }
 
 /** The friend link's code kept by {@link rememberInviteFromAddress}, once, as a link the app can follow. */

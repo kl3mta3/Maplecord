@@ -5,9 +5,9 @@ export interface MemberGroup { key: string; name: string; color: string | null; 
 
 /**
  * The member list in groups: whoever is online goes under their highest role, the groups in the order of the roles
- * (highest first); someone online with no role of their own goes under "Online"; bots that are online have a group
- * to themselves, "Bots", whatever their roles; everyone offline, bots too, is one group at the bottom. Within a group
- * people are in order of their name.
+ * (highest first); someone online with no role of their own goes under "Online"; bots have a group to themselves,
+ * "Bots", whatever their roles and whether they are online or not (the ones online first); every person who is
+ * offline is one group at the bottom. Within a group people are in order of their name.
  */
 export function memberGroups(members: MemberDto[], roles: RoleDto[] | null | undefined): MemberGroup[] {
   const named = new Map((roles ?? []).filter(r => !r.isEveryone).map(r => [r.id, r]))
@@ -17,8 +17,8 @@ export function memberGroups(members: MemberDto[], roles: RoleDto[] | null | und
   const under = new Map<string, MemberDto[]>()
   const plain: MemberDto[] = [], bots: MemberDto[] = [], offline: MemberDto[] = []
   for (const m of members) {
-    if (!m.online) { offline.push(m); continue }
     if (m.isBot) { bots.push(m); continue }
+    if (!m.online) { offline.push(m); continue }
     const role = highest(m)
     if (!role) plain.push(m)
     else under.set(role.id, [...(under.get(role.id) ?? []), m])
@@ -28,7 +28,7 @@ export function memberGroups(members: MemberDto[], roles: RoleDto[] | null | und
     .sort((a, b) => b.role.position - a.role.position || a.role.name.localeCompare(b.role.name))
     .map(({ role, list }) => ({ key: role.id, name: role.name, color: role.color, members: list.sort(byName) }))
   if (plain.length > 0) groups.push({ key: 'online', name: 'Online', color: null, members: plain.sort(byName) })
-  if (bots.length > 0) groups.push({ key: 'bots', name: 'Bots', color: null, members: bots.sort(byName) })
+  if (bots.length > 0) groups.push({ key: 'bots', name: 'Bots', color: null, members: bots.sort((a, b) => Number(b.online) - Number(a.online) || byName(a, b)) })
   if (offline.length > 0) groups.push({ key: 'offline', name: 'Offline', color: null, members: offline.sort(byName) })
   return groups
 }

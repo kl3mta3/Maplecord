@@ -21,7 +21,7 @@ check(shape(memberGroups([member('amy', ['Admin']), member('bob', ['Admin'], fal
 check(shape(memberGroups([member('bob', ['Moderator'], false)], roles)) === 'Offline: bob', 'a role with nobody online has no heading')
 check(shape(memberGroups([member('amy', ['gone']), member('bob', ['Member'])], roles)) === 'Member: bob | Online: amy', 'a role that no longer exists counts for nothing')
 check(shape(memberGroups([member('amy', ['Admin']), member('dan'), member('songs', ['Admin'], true, true), member('archive', [], true, true), member('sleepy', ['Member'], false, true), member('zed', [], false)], roles))
-  === 'Admin: amy | Online: dan | Bots: archive songs | Offline: sleepy zed', 'bots that are online have a group of their own after the people, whatever their roles; an offline bot is with everyone offline')
+  === 'Admin: amy | Online: dan | Bots: archive songs sleepy | Offline: zed', 'bots have a group of their own after the people who are online, whatever their roles, the ones online first; an offline bot stays in it')
 check(shape(memberGroups([member('amy', ['Admin'])], null)) === 'Online: amy' && memberGroups([], roles).length === 0, 'with no roles known everyone online is under Online; nobody, no groups')
 
 console.log(failures === 0 ? 'memberGroups: all passed' : `memberGroups: ${failures} FAILED`)

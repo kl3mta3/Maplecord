@@ -40,7 +40,7 @@ import { soundPackNames } from '../sounds'
 import { DEFAULT_GATE_LEVEL, DEFAULT_NOTIFY, type NotifyLevel } from '../settings'
 import { ContextMenu, type MenuEntry } from './ContextMenu'
 import type { GuildFolder } from '../settings'
-import { Avatar, ProfileEditor, ProfilePopout, UserName } from './Profile'
+import { Avatar, ProfileEditor, ProfilePopout, ProfileColumn, UserName } from './Profile'
 import { assetUrl, initials, shownName, type Appearance } from '../profile'
 import { STATUSES, UserSettingsDialog } from './UserSettings'
 import { ArrowLeftRight, AudioLines, ChartBarDecreasing, ChevronDown, ChevronRight, HeadphoneOff, Headphones, Images, LoaderCircle, Menu, Mic, MicOff, MonitorUp, Paperclip, Phone, PhoneOff, Pin, Plus, Search, Settings as SettingsIcon, Signal, Users, Video } from 'lucide-react'
@@ -57,7 +57,8 @@ import { SharePicker, StreamStage } from './Streams'
 import { CHAT_LEAST, COLUMNS, ColumnGrip, clampColumn, type Column } from './ColumnGrip'
 import { channelMembers, mayManageMessagesIn, mayWriteIn } from '../channelViewers'
 import { memberGroups } from '../memberGroups'
-import { CalendarView } from './Calendar'
+import { dropInRail, railEntries, type RailThing, type RailWhere } from '../railOrder'
+import { CalendarView, EventCard } from './Calendar'
 import { ForumList, GalleryGrid, MediaGrid, NewPostDialog, PinsDialog, PollDialog, PollView, QUICK_REACTIONS, ReactionPicker, Reactions, ReplyQuote, SearchDialog } from './ChatExtras'
 
 type DialogState =
@@ -153,8 +154,10 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
     { kind: 'item', label: 'Roll buttons', checked: store.settings.showRollButtons !== false, onClick: () => store.updateSettings({ showRollButtons: store.settings.showRollButtons === false }) },
     { kind: 'item', label: isElectron() ? 'In-game overlay' : 'In-game overlay (desktop app only)', disabled: !isElectron(), checked: isElectron() && store.settings.overlayEnabled, onClick: () => store.updateSettings({ overlayEnabled: !store.settings.overlayEnabled }) },
   ]
-  // Servers can be grouped into folders in the rail: drag one onto another. Kept on this device.
+  // Servers are put in order in the rail by dragging, and grouped into folders by dragging one onto another. Folders
+  // are dragged too. Kept on this device.
   const DRAG = 'text/maplecord-guild'
+  const DRAG_FOLDER = 'text/maplecord-folder'
   // Channels and their groups are dragged too, by people who may manage channels: onto a group to move a channel
   // into it, onto a channel to put it in front of that one, and a group onto a group to reorder the groups.
   const CHANNEL_DRAG = 'text/maplecord-channel'
@@ -225,12 +228,39 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   })
   const moveToFolder = (guildId: string, folderId: string | null) =>
     saveFolders(folders.map(f => ({ ...f, guildIds: f.id === folderId ? [...f.guildIds.filter(id => id !== guildId), guildId] : f.guildIds.filter(id => id !== guildId) })))
-  const dropOnGuild = (dragged: string, target: string) => {
-    if (dragged === target) return
-    const into = folderOf(target)
-    if (into) { moveToFolder(dragged, into.id); return }
-    saveFolders([...folders.map(f => ({ ...f, guildIds: f.guildIds.filter(id => id !== dragged) })), { id: crypto.randomUUID(), name: 'Folder', guildIds: [target, dragged], open: true }])
+  const rail = railEntries(store.guilds.map(x => x.guild.id), store.settings.guildOrder, folders)
+  /** Where the thing being dragged over the list would land, to show it before it is let go. */
+  const [railDrop, setRailDrop] = useState<{ key: string; where: RailWhere } | null>(null)
+  /** A server or a folder is being dragged: all the browser says while it is still held. */
+  const railKind = (e: React.DragEvent) => (e.dataTransfer.types.includes(DRAG_FOLDER) ? 'folder' : e.dataTransfer.types.includes(DRAG) ? 'server' : null)
+  /**
+   * The upper edge, the lower edge or the middle of what the pointer is over. A folder being dragged has no middle,
+   * as it never goes into anything; and the head of an open folder has no lower edge, as what is below it is inside.
+   */
+  const railZone = (e: React.DragEvent, kind: 'server' | 'folder', over: 'server' | 'closed' | 'open'): RailWhere => {
+    const box = e.currentTarget.getBoundingClientRect()
+    const y = (e.clientY - box.top) / box.height
+    if (kind === 'folder') return y < 0.5 ? 'before' : 'after'
+    if (over === 'open') return y < 0.3 ? 'before' : 'onto'
+    return y < 0.3 ? 'before' : y > 0.7 ? 'after' : 'onto'
   }
+  const railOver = (key: string, over: 'server' | 'closed' | 'open') => (e: React.DragEvent) => {
+    const kind = railKind(e)
+    if (!kind) return
+    e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'
+    const where = railZone(e, kind, over)
+    if (railDrop?.key !== key || railDrop.where !== where) setRailDrop({ key, where })
+  }
+  const railLetGo = (target: RailThing, over: 'server' | 'closed' | 'open') => (e: React.DragEvent) => {
+    const kind = railKind(e)
+    if (!kind) return
+    e.preventDefault(); e.stopPropagation()
+    const id = e.dataTransfer.getData(kind === 'folder' ? DRAG_FOLDER : DRAG)
+    setRailDrop(null)
+    const saved = dropInRail(rail, kind === 'folder' ? { folder: id } : { server: id }, target, railZone(e, kind, over), () => crypto.randomUUID())
+    if (saved) store.updateSettings({ guildOrder: saved.order, guildFolders: saved.folders })
+  }
+  const railMark = (key: string) => (railDrop?.key === key ? ' drop' + railDrop.where : '')
   const dragged = (e: React.DragEvent) => (e.dataTransfer.types.includes(DRAG) ? e.dataTransfer.getData(DRAG) : '')
   const allowDrop = (e: React.DragEvent) => { if (e.dataTransfer.types.includes(DRAG)) { e.preventDefault(); e.dataTransfer.dropEffect = 'move' } }
   const folderEntries = (folderId: string): MenuEntry[] => {
@@ -451,36 +481,37 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
         <button className={pane === 'people' ? 'accent' : ''} onClick={() => setPane(pane === 'people' ? 'chat' : 'people')} title={pane === 'people' ? 'Back to the conversation' : store.home ? 'Friends' : 'Members'}><Users size={18} /></button>
       </div>
       {/* ===== Guild rail ===== */}
-      <div className="rail" onDragOver={allowDrop} onDrop={e => { const id = dragged(e); if (id) { e.preventDefault(); moveToFolder(id, null) } }}>
+      <div className="rail" onDragOver={allowDrop} onDrop={e => { setRailDrop(null); const id = dragged(e); if (id) { e.preventDefault(); moveToFolder(id, null) } }}
+        onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setRailDrop(null) }}>
         <button className={'guild home' + (store.home ? ' active' : '')} title="Friends & direct messages" onClick={store.openHome}>
           <img className="logo" src={import.meta.env.BASE_URL + 'logo.png'} alt="Home" draggable={false} />{dmUnreadTotal > 0 && <span className="badge">{dmUnreadTotal}</span>}
         </button>
         <div className="sep" />
         {(() => {
           const serverButton = (x: (typeof store.guilds)[number]) => (
-            <button key={x.guild.id} draggable className={'guild' + (x.guild.id === g?.guild.id ? ' active' : '') + (store.settings.guilds?.[x.guild.id]?.muted ? ' muted' : '')}
-              title={x.guild.name + (store.settings.guilds?.[x.guild.id]?.muted ? ' (muted)' : '') + ' — right-click for options · drag onto another server to make a folder'}
+            <button key={x.guild.id} draggable className={'guild' + (x.guild.id === g?.guild.id ? ' active' : '') + (store.settings.guilds?.[x.guild.id]?.muted ? ' muted' : '') + railMark('s:' + x.guild.id)}
+              title={x.guild.name + (store.settings.guilds?.[x.guild.id]?.muted ? ' (muted)' : '') + ' — right-click for options · drag to move it, or onto another server to make a folder'}
               onClick={() => store.selectGuild(x.guild.id)} onContextMenu={e => openGuildMenu(e, x.guild.id)}
-              onDragStart={e => { e.dataTransfer.setData(DRAG, x.guild.id); e.dataTransfer.effectAllowed = 'move' }}
-              onDragOver={allowDrop} onDrop={e => { const id = dragged(e); if (id) { e.preventDefault(); e.stopPropagation(); dropOnGuild(id, x.guild.id) } }}>
+              onDragStart={e => { e.dataTransfer.setData(DRAG, x.guild.id); e.dataTransfer.effectAllowed = 'move' }} onDragEnd={() => setRailDrop(null)}
+              onDragOver={railOver('s:' + x.guild.id, 'server')} onDrop={railLetGo({ server: x.guild.id }, 'server')}>
               {x.guild.iconUrl ? <img src={x.guild.iconUrl} alt="" draggable={false} /> : initials(x.guild.name)}
               {x.unread > 0 && <span className="badge">{x.unread}</span>}
             </button>
           )
-          // A folder is drawn where its first server would be; servers in no folder stay where they were.
-          const drawn = new Set<string>()
-          return store.guilds.map(x => {
-            const f = folderOf(x.guild.id)
-            if (!f) return serverButton(x)
-            if (drawn.has(f.id)) return null
-            drawn.add(f.id)
-            const inside = store.guilds.filter(y => f.guildIds.includes(y.guild.id))
+          // In the order this person put them in. A folder is drawn where its first server would be.
+          const byId = new Map(store.guilds.map(x => [x.guild.id, x]))
+          return rail.map(entry => {
+            if (entry.kind === 'server') return serverButton(byId.get(entry.id)!)
+            const f = entry.folder
+            const inside = entry.members.map(id => byId.get(id)!)
             const unread = inside.reduce((n, y) => n + y.unread, 0)
             return (
               <div key={f.id} className={'folder' + (f.open ? ' open' : '')} onDragOver={allowDrop}
                 onDrop={e => { const id = dragged(e); if (id) { e.preventDefault(); e.stopPropagation(); moveToFolder(id, f.id) } }}>
-                <button className={'folderhead' + (!f.open && inside.some(y => y.guild.id === g?.guild.id) ? ' active' : '')}
-                  title={f.name + (f.open ? ' — click to close' : ' — click to open') + ' · right-click for options'}
+                <button draggable className={'folderhead' + (!f.open && inside.some(y => y.guild.id === g?.guild.id) ? ' active' : '') + railMark('f:' + f.id)}
+                  title={f.name + (f.open ? ' — click to close' : ' — click to open') + ' · right-click for options · drag to move it'}
+                  onDragStart={e => { e.dataTransfer.setData(DRAG_FOLDER, f.id); e.dataTransfer.effectAllowed = 'move' }} onDragEnd={() => setRailDrop(null)}
+                  onDragOver={railOver('f:' + f.id, f.open ? 'open' : 'closed')} onDrop={railLetGo({ folder: f.id }, f.open ? 'open' : 'closed')}
                   onClick={() => saveFolders(folders.map(y => (y.id === f.id ? { ...y, open: !y.open } : y)))}
                   onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setMenu({ kind: 'folder', folderId: f.id, x: e.clientX, y: e.clientY }) }}>
                   {/* No folder picture: the first four servers in it, small. */}
@@ -600,6 +631,9 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
                       {c.directSince && <span className="p2ptag">P2P</span>}
                       {store.settings.mutedChannels?.[c.id] && <span className="muted" title="Muted">🔕</span>}
                       {(g.channelUnread[c.id] ?? 0) > 0 && <span className="badge">{g.channelUnread[c.id]}</span>}
+                      {c.type === ChannelType.Calendar && store.invitations.some(e => e.channelId === c.id) && (
+                        <span className="badge" title="Events you were asked along to and have not answered">{store.invitations.filter(e => e.channelId === c.id).length}</span>
+                      )}
                     </div>
                     {c.type === ChannelType.Voice && (() => {
                       // Live state for the channel I'm in (speaking, connection); the server's roster for every other one.
@@ -701,7 +735,11 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       {store.home && !store.selectedChannel
         ? <Friends store={store} />
         : g && store.selectedChannel?.type === ChannelType.Calendar
-        ? <CalendarView store={store} channelId={store.selectedChannel.id} name={store.selectedChannel.name} mayPost={can(Permission.PostEvents)} mayManage={can(Permission.ManageMessages)} nameOf={nameIn} />
+        ? <CalendarView store={store} channelId={store.selectedChannel.id} name={store.selectedChannel.name} mayPost={can(Permission.PostEvents)} mayManage={can(Permission.ManageMessages)} mayShare={can(Permission.ShareEvents)} nameOf={nameIn}
+            // Where an event can be posted: the text channels and forums this person can write in. A P2P channel's text never passes the server.
+            postTo={!g ? [] : g.channels.filter(c => (c.type === ChannelType.Text || c.type === ChannelType.Forum) && !c.directSince && (!me || mayWriteIn(g, me.id, c))).sort((a, b) => a.position - b.position)
+              .map(c => ({ id: c.id, name: c.name, forum: c.type === ChannelType.Forum }))}
+            members={!g ? [] : channelMembers(g, store.selectedChannel!).filter(m => !m.isBot).map(m => ({ userId: m.userId, name: memberName(m) }))} />
         : <Chat store={store} openRollDialog={(rollKind: RollKind) => setDialog({ kind: 'startRoll', rollKind })} canRoll={g ? can(Permission.StartRolls) : !!store.selectedDm} colorOf={colorOf}
           onCall={(userId, name, direct) => { if (direct) setDialog({ kind: 'p2pCall', userId, name }); else void store.startCall(userId, false) }} onUserMenu={openUserMenu} isIgnored={ignored} onUserCard={openCard} nameIn={nameIn} />}
 
@@ -710,7 +748,11 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
 
       {/* ===== Members ===== */}
       <div className="members">
-        {store.home ? (
+        {store.home && store.selectedDm ? (
+          // Beside a direct conversation: who it is with. The friends list is back when no conversation is open.
+          <ProfileColumn key={store.selectedDm.other.id} store={store} userId={store.selectedDm.other.id} fallbackName={shownName(store.selectedDm.other)}
+            onFull={e => openCard(e, store.selectedDm!.other.id, shownName(store.selectedDm!.other))} />
+        ) : store.home ? (
           <>
             <div className="header">Friends <span className="muted">{store.friends.friends.filter(f => f.online).length} online</span></div>
             <div className="list">
@@ -1235,7 +1277,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
         {(thread ? thread.canLoadOlder : store.canLoadOlder) && <div style={{ textAlign: 'center' }}><button className="subtle" onClick={thread ? store.loadOlderThread : store.loadOlder}>Load older messages</button></div>}
         {shown.map(m => isIgnored(m.authorId) && !m.webhookId && !revealed.has(m.id)
           ? <div key={m.id} className="message ignored"><span /><span className="muted">Message from {m.authorName}, who you ignore · <button className="subtle" onClick={() => setRevealed(new Set([...revealed, m.id]))}>show</button></span></div>
-          : <Message key={m.id} m={m} extras={extrasFor(m)} color={colorOf(m.authorId)} icon={store.itemIcon(m.roll?.item)} serverUrl={store.settings.serverUrl} onInvite={link => void store.openInvite(link)} onPress={id => void store.pressButton(m.id, id)}
+          : <Message key={m.id} m={m} extras={extrasFor(m)} color={colorOf(m.authorId)} icon={store.itemIcon(m.roll?.item)} serverUrl={store.settings.serverUrl} onEvent={id => void store.openEvent(id)} onInvite={link => void store.openInvite(link)} onPress={id => void store.pressButton(m.id, id)}
               fileOffer={m.fileOffer ? <FileOfferView store={store} offer={m.fileOffer} mine={m.authorId === (me?.id ?? '')} /> : undefined}
               p2pFiles={m.p2pFiles?.map(f => <P2PFileChip key={f.hash} store={store} channelId={m.channelId} authorId={m.authorId} file={f} />)}
               author={m.webhookId ? null : store.appearanceOf(m.authorId)} name={m.webhookId ? m.authorName : nameIn(m.authorId, m.authorName)}
@@ -1260,7 +1302,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
             { kind: 'item', label: 'Reply', icon: '↩', onClick: () => setReplyingTo(messageMenu.m) } as MenuEntry,
             { kind: 'item', label: 'Add reaction', icon: '😀', onClick: () => setPicker({ id: messageMenu.m.id, x: messageMenu.x, y: messageMenu.y }) } as MenuEntry,
             ...(!thread && !messageMenu.m.threadId ? [{ kind: 'item', label: (messageMenu.m.threadCount ?? 0) > 0 ? 'Open thread' : 'Reply in a thread', icon: '💬', onClick: () => void store.openThread(messageMenu.m) } as MenuEntry] : []),
-            ...(messageMenu.m.authorId === me?.id && !messageMenu.m.webhookId && messageMenu.m.kind === MessageKind.Text ? [{ kind: 'item', label: 'Edit', icon: '✎', onClick: () => setEditing(messageMenu.m.id) } as MenuEntry] : []),
+            ...(messageMenu.m.authorId === me?.id && !messageMenu.m.webhookId && messageMenu.m.kind === MessageKind.Text && !messageMenu.m.event ? [{ kind: 'item', label: 'Edit', icon: '✎', onClick: () => setEditing(messageMenu.m.id) } as MenuEntry] : []),
             ...(mayPin && !messageMenu.m.threadId ? [{ kind: 'item', label: messageMenu.m.pinnedAt ? 'Unpin' : 'Pin to this channel', icon: '📌', onClick: () => void store.pinMessage(messageMenu.m.id, !messageMenu.m.pinnedAt) } as MenuEntry] : []),
             { kind: 'sep' } as MenuEntry,
           ] : []),
@@ -1453,7 +1495,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
 }
 
 /** An invite link somewhere in a message: this server's invite page, or the app's own kind of link. */
-const INVITE_LINK = /(https?:\/\/[^\s<>"']+\/(?:invite|add)\/[A-Za-z0-9]{4,32}(?:\?[^\s<>"']*)?|maplecord:\/\/(?:invite|add)\/[^\s<>"']+)/g
+const INVITE_LINK = /(https?:\/\/[^\s<>"']+\/(?:invite|add)\/[A-Za-z0-9]{4,32}(?:\?[^\s<>"']*)?|https?:\/\/[^\s<>"']+\/event\/[0-9a-fA-F-]{36}(?:\?[^\s<>"']*)?|maplecord:\/\/(?:invite|add|event)\/[^\s<>"']+)/g
 
 /** A web address in running text. What usually ends a sentence is not taken as its last character. */
 const WEB_LINK = /(https?:\/\/[^\s<>"']+)/g
@@ -1471,7 +1513,7 @@ function withInviteLinks(text: string, open?: (link: string) => void): React.Rea
   // split() with one capturing group puts the invite links at the odd places.
   ;(open ? text.split(INVITE_LINK) : [text]).forEach((part, i) => {
     if (i % 2 === 1) {
-      out.push(<button key={'i' + i} className="invitelink" title={/\/add\//.test(part) ? 'Open this friend link' : 'Open this invite'} onClick={() => open!(part)}>{part}</button>)
+      out.push(<button key={'i' + i} className="invitelink" title={/\/event\//.test(part) ? 'Open this event in its calendar' : /\/add\//.test(part) ? 'Open this friend link' : 'Open this invite'} onClick={() => open!(part)}>{part}</button>)
       return
     }
     part.split(WEB_LINK).forEach((piece, j) => {
@@ -1522,7 +1564,7 @@ function MessageEditor({ text, title, onSave, onCancel }: { text: string; title:
   )
 }
 
-function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu, onUserCard, onMenu, onInvite, onPress, fileOffer, p2pFiles, extras }: {
+function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu, onUserCard, onMenu, onInvite, onEvent, onPress, fileOffer, p2pFiles, extras }: {
   extras?: MessageExtras
   /** Pressed one of the buttons under a bot's message. */
   onPress?: (buttonId: string) => void
@@ -1530,6 +1572,8 @@ function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu,
   p2pFiles?: React.ReactNode
   /** Pressed an invite link in the text. */
   onInvite?: (link: string) => void
+  /** Pressed "Open in the calendar" on an event that was posted here. */
+  onEvent?: (eventId: string) => void
   m: MessageDto; color?: string; icon?: string | null; serverUrl: string; mention?: boolean
   /** Right-click anywhere on the message that is not the author. */
   onMenu?: (e: React.MouseEvent) => void
@@ -1578,6 +1622,9 @@ function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu,
             <div className="row">🎲 rolled <b style={{ fontSize: 18 }}>{m.content}</b> <span className="muted">({m.dice?.min ?? 1}–{m.dice?.max ?? 100})</span></div>
           ) : m.kind === MessageKind.CoinFlip ? (
             <div className="row"><img src={import.meta.env.BASE_URL + (m.content === 'Tails' ? 'coin_tails.png' : 'coin_heads.png')} width={40} height={40} alt="" /> flipped a coin — <b>{m.content}</b></div>
+          ) : m.event ? (
+            // An event posted from a calendar: the card says it, with the time in our own time zone, in place of the text.
+            <EventCard event={m.event} onOpen={onEvent ? () => onEvent(m.event!.eventId) : undefined} />
           ) : extras?.editor ?? <div className="body">{withInviteLinks(m.content, onInvite)}{m.editedAt && <span className="edited muted" title={`Edited ${new Date(m.editedAt).toLocaleString()}`}> (edited)</span>}</div>}
         {m.attachments.map(a => <AttachmentView key={a.id} file={a} pictures={extras?.pictures} />)}
         {p2pFiles}

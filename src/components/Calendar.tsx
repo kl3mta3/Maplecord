@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Store } from '../store'
-import type { CalendarEventDto } from '../types'
+import { EventAnswer, type CalendarEventDto, type PostedEventDto } from '../types'
+import { ContextMenu, type MenuEntry } from './ContextMenu'
 import { Dialog } from './Dialogs'
 
-// A calendar channel: a month of days as squares, with what is on each. Anyone who sees the channel reads it; whoever
-// may post events adds to it by opening a day.
+// A calendar channel: a month of days as squares, with what is on each. Anyone who sees the channel reads it and says
+// whether they are coming; whoever may post events adds to it by opening a day, and asks people along.
 
 const two = (n: number) => String(n).padStart(2, '0')
 /** A day as year-month-day, the way events carry theirs. */
@@ -33,22 +34,60 @@ export function byShownDay(events: CalendarEventDto[]): Map<string, CalendarEven
   return days
 }
 
-export function CalendarView({ store, channelId, name, mayPost, mayManage, nameOf }: {
+/** The four answers, in the order they are offered, each with its mark and what it says. */
+const ANSWERS: { answer: EventAnswer; mark: string; says: string }[] = [
+  { answer: EventAnswer.Going, mark: '✅', says: 'I will be there' },
+  { answer: EventAnswer.NotGoing, mark: '❌', says: 'I will not be there' },
+  { answer: EventAnswer.Unsure, mark: '🤷', says: 'Not sure yet' },
+  { answer: EventAnswer.WhyMe, mark: '😠', says: 'Why did you invite me to this?' },
+]
+const markOf = (answer: EventAnswer) => ANSWERS.find(a => a.answer === answer)?.mark ?? '✉️'
+const saysOf = (answer: EventAnswer) => ANSWERS.find(a => a.answer === answer)?.says ?? 'Asked along, has not answered'
+
+/** When a posted event is, in this person's own time zone: its day, and its time if it has one. */
+export const postedWhen = (event: Pick<PostedEventDto, 'day' | 'at'>) => (event.at
+  ? new Date(event.at).toLocaleString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+  : fromKey(event.day).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }))
+
+/** An event that was posted into a channel, drawn as a card with its time in this person's own time zone. */
+export function EventCard({ event, onOpen }: { event: PostedEventDto; onOpen?: () => void }) {
+  const when = postedWhen(event)
+  return (
+    <div className="card eventcard">
+      <div className="title">📅 {event.title}</div>
+      <div className="line" title={event.at ? 'Shown in your own time zone' : undefined}>{when}</div>
+      {event.note && <div className="body note">{event.note}</div>}
+      {onOpen && <div><button className="subtle" onClick={onOpen} title="Open the calendar on this event. What was posted here is the event as it was then">Open in the calendar</button></div>}
+    </div>
+  )
+}
+
+export function CalendarView({ store, channelId, name, mayPost, mayManage, mayShare, nameOf, postTo, members }: {
   store: Store; channelId: string; name: string
   /** May put events on it, and change or remove their own. */
   mayPost: boolean
   /** May change or remove anyone's (whoever may manage messages). */
   mayManage: boolean
+  /** May post an event from here into channels. */
+  mayShare: boolean
   nameOf: (userId: string, fallback: string) => string
+  /** The text channels and forums this person can write in, to post an event into. */
+  postTo: { id: string; name: string; forum: boolean }[]
+  /** The people who can see this calendar, to ask along. */
+  members: { userId: string; name: string }[]
 }) {
   const now = new Date()
   const [month, setMonth] = useState({ y: now.getFullYear(), m: now.getMonth() })
   const [events, setEvents] = useState<CalendarEventDto[]>([])
   const [openDay, setOpenDay] = useState<string | null>(null)
   const [editing, setEditing] = useState<{ day: string; event?: CalendarEventDto } | null>(null)
+  const [menu, setMenu] = useState<{ event: CalendarEventDto; x: number; y: number } | null>(null)
+  const [posting, setPosting] = useState<{ event: CalendarEventDto; forum: boolean } | null>(null)
+  const [inviting, setInviting] = useState<string | null>(null)
   const days = useMemo(() => monthDays(month.y, month.m), [month.y, month.m])
   const me = store.settings.user?.id
   const { api, setError } = store
+  const fail = (what: string) => (e: unknown) => setError(e instanceof Error ? e.message : what)
 
   // A day to either side of what is shown: an event with a time can be on the next day over for us.
   useEffect(() => {
@@ -59,19 +98,54 @@ export function CalendarView({ store, channelId, name, mayPost, mayManage, nameO
     return () => { cancelled = true }
   }, [api, setError, channelId, days])
 
-  // Someone put an event on it, changed one or took one off, while we are looking.
+  // Someone put an event on it, changed one, answered one or took one off, while we are looking.
   const change = store.calendarChange
   useEffect(() => {
     if (!change || change.channelId !== channelId) return
     setEvents(list => (change.deleted ? list.filter(e => e.id !== change.deleted) : change.changed ? [...list.filter(e => e.id !== change.changed!.id), change.changed] : list))
   }, [change, channelId])
 
+  // Sent here for one event (a link, a posted event, an invitation): its month, with its day opened.
+  const target = store.calendarTarget
+  const taken = useRef(0)
+  useEffect(() => {
+    if (!target || target.event.channelId !== channelId || taken.current === target.n) return
+    taken.current = target.n
+    const day = fromKey(shownDay(target.event))
+    setMonth({ y: day.getFullYear(), m: day.getMonth() })
+    setOpenDay(shownDay(target.event))
+  }, [target, channelId])
+
   const shown = useMemo(() => byShownDay(events), [events])
   const today = dayKey(now)
   const step = (by: number) => setMonth(at => { const d = new Date(at.y, at.m + by, 1); return { y: d.getFullYear(), m: d.getMonth() } })
   const weekdays = useMemo(() => Array.from({ length: 7 }, (_, i) => new Date(2023, 0, 1 + i).toLocaleDateString([], { weekday: 'short' })), [])
   const openList = openDay ? shown.get(openDay) ?? [] : []
-  const remove = (e: CalendarEventDto) => { void api.deleteEvent(e.id).catch(err => setError(err instanceof Error ? err.message : 'The event could not be removed.')) }
+  const remove = (e: CalendarEventDto) => { void api.deleteEvent(e.id).catch(fail('The event could not be removed.')) }
+  const mayChange = (e: CalendarEventDto) => (e.authorId === me && mayPost) || mayManage
+  const forums = postTo.filter(c => c.forum), texts = postTo.filter(c => !c.forum)
+  /** What we were asked along to on this calendar and have not answered. */
+  const waiting = store.invitations.filter(e => e.channelId === channelId)
+
+  const answer = (e: CalendarEventDto, a: EventAnswer) => {
+    const mine = (e.participants ?? []).find(p => p.userId === me)?.answer
+    // Pressing the answer already given takes it back.
+    void api.answerEvent(e.id, mine === a ? null : a).catch(fail('Your answer could not be saved.'))
+  }
+  const copyLink = async (e: CalendarEventDto) => {
+    const link = await store.eventLink(e.id)
+    if (!link) { setError('This server does not give links to events.'); return }
+    void navigator.clipboard.writeText(link).then(() => setError('A link to the event was copied. Whoever follows it sees the event only if they can see this calendar.'), () => setError('Could not copy. Here it is: ' + link))
+  }
+  const entriesFor = (e: CalendarEventDto): MenuEntry[] => [
+    { kind: 'item', label: 'Post to channels…', icon: '📣', disabled: !mayShare || texts.length === 0, onClick: () => setPosting({ event: e, forum: false }) },
+    { kind: 'item', label: 'Create a forum post…', icon: '☰', disabled: !mayShare || forums.length === 0, onClick: () => setPosting({ event: e, forum: true }) },
+    { kind: 'item', label: 'Create a link', icon: '🔗', onClick: () => void copyLink(e) },
+    ...(mayChange(e) ? [{ kind: 'sep' } as MenuEntry, { kind: 'item', label: 'Add participants…', icon: '➕', onClick: () => setInviting(e.id) } as MenuEntry, { kind: 'item', label: 'Change', icon: '✎', onClick: () => setEditing({ day: shownDay(e), event: e }) } as MenuEntry] : []),
+    ...(e.authorId === me || mayManage ? [{ kind: 'item', label: 'Remove', danger: true, onClick: () => remove(e) } as MenuEntry] : []),
+  ]
+  const openMenu = (e: React.MouseEvent, event: CalendarEventDto) => { e.preventDefault(); e.stopPropagation(); setMenu({ event, x: e.clientX, y: e.clientY }) }
+  const invitingEvent = inviting ? events.find(e => e.id === inviting) ?? null : null
 
   return (
     <div className="chat calendar">
@@ -84,6 +158,16 @@ export function CalendarView({ store, channelId, name, mayPost, mayManage, nameO
           <button onClick={() => setMonth({ y: now.getFullYear(), m: now.getMonth() })}>Today</button>
         </div>
       </div>
+      {waiting.length > 0 && (
+        <div className="calwaiting">
+          <span className="muted">You were asked along:</span>
+          {waiting.map(e => (
+            <button key={e.id} className="subtle" title="Open it to answer" onClick={() => { const day = fromKey(shownDay(e)); setMonth({ y: day.getFullYear(), m: day.getMonth() }); setOpenDay(shownDay(e)) }}>
+              ✉️ {e.title} · {fromKey(shownDay(e)).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="calweek">{weekdays.map(w => <span key={w}>{w}</span>)}</div>
       <div className="calgrid">
         {days.map(d => {
@@ -93,31 +177,56 @@ export function CalendarView({ store, channelId, name, mayPost, mayManage, nameO
             <button key={key} className={'calday' + (d.getMonth() !== month.m ? ' other' : '') + (key === today ? ' today' : '') + (list.length > 0 ? ' has' : '')}
               onClick={() => setOpenDay(key)} title={d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }) + (list.length > 0 ? ` · ${list.length} ${list.length === 1 ? 'event' : 'events'}` : '')}>
               <span className="num">{d.getDate()}</span>
-              {list.slice(0, 3).map(e => <span key={e.id} className="calevent">{shownTime(e) && <i>{shownTime(e)} </i>}{e.title}</span>)}
+              {list.slice(0, 3).map(e => <span key={e.id} className="calevent" onContextMenu={x => openMenu(x, e)}>{shownTime(e) && <i>{shownTime(e)} </i>}{e.title}</span>)}
               {list.length > 3 && <span className="calmore">+{list.length - 3} more</span>}
             </button>
           )
         })}
       </div>
 
-      {openDay && !editing && (
-        <Dialog title={fromKey(openDay).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} onClose={() => setOpenDay(null)}>
+      {openDay && !editing && !posting && !invitingEvent && (
+        <Dialog title={fromKey(openDay).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} onClose={() => setOpenDay(null)} scrolls>
+          {mayPost && <button className="accent dialogcorner" onClick={() => setEditing({ day: openDay })}>Add an event</button>}
           {openList.length === 0 && <div className="muted">Nothing on this day.</div>}
-          {openList.map(e => (
-            <div key={e.id} className="caldetail">
-              <div><b>{e.title}</b>{shownTime(e) && <span className="muted"> · {shownTime(e)}</span>}</div>
-              {e.note && <div className="note">{e.note}</div>}
-              <div className="row">
-                <span className="muted grow">by {nameOf(e.authorId, e.authorName)}{e.editedAt ? ' · changed' : ''}</span>
-                {((e.authorId === me && mayPost) || mayManage) && <button className="subtle" onClick={() => setEditing({ day: openDay, event: e })}>Change</button>}
-                {(e.authorId === me || mayManage) && <button className="subtle danger" onClick={() => remove(e)}>Remove</button>}
+          {openList.map(e => {
+            const people = e.participants ?? []
+            const mine = people.find(p => p.userId === me)
+            return (
+              <div key={e.id} className="caldetail" onContextMenu={x => openMenu(x, e)}>
+                <div><b>{e.title}</b>{shownTime(e) && <span className="muted"> · {shownTime(e)}</span>}</div>
+                {e.note && <div className="note">{e.note}</div>}
+                {mine?.answer === EventAnswer.Invited && <div className="calasked">✉️ You were asked along{mine.invitedById ? ` by ${nameOf(mine.invitedById, people.find(p => p.userId === mine.invitedById)?.name ?? e.authorName)}` : ''}. Are you coming?</div>}
+                <div className="calanswers">
+                  {ANSWERS.map(a => {
+                    const count = people.filter(p => p.answer === a.answer).length
+                    return (
+                      <button key={a.answer} className={'reaction' + (mine?.answer === a.answer ? ' mine' : '')} aria-pressed={mine?.answer === a.answer}
+                        title={mine?.answer === a.answer ? `${a.says} (press again to take it back)` : a.says} onClick={() => answer(e, a.answer)}>{a.mark} <span>{count}</span></button>
+                    )
+                  })}
+                  {mayChange(e) && <button className="subtle" onClick={() => setInviting(e.id)} title="Ask people along to this event">➕ Add participant</button>}
+                </div>
+                {people.length > 0 && (
+                  <div className="calpeople">
+                    {people.map(p => (
+                      <span key={p.userId} className={'chip' + (p.answer === EventAnswer.Invited ? ' waiting' : '')} title={saysOf(p.answer)}>
+                        {markOf(p.answer)} {nameOf(p.userId, p.name)}
+                        {mayChange(e) && <button className="subtle x" aria-label={`Take ${nameOf(p.userId, p.name)} off the list`} title="Take them off the list"
+                          onClick={() => void api.uninviteFromEvent(e.id, p.userId).catch(fail('They could not be taken off the list.'))}>×</button>}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="row">
+                  <span className="muted grow">by {nameOf(e.authorId, e.authorName)}{e.editedAt ? ' · changed' : ''}</span>
+                  <button className="subtle" onClick={x => setMenu({ event: e, x: x.clientX, y: x.clientY })} title="Post it to channels, make a forum post of it, or make a link to it">Post or link…</button>
+                  {mayChange(e) && <button className="subtle" onClick={() => setEditing({ day: openDay, event: e })}>Change</button>}
+                  {(e.authorId === me || mayManage) && <button className="subtle danger" onClick={() => remove(e)}>Remove</button>}
+                </div>
               </div>
-            </div>
-          ))}
-          <div className="buttons">
-            {mayPost && <button className="accent" onClick={() => setEditing({ day: openDay })}>Add an event</button>}
-            <button onClick={() => setOpenDay(null)}>Close</button>
-          </div>
+            )
+          })}
+          <div className="buttons"><button onClick={() => setOpenDay(null)}>Close</button></div>
         </Dialog>
       )}
       {editing && (
@@ -127,7 +236,98 @@ export function CalendarView({ store, channelId, name, mayPost, mayManage, nameO
             catch (e) { setError(e instanceof Error ? e.message : 'The event could not be saved.') }
           }} />
       )}
+      {posting && (
+        <PostEventDialog event={posting.event} forum={posting.forum} channels={posting.forum ? forums : texts} onClose={() => setPosting(null)}
+          onPost={async ids => {
+            try { await api.postEventTo(posting.event.id, ids); setPosting(null) }
+            catch (e) { setError(e instanceof Error ? e.message : 'The event could not be posted.') }
+          }} />
+      )}
+      {invitingEvent && (
+        <InviteDialog event={invitingEvent} people={members.filter(m => !(invitingEvent.participants ?? []).some(p => p.userId === m.userId))} onClose={() => setInviting(null)}
+          onInvite={async ids => {
+            try { await api.inviteToEvent(invitingEvent.id, ids); setInviting(null) }
+            catch (e) { setError(e instanceof Error ? e.message : 'They could not be asked along.') }
+          }} />
+      )}
+      {menu && <ContextMenu x={menu.x} y={menu.y} entries={entriesFor(menu.event)} onClose={() => setMenu(null)} />}
+      {/* What the app has to say (something refused, a link copied): the calendar stands where the conversation would say it. */}
+      {store.error && <div className="error"><span className="grow">{store.error}</span><button className="subtle" onClick={() => store.setError(null)}>×</button></div>}
     </div>
+  )
+}
+
+/**
+ * A drop-down that takes several: each row gets a check when picked and loses it when picked again. With as many
+ * picked as it takes, the rest cannot be.
+ */
+function MultiPick({ items, picked, onChange, most, placeholder }: {
+  items: { id: string; label: string }[]; picked: string[]; onChange: (ids: string[]) => void; most: number; placeholder: string
+}) {
+  const [open, setOpen] = useState(true)
+  const chosen = items.filter(i => picked.includes(i.id))
+  return (
+    <div className="multipick">
+      <button className="pickhead" aria-expanded={open} onClick={() => setOpen(o => !o)}>
+        <span className="grow">{chosen.length === 0 ? placeholder : chosen.map(c => c.label).join(', ')}</span><span className="muted">{picked.length}/{most} {open ? '▴' : '▾'}</span>
+      </button>
+      {open && (
+        <div className="picklist" role="listbox" aria-multiselectable>
+          {items.length === 0 && <div className="muted">Nothing to choose from.</div>}
+          {items.map(i => {
+            const on = picked.includes(i.id)
+            return (
+              <button key={i.id} role="option" aria-selected={on} className={'pickrow' + (on ? ' on' : '')} disabled={!on && picked.length >= most}
+                onClick={() => onChange(on ? picked.filter(id => id !== i.id) : [...picked, i.id])}><span className="tick">{on ? '✓' : ''}</span>{i.label}</button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Posting an event into channels: up to five text channels, each ticked in the list; or one forum, as a post of its own. */
+function PostEventDialog({ event, forum, channels, onPost, onClose }: {
+  event: CalendarEventDto; forum: boolean; channels: { id: string; name: string }[]; onPost: (channelIds: string[]) => void | Promise<void>; onClose: () => void
+}) {
+  const [picked, setPicked] = useState<string[]>(forum && channels.length === 1 ? [channels[0]!.id] : [])
+  const [busy, setBusy] = useState(false)
+  const post = async () => { if (picked.length === 0 || busy) return; setBusy(true); await onPost(picked); setBusy(false) }
+  return (
+    <Dialog title={forum ? `A forum post for "${event.title}"` : `Post "${event.title}"`} onClose={onClose} scrolls>
+      <div className="muted">{forum ? 'Forum' : 'Channels'}</div>
+      <MultiPick items={channels.map(c => ({ id: c.id, label: (forum ? '☰ ' : '# ') + c.name }))} picked={picked} onChange={setPicked} most={forum ? 1 : 5}
+        placeholder={forum ? 'Choose a forum…' : 'Choose channels…'} />
+      <div className="muted">
+        {forum ? 'It becomes a post of its own there, with the event\'s title.' : 'Up to 5 at once.'} Everyone sees the time in their own time zone. It is posted as it is now: if the event changes later, post it again.
+      </div>
+      <div className="buttons">
+        <button onClick={onClose}>Cancel</button>
+        <button className="accent" disabled={picked.length === 0 || busy} onClick={() => void post()}>{forum ? 'Create post' : 'Post'}</button>
+      </div>
+    </Dialog>
+  )
+}
+
+/** Asking people along to an event: members who can see the calendar and are not on its list yet. */
+function InviteDialog({ event, people, onInvite, onClose }: {
+  event: CalendarEventDto; people: { userId: string; name: string }[]; onInvite: (userIds: string[]) => void | Promise<void>; onClose: () => void
+}) {
+  const [picked, setPicked] = useState<string[]>([])
+  const [busy, setBusy] = useState(false)
+  const sorted = useMemo(() => [...people].sort((a, b) => a.name.localeCompare(b.name)), [people])
+  const invite = async () => { if (picked.length === 0 || busy) return; setBusy(true); await onInvite(picked); setBusy(false) }
+  return (
+    <Dialog title={`Ask people along to "${event.title}"`} onClose={onClose} scrolls>
+      <div className="muted">People</div>
+      <MultiPick items={sorted.map(p => ({ id: p.userId, label: p.name }))} picked={picked} onChange={setPicked} most={25} placeholder="Choose people…" />
+      <div className="muted">Each is told now if their app is open, and otherwise when they next open it. Only people who can see this calendar are listed.</div>
+      <div className="buttons">
+        <button onClick={onClose}>Cancel</button>
+        <button className="accent" disabled={picked.length === 0 || busy} onClick={() => void invite()}>Ask along</button>
+      </div>
+    </Dialog>
   )
 }
 

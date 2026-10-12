@@ -1,5 +1,5 @@
 import { TagSettings } from './Tags'
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { isElectron } from '../platform'
 import { ChannelType, Permission, hasPermission, type ApplicationDto, type ChannelDto, type GuildDto, type MemberDto, type RoleDto } from '../types'
 import type { Api } from '../api'
@@ -45,33 +45,37 @@ export function OverlaySettingsDialog({ settings, onChange, packs, onOpenSounds,
 
 // ---- Server settings ---------------------------------------------------------------
 
-export const PERMISSION_LABELS: { bit: number; name: string; hint: string }[] = [
-  { bit: Permission.ViewChannels, name: 'View channels', hint: 'See channels and read messages' },
-  { bit: Permission.SendMessages, name: 'Send messages', hint: '' },
-  { bit: Permission.AttachFiles, name: 'Attach files', hint: 'Images and uploads' },
-  { bit: Permission.ManageMessages, name: 'Manage messages', hint: 'Delete other people\'s messages' },
-  { bit: Permission.StartRolls, name: 'Start rolls', hint: 'Rolls, need/greed, flips, RPS, /dice' },
-  { bit: Permission.JoinVoice, name: 'Join voice', hint: '' },
-  { bit: Permission.Speak, name: 'Speak', hint: '' },
-  { bit: Permission.Stream, name: 'Stream', hint: 'Share screen' },
-  { bit: Permission.CreateInvites, name: 'Create invites', hint: '' },
-  { bit: Permission.ManageChannels, name: 'Manage channels', hint: 'Create, rename, delete, overrides' },
-  { bit: Permission.ManageRoles, name: 'Manage roles', hint: 'Only roles below your own' },
-  { bit: Permission.ManageWebhooks, name: 'Manage webhooks', hint: '' },
-  { bit: Permission.ManageGuild, name: 'Manage server', hint: 'Name, icon, bots' },
-  { bit: Permission.KickMembers, name: 'Kick members', hint: '' },
-  { bit: Permission.BanMembers, name: 'Ban members', hint: '' },
-  { bit: Permission.MuteMembers, name: 'Mute members', hint: '' },
-  { bit: Permission.DisconnectMembers, name: 'Disconnect members', hint: 'Take someone out of a voice channel (right-click them). They can join again' },
-  { bit: Permission.PostEvents, name: 'Post events', hint: 'Put events on a calendar channel, and change or remove their own' },
-  { bit: Permission.MoveMembers, name: 'Move members', hint: 'Drag someone from one voice channel onto another. Never into or out of a P2P channel' },
-  { bit: Permission.ManageDirectChannels, name: 'Create P2P channels', hint: 'Make a voice channel P2P or relayed (also needs Manage channels)' },
-  { bit: Permission.JoinDirectVoice, name: 'Join P2P channels', hint: 'Join a P2P voice channel (also needs Join voice, and P2P allowed on their own account)' },
-  { bit: Permission.UseRelayInDirect, name: 'Use the relay in P2P channels', hint: 'Connect through the relay there when a direct connection cannot be made, or to keep their address from the others. Relayed limits apply. Without it, P2P channels are direct only' },
-  { bit: Permission.StreamDirect, name: 'Stream in P2P channels', hint: 'Share screen or camera in a P2P channel (also needs Stream)' },
-  { bit: Permission.WearTag, name: 'Wear the server tag', hint: 'Pick this server\'s tag to show beside their name. Someone who loses this stops wearing it' },
-  { bit: Permission.Administrator, name: 'Administrator', hint: 'Every permission, bypasses channel overrides' },
+/** Everything a role can allow, in the groups the role editor shows them under. */
+export const PERMISSION_LABELS: { group: string; bit: number; name: string; hint: string }[] = [
+  { group: 'General', bit: Permission.ViewChannels, name: 'View channels', hint: 'See channels and read messages' },
+  { group: 'General', bit: Permission.CreateInvites, name: 'Create invites', hint: '' },
+  { group: 'General', bit: Permission.StartRolls, name: 'Start rolls', hint: 'Rolls, need/greed, flips, RPS, /dice' },
+  { group: 'General', bit: Permission.WearTag, name: 'Wear the server tag', hint: 'Pick this server\'s tag to show beside their name. Someone who loses this stops wearing it' },
+  { group: 'Text', bit: Permission.SendMessages, name: 'Send messages', hint: '' },
+  { group: 'Text', bit: Permission.AttachFiles, name: 'Attach files', hint: 'Images and uploads' },
+  { group: 'Text', bit: Permission.ManageMessages, name: 'Manage messages', hint: 'Delete other people\'s messages' },
+  { group: 'Voice', bit: Permission.JoinVoice, name: 'Join voice', hint: '' },
+  { group: 'Voice', bit: Permission.Speak, name: 'Speak', hint: '' },
+  { group: 'Voice', bit: Permission.Stream, name: 'Stream', hint: 'Share screen' },
+  { group: 'Calendar', bit: Permission.PostEvents, name: 'Post events', hint: 'Put events on a calendar channel, and change or remove their own' },
+  { group: 'Calendar', bit: Permission.ShareEvents, name: 'Share events', hint: 'Post an event from a calendar into text channels and forums they can write in' },
+  { group: 'P2P', bit: Permission.ManageDirectChannels, name: 'Create P2P channels', hint: 'Make a voice channel P2P or relayed (also needs Manage channels)' },
+  { group: 'P2P', bit: Permission.JoinDirectVoice, name: 'Join P2P channels', hint: 'Join a P2P voice channel (also needs Join voice, and P2P allowed on their own account)' },
+  { group: 'P2P', bit: Permission.UseRelayInDirect, name: 'Use the relay in P2P channels', hint: 'Connect through the relay there when a direct connection cannot be made, or to keep their address from the others. Relayed limits apply. Without it, P2P channels are direct only' },
+  { group: 'P2P', bit: Permission.StreamDirect, name: 'Stream in P2P channels', hint: 'Share screen or camera in a P2P channel (also needs Stream)' },
+  { group: 'Moderation', bit: Permission.KickMembers, name: 'Kick members', hint: '' },
+  { group: 'Moderation', bit: Permission.BanMembers, name: 'Ban members', hint: '' },
+  { group: 'Moderation', bit: Permission.MuteMembers, name: 'Mute members', hint: '' },
+  { group: 'Moderation', bit: Permission.DisconnectMembers, name: 'Disconnect members', hint: 'Take someone out of a voice channel (right-click them). They can join again' },
+  { group: 'Moderation', bit: Permission.MoveMembers, name: 'Move members', hint: 'Drag someone from one voice channel onto another. Never into or out of a P2P channel' },
+  { group: 'Server', bit: Permission.ManageChannels, name: 'Manage channels', hint: 'Create, rename, delete, overrides' },
+  { group: 'Server', bit: Permission.ManageRoles, name: 'Manage roles', hint: 'Only roles below your own' },
+  { group: 'Server', bit: Permission.ManageWebhooks, name: 'Manage webhooks', hint: '' },
+  { group: 'Server', bit: Permission.ManageGuild, name: 'Manage server', hint: 'Name, icon, bots' },
+  { group: 'Server', bit: Permission.Administrator, name: 'Administrator', hint: 'Every permission, bypasses channel overrides' },
 ]
+/** The groups, in the order they are shown. */
+export const PERMISSION_GROUPS = [...new Set(PERMISSION_LABELS.map(p => p.group))]
 
 const ROLE_SWATCHES = ['#9000ff', '#00ddff', '#ff008c', '#2cfc00', '#f19511', '#ff3b3b', '#ffd700', '#1abc9c', '#e91e63', '#3498db', '#95a5a6', '#ffffff']
 
@@ -217,11 +221,16 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, myP
               </div>
               <div className="muted">Permissions</div>
               <div className="perms">
-                {PERMISSION_LABELS.map(p => (
-                  <label key={p.bit} className="row" title={p.hint}>
-                    <input type="checkbox" checked={(draft.permissions & p.bit) !== 0} onChange={e => setDraft({ ...draft, permissions: e.target.checked ? draft.permissions | p.bit : draft.permissions & ~p.bit })} />
-                    <span>{p.name}</span>
-                  </label>
+                {PERMISSION_GROUPS.map(group => (
+                  <Fragment key={group}>
+                    <div className="permgroup">{group}</div>
+                    {PERMISSION_LABELS.filter(p => p.group === group).map(p => (
+                      <label key={p.bit} className="row" title={p.hint}>
+                        <input type="checkbox" checked={(draft.permissions & p.bit) !== 0} onChange={e => setDraft({ ...draft, permissions: e.target.checked ? draft.permissions | p.bit : draft.permissions & ~p.bit })} />
+                        <span>{p.name}</span>
+                      </label>
+                    ))}
+                  </Fragment>
                 ))}
               </div>
               <div className="buttons" style={{ justifyContent: 'space-between' }}>

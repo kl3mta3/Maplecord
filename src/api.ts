@@ -271,6 +271,16 @@ export class Api {
   postEvent(channelId: string, event: { title: string; note: string | null; day: string; at: string | null }) { return this.request<CalendarEventDto>('POST', `/api/channels/${channelId}/events`, event) }
   editEvent(eventId: string, event: { title: string; note: string | null; day: string; at: string | null }) { return this.request<CalendarEventDto>('PATCH', `/api/events/${eventId}`, event) }
   deleteEvent(eventId: string) { return this.request<void>('DELETE', `/api/events/${eventId}`) }
+  /** One event, if we can see its calendar. */
+  event(eventId: string) { return this.request<CalendarEventDto>('GET', `/api/events/${eventId}`) }
+  /** Our own answer to an event; null takes it back. */
+  answerEvent(eventId: string, answer: number | null) { return this.request<CalendarEventDto>('PUT', `/api/events/${eventId}/answer`, { answer }) }
+  inviteToEvent(eventId: string, userIds: string[]) { return this.request<CalendarEventDto>('POST', `/api/events/${eventId}/invited`, { userIds }) }
+  uninviteFromEvent(eventId: string, userId: string) { return this.request<CalendarEventDto>('DELETE', `/api/events/${eventId}/invited/${userId}`) }
+  /** Posts the event into text channels and forums: a message in each. */
+  postEventTo(eventId: string, channelIds: string[]) { return this.request<MessageDto[]>('POST', `/api/events/${eventId}/post`, { channelIds }) }
+  /** What we have been asked along to and have not answered. */
+  invitations() { return this.request<CalendarEventDto[]>('GET', '/api/me/invitations') }
   openDm(userId: string) { return this.request<DmChannelDto>('POST', `/api/dms/${userId}`) }
 
   /** Raw PNG body; returns the server path to put on a roll's item so the whole party sees the icon. */
