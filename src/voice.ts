@@ -65,6 +65,8 @@ interface Peer {
 interface Meter { ctx: AudioContext; analyser: AnalyserNode; buf: Float32Array<ArrayBuffer>; speaking: boolean; lastAbove: number; src: MediaStreamAudioSourceNode; gain?: GainNode }
 
 export const SPEAKING_THRESHOLD = 0.02
+/** Any sound at all from a bot, as opposed to the silence of one that is sending nothing. */
+const BOT_SOUND_THRESHOLD = 0.0002
 const SILENCE_HOLD_MS = 350
 
 export class VoiceEngine {
@@ -248,14 +250,15 @@ export class VoiceEngine {
    * (there was none to begin with, or the new one would not open); the choice is still remembered for next time.
    */
   async switchDevices(inputDeviceId: string | null, outputDeviceId: string | null): Promise<boolean> {
-    if (outputDeviceId !== this.outputDeviceId) {
-      this.outputDeviceId = outputDeviceId
-      for (const peer of this.peers.values()) {
-        const audio = peer.audio as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }
-        void audio.setSinkId?.(outputDeviceId ?? '').catch(() => {})
-        const ctx = peer.meter?.gain ? peer.meter.ctx as AudioContext & { setSinkId?: (id: string) => Promise<void> } : null
-        void ctx?.setSinkId?.(outputDeviceId ?? '').catch(() => {})
-      }
+    // Done again even when it is the device already chosen: choosing it again is how someone says it is not playing there.
+    this.outputDeviceId = outputDeviceId
+    for (const [id, peer] of this.peers) {
+      const audio = peer.audio as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }
+      void audio.setSinkId?.(outputDeviceId ?? '').catch(() => {})
+      // Which way each person is played depends on whether a device was chosen (see applyAudio).
+      this.applyAudio(id, peer)
+      const ctx = peer.meter?.gain ? peer.meter.ctx as AudioContext & { setSinkId?: (id: string) => Promise<void> } : null
+      void ctx?.setSinkId?.(outputDeviceId ?? '').catch(() => {})
     }
     if (inputDeviceId === this.inputDeviceId) return true
     this.inputDeviceId = inputDeviceId
@@ -586,6 +589,7 @@ export class VoiceEngine {
     this.silencedPeers.clear()
     this.musicPeers.clear()
     this.caps.clear(); this.capSeen.clear(); this.overCap.clear()
+    this.botPeers.clear()
     // With push to talk on, nothing is sent until the key is held, from the first moment of the next call.
     this.sending = !this.push
     this.events.speaking(null, false)
@@ -620,6 +624,16 @@ export class VoiceEngine {
   /** Says whether someone in the call is a bot in a P2P call. It counts for a connection made after this. */
   setPeerMusic(connectionId: string, music: boolean) {
     if (music) this.musicPeers.add(connectionId); else this.musicPeers.delete(connectionId)
+  }
+
+  // ---- A bot's light ----
+  // A person's light comes on when they are as loud as someone talking. What a bot sends is often quieter than that
+  // (music turned down, a soft passage), so its light comes on whenever it is sending any sound at all.
+  private botPeers = new Set<string>()
+
+  /** Whether someone in the call is a bot. */
+  setPeerBot(connectionId: string, bot: boolean) {
+    if (bot) this.botPeers.add(connectionId); else this.botPeers.delete(connectionId)
   }
 
   // ---- A bot's sound limit ----
@@ -693,7 +707,11 @@ export class VoiceEngine {
     // Either way only while the context is allowed to make a sound: a phone stops one whenever it likes (a call, an
     // alarm, another app's sound), and then the element at its own volume beats silence. (See makeMeter: this is
     // looked at again whenever the context stops or starts.)
-    const throughGain = meter?.ctx.state === 'running' && (want.volume > 1 || (want.volume < 1 && elementVolumeIgnored()))
+    //
+    // And the same again when an output device other than the system's own has been chosen. A sound element playing
+    // someone's voice takes the device it is told, says it is on it, and goes on playing on the system's default one
+    // (measured in the desktop app, 2026-10-12); an audio context told the device does play there.
+    const throughGain = meter?.ctx.state === 'running' && (want.volume > 1 || !!this.outputDeviceId || (want.volume < 1 && elementVolumeIgnored()))
     if (!want.muted && throughGain && meter) {
       // An audio element cannot go above 100%, so louder than that is played through a gain node instead. The
       // element stays attached but silent: Chromium only feeds a remote stream to Web Audio while one is playing it.
@@ -718,6 +736,7 @@ export class VoiceEngine {
     this.silencedPeers.delete(connectionId)
     this.musicPeers.delete(connectionId)
     this.caps.delete(connectionId); this.capSeen.delete(connectionId); this.overCap.delete(connectionId)
+    this.botPeers.delete(connectionId)
     this.refused.delete(connectionId)
     this.dropPeer(connectionId)
   }
@@ -847,7 +866,7 @@ export class VoiceEngine {
     this.events.level(id, Math.min(1, rms * 4))
     const now = Date.now()
     // Our own light is set by setTalking, so that it shows exactly when our voice is being sent.
-    if (rms >= (id === null ? this.gateThreshold : SPEAKING_THRESHOLD)) {
+    if (rms >= (id === null ? this.gateThreshold : this.botPeers.has(id) ? BOT_SOUND_THRESHOLD : SPEAKING_THRESHOLD)) {
       m.lastAbove = now
       if (!m.speaking) { m.speaking = true; if (id !== null) this.events.speaking(id, true) }
     } else if (m.speaking && now - m.lastAbove > SILENCE_HOLD_MS) {

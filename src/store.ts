@@ -2277,6 +2277,7 @@ export function useMaplecord() {
       if (p.connectionId === voiceHub.connectionId) continue
       const prefs = settings.users?.[p.userId] ?? {}
       voiceEngine.setPeerAudio(p.connectionId, prefs.volume ?? 1, !!prefs.muted)
+      voiceEngine.setPeerBot(p.connectionId, !!p.bot)
     }
   }, [settings.users, voiceEngine, voiceHub, voicePeers])
 
