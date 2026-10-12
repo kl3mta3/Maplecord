@@ -267,4 +267,5 @@ export interface QrDto { size: number; modules: string }
 export interface FriendLinkDto { code: string; url: string; qr: QrDto }
 /** Whose friend link a code is, and how things stand with them. */
 export interface FriendLinkOwnerDto { user: UserDto; state: 'self' | 'friends' | 'asked' | 'open' }
-export interface DmChannelDto { channelId: string; other: UserDto; online: boolean; createdAt: string; dnd?: boolean; idle?: boolean }
+/** `lastAt`: when the newest message in it was written; missing when nothing has been said in it yet. */
+export interface DmChannelDto { channelId: string; other: UserDto; online: boolean; createdAt: string; dnd?: boolean; idle?: boolean; lastAt?: string | null }

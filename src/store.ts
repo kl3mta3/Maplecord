@@ -113,6 +113,12 @@ export const p2pMedia = (messages: MessageDto[]): MediaItem[] => messages
 /** A file on a P2P message, as the screen shows it: whether this device has it, is fetching it, or could not find it. */
 export interface P2PFileView { state: 'have' | 'fetching' | 'nobody' | 'relay'; got: number; url?: string }
 
+/** Direct conversations with the one written in last at the top; ones with nothing said yet keep their order below. */
+const newestFirst = (list: DmChannelDto[]) => {
+  const at = (d: DmChannelDto) => (d.lastAt ? Date.parse(d.lastAt) || 0 : 0)
+  return [...list].sort((a, b) => at(b) - at(a))
+}
+
 export function useMaplecord() {
   const settingsRef = useRef<Settings>(loadSettings())
   const [settings, setSettingsState] = useState<Settings>(settingsRef.current)
@@ -331,6 +337,8 @@ export function useMaplecord() {
   const streamRulesRef = useRef<StreamSettingsDto | null>(null)
   /** How many people are watching each stream in the voice channel we are in, by the sharer's connection. */
   const [viewerCounts, setViewerCounts] = useState<Record<string, number>>({})
+  /** How many were watching our own stream when we were last told, to hear the number change. */
+  const ownViewers = useRef(0)
   const stopShareRef = useRef<(reason?: string) => Promise<void>>(async () => {})
   const [streamEngine] = useState(() => new StreamEngine({
     signal: (target, kind, payload) => voiceHub.streamSignal(target, kind, payload),
@@ -619,6 +627,8 @@ export function useMaplecord() {
     }
     await hub.connect({
       MessageReceived: m => {
+        // A direct conversation that was just written in goes to the top of the list.
+        if (!m.ephemeral) setDms(ds => (ds.some(d => d.channelId === m.channelId) ? newestFirst(ds.map(d => (d.channelId === m.channelId ? { ...d, lastAt: m.createdAt } : d))) : ds))
         if (!m.ephemeral && findChannel(m.channelId)?.channel.directSince && findChannel(m.channelId)?.guild) void keep(p2pBox(settingsRef.current.user?.id, m.channelId), m.id, m.createdAt, { server: m }).catch(() => {})
         if (selected.current.channel === m.channelId) {
           // While a page from the past is on screen, what is said now is not put below it: there would be a gap between.
@@ -678,7 +688,7 @@ export function useMaplecord() {
         setFriends(fr => ({ friends: fr.friends.map(mark), incoming: fr.incoming.map(mark), outgoing: fr.outgoing.map(mark) }))
         setDms(ds => ds.map(d => (d.other.id === userId ? { ...d, online } : d)))
       },
-      DmOpened: dm => setDms(ds => (ds.some(d => d.channelId === dm.channelId) ? ds : [dm, ...ds])),
+      DmOpened: dm => setDms(ds => (ds.some(d => d.channelId === dm.channelId) ? ds : [{ ...dm, lastAt: dm.lastAt ?? new Date().toISOString() }, ...ds])),
       // Someone changed how they appear: update every place we hold a copy of them.
       UserUpdated: (u: UserDto) => {
         const look = { avatarUrl: u.avatarUrl, displayName: u.displayName ?? null, nameFont: u.nameFont ?? null, nameColor: u.nameColor ?? null, nameColor2: u.nameColor2 ?? null, decoration: u.decoration ?? null, tag: u.tag ?? null }
@@ -922,7 +932,14 @@ export function useMaplecord() {
       // To a sharer this names a viewer who left; to a viewer it names a sharer whose stream is over.
       StreamWatchEnded: id => { streamEngine.viewerLeft(id); streamEngine.unwatch(id) },
       StreamSignalReceived: (from, kind, payload) => { void streamEngine.signal(from, kind, payload) },
-      StreamViewersChanged: (id, viewers) => setViewerCounts(counts => ({ ...counts, [id]: viewers })),
+      StreamViewersChanged: (id, viewers) => {
+        // The stream we are sharing: one sound when someone starts watching it, another when someone stops.
+        if (id === voiceHub.connectionId) {
+          if (streamEngine.localStream && viewers !== ownViewers.current) playSound(viewers > ownViewers.current ? 'watch' : 'unwatch', settingsRef.current.soundProfile, settingsRef.current.soundEnabled)
+          ownViewers.current = viewers
+        }
+        setViewerCounts(counts => ({ ...counts, [id]: viewers }))
+      },
       StreamEnded: (id, reason) => {
         if (id === voiceHub.connectionId) { streamEngine.stopSharing(); if (reason) setError(reason) }
         else streamEngine.unwatch(id)
@@ -1001,7 +1018,7 @@ export function useMaplecord() {
   const openDm = useCallback(async (userId: string) => {
     await run(async () => {
       const dm = await api.openDm(userId)
-      setDms(ds => (ds.some(d => d.channelId === dm.channelId) ? ds : [dm, ...ds]))
+      setDms(ds => (ds.some(d => d.channelId === dm.channelId) ? ds : [{ ...dm, lastAt: dm.lastAt ?? new Date().toISOString() }, ...ds]))
       dmsRef.current = dmsRef.current.some(d => d.channelId === dm.channelId) ? dmsRef.current : [dm, ...dmsRef.current]
       setHome(true)
       setSelectedChannelId(dm.channelId)
@@ -1680,7 +1697,7 @@ export function useMaplecord() {
       const meta = await api.meta(settingsRef.current.serverUrl)
       const link = meta?.inviteBase ? meta.inviteBase + invite.code : `invite code ${invite.code}`
       const dm = await api.openDm(userId)
-      setDms(ds => (ds.some(d => d.channelId === dm.channelId) ? ds : [dm, ...ds]))
+      setDms(ds => (ds.some(d => d.channelId === dm.channelId) ? ds : [{ ...dm, lastAt: dm.lastAt ?? new Date().toISOString() }, ...ds]))
       dmsRef.current = dmsRef.current.some(d => d.channelId === dm.channelId) ? dmsRef.current : [dm, ...dmsRef.current]
       await hub.sendMessage(dm.channelId, `Join me on ${name}: ${link}`, null)
       setError(`Invite to ${name} sent.`)
@@ -1921,6 +1938,7 @@ export function useMaplecord() {
     catch (e) { media.getTracks().forEach(t => t.stop()); throw e }
     // A new stream starts with nobody watching, whatever the last one ended on.
     const own = voiceHub.connectionId
+    ownViewers.current = 0
     if (own) setViewerCounts(counts => ({ ...counts, [own]: 0 }))
     try { await streamEngine.start(media, kind, quality, pass) }
     catch {
@@ -2185,7 +2203,7 @@ export function useMaplecord() {
     if (callRef.current) return
     await run(async () => {
       const dm = await api.openDm(userId)
-      setDms(ds => (ds.some(d => d.channelId === dm.channelId) ? ds : [dm, ...ds]))
+      setDms(ds => (ds.some(d => d.channelId === dm.channelId) ? ds : [{ ...dm, lastAt: dm.lastAt ?? new Date().toISOString() }, ...ds]))
       dmsRef.current = dmsRef.current.some(d => d.channelId === dm.channelId) ? dmsRef.current : [dm, ...dmsRef.current]
       if (voiceRef.current) await leaveVoice()
       // Until this call's own connection details are in, nothing here may connect any way but through a relay.

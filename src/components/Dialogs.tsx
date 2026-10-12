@@ -283,17 +283,23 @@ export function CreateChannelDialog({ categories, onSubmit, onClose, initialType
   const [direct, setDirect] = useState(false)
   const group = type === ChannelType.Category ? false : !!groups.find(c => c.id === parent)?.directSince
   const p2p = direct || group || allDirect
+  // A full P2P server has no forums and no calendars: both are kept by the server.
+  const kinds: { type: number; label: string; what?: string }[] = [
+    { type: ChannelType.Text, label: '# Text' },
+    ...(allDirect ? [] : [{ type: ChannelType.Forum, label: '☰ Forum', what: 'A list of posts with titles; each has its own thread.' }]),
+    { type: ChannelType.Gallery, label: '🖼 Gallery', what: 'Posts are pictures with a title; what is said about one is in its thread.' },
+    ...(allDirect ? [] : [{ type: ChannelType.Calendar, label: '📅 Calendar', what: 'A month of days with events on them.' }]),
+    { type: ChannelType.Voice, label: '🔊 Voice' },
+    { type: ChannelType.Category, label: 'Category', what: 'A group that holds channels.' },
+  ]
   const submit = () => { if (name.trim()) { onSubmit(name.trim(), type, type === ChannelType.Category ? null : parent || null, p2p); onClose() } }
   return (
     <Dialog title={type === ChannelType.Category ? 'Create category' : 'Create channel'} onClose={onClose}>
-      <div className="row">
-        <label className="row"><input type="radio" checked={type === ChannelType.Text} onChange={() => setType(ChannelType.Text)} /> # Text</label>
-        {!allDirect && <label className="row" title="A list of posts with titles; each has its own thread"><input type="radio" checked={type === ChannelType.Forum} onChange={() => { setType(ChannelType.Forum); setDirect(false) }} /> ☰ Forum</label>}
-        <label className="row" title="Posts are pictures with a title; what is said about one is in its thread"><input type="radio" checked={type === ChannelType.Gallery} onChange={() => setType(ChannelType.Gallery)} /> 🖼 Gallery</label>
-        {!allDirect && <label className="row" title="A month of days with events on them"><input type="radio" checked={type === ChannelType.Calendar} onChange={() => { setType(ChannelType.Calendar); setDirect(false) }} /> 📅 Calendar</label>}
-        <label className="row"><input type="radio" checked={type === ChannelType.Voice} onChange={() => setType(ChannelType.Voice)} /> 🔊 Voice</label>
-        <label className="row"><input type="radio" checked={type === ChannelType.Category} onChange={() => setType(ChannelType.Category)} /> Category</label>
-      </div>
+      <div className="muted">Kind</div>
+      <select value={type} aria-label="Kind" onChange={e => { const kind = Number(e.target.value); setType(kind); if (kind === ChannelType.Forum || kind === ChannelType.Calendar) setDirect(false) }}>
+        {kinds.map(k => <option key={k.type} value={k.type}>{k.label}</option>)}
+      </select>
+      {kinds.find(k => k.type === type)?.what && <div className="muted">{kinds.find(k => k.type === type)!.what}</div>}
       <div className="muted">Name</div>
       <input autoFocus value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()} />
       {type !== ChannelType.Category && (

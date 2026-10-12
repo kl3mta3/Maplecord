@@ -33,7 +33,7 @@ export function OverlaySettingsDialog({ settings, onChange, packs, onOpenSounds,
         <select className="grow" value={chosen} onChange={e => onChange({ soundProfile: e.target.value })}>
           {packs.map(p => <option key={p}>{p}</option>)}
         </select>
-        {desktop && <button className="subtle" onClick={onOpenSounds} title="Each folder in here is a pack: roll.wav, win.wav, lose.wav, you100.wav, one.wav, sixtyNine.wav, they100.wav, emo.wav, join.wav, leave.wav, message.wav, drop.wav, removed.wav">Open sounds folder</button>}
+        {desktop && <button className="subtle" onClick={onOpenSounds} title="Each folder in here is a pack: roll.wav, win.wav, lose.wav, you100.wav, one.wav, sixtyNine.wav, they100.wav, emo.wav, join.wav, leave.wav, message.wav, drop.wav, removed.wav, watch.wav, unwatch.wav">Open sounds folder</button>}
         {desktop && <button className="subtle" onClick={onReloadSounds}>Reload</button>}
       </div>
       {desktop && <div className="muted">Add your own: put a folder of sounds in the sounds folder and press Reload. They stay on this computer.</div>}

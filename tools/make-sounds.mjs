@@ -140,6 +140,19 @@ function write(name, buf) {
   thump(b, { at: 0.2, dur: 0.12, gain: 0.5, tone: 0.05 })
   write('removed', b)
 }
+// watch: someone started watching the stream you are sharing. One soft note sliding up: a seat being taken.
+{
+  const b = buffer(0.34)
+  tone(b, { at: 0, dur: 0.3, freq: note(64), slideTo: note(71), gain: 0.45, shape: 'soft', attack: 0.02 })
+  tone(b, { at: 0.12, dur: 0.2, freq: note(76), gain: 0.16 })
+  write('watch', b)
+}
+// unwatch: someone stopped watching it. The same note sliding back down.
+{
+  const b = buffer(0.34)
+  tone(b, { at: 0, dur: 0.3, freq: note(71), slideTo: note(64), gain: 0.45, shape: 'soft', attack: 0.02 })
+  write('unwatch', b)
+}
 // leave: a door closing: one dull thud and a latch
 {
   const b = buffer(0.45)
