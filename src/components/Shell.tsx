@@ -346,10 +346,11 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           entries: invitable.map(x => ({ kind: 'item' as const, label: x.guild.name, onClick: () => { void store.inviteToServer(x.guild.id, userId) } })),
         })
       }
-      entries.push({ kind: 'sep' })
-      entries.push({ kind: 'item', label: 'Mute their voice', checked: !!prefs.muted, onClick: () => store.setUserPrefs(userId, { muted: !prefs.muted }) })
-      entries.push({ kind: 'slider', label: 'Voice volume', min: 0, max: 200, step: 5, value: Math.round((prefs.volume ?? 1) * 100), format: v => v + '%', onChange: v => store.setUserPrefs(userId, { volume: v / 100 }) })
     }
+    // How loud this person, or this bot, is for us in voice, and whether we hear them at all. It changes nothing for anyone else.
+    entries.push({ kind: 'sep' })
+    entries.push({ kind: 'item', label: isBot ? 'Mute it for me' : 'Mute their voice', checked: !!prefs.muted, onClick: () => store.setUserPrefs(userId, { muted: !prefs.muted }) })
+    entries.push({ kind: 'slider', label: 'Voice volume', min: 0, max: 200, step: 5, value: Math.round((prefs.volume ?? 1) * 100), format: v => v + '%', onChange: v => store.setUserPrefs(userId, { volume: v / 100 }) })
     entries.push({ kind: 'item', label: 'Ignore', checked: !!prefs.ignored, onClick: () => store.setUserPrefs(userId, { ignored: !prefs.ignored }) })
     const isBlocked = store.blocked.some(u => u.id === userId)
     if (!isBot) entries.push({ kind: 'item', label: isBlocked ? 'Unblock' : 'Block', icon: '🚫', danger: !isBlocked, onClick: () => { void store.setBlocked(userId, !isBlocked) } })

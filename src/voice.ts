@@ -547,6 +547,22 @@ export class VoiceEngine {
     audio.autoplay = true
     audio.style.display = 'none'
     document.body.appendChild(audio)
+    // Nothing here ever pauses someone's sound (not hearing them is done by muting). A phone does, when something
+    // else takes its sound for a moment, and does not always start it again: so it is started again here, and tried
+    // for a minute if the phone is not ready to. (An element that has been let go of has no stream and is left alone.)
+    // (Not without end, though: a phone that keeps pausing it is left to, after a few times in a row.)
+    let tries = 0, starts = 0, since = 0
+    const again = () => {
+      if (!audio.isConnected || !audio.srcObject || !audio.paused) { tries = 0; return }
+      audio.play().then(() => { tries = 0 }, () => { if (++tries < 30) window.setTimeout(again, 2000) })
+    }
+    audio.addEventListener('pause', () => {
+      const now = Date.now()
+      if (now - since > 20_000) { since = now; starts = 0 }
+      if (++starts > 5) return
+      tries = 0
+      window.setTimeout(again, 250)
+    })
     if (this.outputDeviceId && 'setSinkId' in audio) void (audio as HTMLAudioElement & { setSinkId(id: string): Promise<void> }).setSinkId(this.outputDeviceId).catch(() => {})
     return audio
   }
@@ -673,10 +689,12 @@ export class VoiceEngine {
     const chosen = this.wanted.get(connectionId) ?? { volume: 1, muted: false }
     const want = { volume: chosen.volume * this.master, muted: chosen.muted || this.deafened || this.silencedPeers.has(connectionId) || this.overCap.has(connectionId) }
     const meter = peer.meter
-    // An iPhone ignores the element's volume altogether (see volume.ts), so there quieter goes the same way as louder,
-    // as long as the context is allowed to make a sound; if it is not, full volume beats silence.
-    const quieterHere = want.volume < 1 && elementVolumeIgnored() && meter?.ctx.state === 'running'
-    if (!want.muted && (want.volume > 1 || quieterHere) && meter) {
+    // An iPhone ignores the element's volume altogether (see volume.ts), so there quieter goes the same way as louder.
+    // Either way only while the context is allowed to make a sound: a phone stops one whenever it likes (a call, an
+    // alarm, another app's sound), and then the element at its own volume beats silence. (See makeMeter: this is
+    // looked at again whenever the context stops or starts.)
+    const throughGain = meter?.ctx.state === 'running' && (want.volume > 1 || (want.volume < 1 && elementVolumeIgnored()))
+    if (!want.muted && throughGain && meter) {
       // An audio element cannot go above 100%, so louder than that is played through a gain node instead. The
       // element stays attached but silent: Chromium only feeds a remote stream to Web Audio while one is playing it.
       if (!meter.gain) {
@@ -791,6 +809,13 @@ export class VoiceEngine {
 
   private makeMeter(stream: MediaStream): Meter {
     const ctx = new AudioContext()
+    // Stopped by the phone, or started again: whoever is played through it is played the other way meanwhile (see
+    // applyAudio), and it is asked to carry on.
+    ctx.onstatechange = () => {
+      if (ctx.state === 'closed') return
+      for (const [id, peer] of this.peers) if (peer.meter?.ctx === ctx) this.applyAudio(id, peer)
+      if (ctx.state !== 'running') void ctx.resume().catch(() => { /* not until the phone lets it */ })
+    }
     const src = ctx.createMediaStreamSource(stream)
     const analyser = ctx.createAnalyser()
     analyser.fftSize = 512

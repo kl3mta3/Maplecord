@@ -115,9 +115,9 @@ export function WebhooksTab({ api, guildId, channels }: { api: Api; guildId: str
 /** Server settings: the bots that have been added to this server. Adding or removing one needs Manage Server. */
 export function ServerBotsTab({ api, guildId, canManage, onRoles, onManage, fullP2P = false, hasP2PChannels = false }: {
   api: Api; guildId: string; canManage: boolean
-  /** The kind of server decides the kind of bot: a full P2P server takes P2P bots only, any other ordinary bots only. */
+  /** A server takes the bots it has channels for. A full P2P server has only P2P channels, so P2P bots only. */
   fullP2P?: boolean
-  /** A server with P2P channels in it (and not a full P2P one) keeps its bots out of its voice channels. */
+  /** A server with P2P channels in it takes P2P bots; one that is not a full P2P server takes ordinary bots too. */
   hasP2PChannels?: boolean
   /** Opens the roles of one bot (by its member id), when the person may manage roles. */
   onRoles?: (botUserId: string) => void
@@ -143,7 +143,7 @@ export function ServerBotsTab({ api, guildId, canManage, onRoles, onManage, full
     await api.removeGuildApplication(guildId, appId)
     setBots(list => (list ?? []).filter(b => b.id !== appId))
   })
-  const addable = mine.filter(m => !!m.direct === fullP2P && !(bots ?? []).some(b => b.id === m.id))
+  const addable = mine.filter(m => (m.direct ? fullP2P || hasP2PChannels : !fullP2P) && !(bots ?? []).some(b => b.id === m.id))
 
   return (
     <div className="integrations">
@@ -155,7 +155,9 @@ export function ServerBotsTab({ api, guildId, canManage, onRoles, onManage, full
       <div className="muted">
         {fullP2P
           ? 'This is a full P2P server, so only P2P bots can be added to it. A P2P bot sees nothing until it is let into a channel (right-click the channel).'
-          : 'Only ordinary bots can be added to this server. A P2P bot is for a full P2P server.' + (hasP2PChannels ? ' This server has P2P channels, so its bots are kept out of its voice channels.' : '')}
+          : hasP2PChannels
+            ? 'This server has ordinary channels and P2P channels, so both kinds of bot can be added. An ordinary bot is only ever in the ordinary channels. A P2P bot is only ever in the P2P channels it is let into (right-click the channel).'
+            : 'Only ordinary bots can be added to this server. A P2P bot is for a server that has P2P channels.'}
       </div>
       {canManage && (
         <div className="row">
@@ -402,7 +404,7 @@ export function MyBots({ api }: { api: Api }) {
       <label className="row"><input type="checkbox" checked={direct} onChange={e => setDirect(e.target.checked)} /> <span>Make it a P2P bot</span></label>
       <div className="muted">
         {direct
-          ? 'A P2P bot connects straight to people\'s apps in the P2P channels it is let into, one channel at a time, in one full P2P server only. It has no slash commands, cannot read or post in ordinary channels, and each person is asked before their app connects to it. This cannot be changed after the bot is made.'
+          ? 'A P2P bot connects straight to people\'s apps in the P2P channels it is let into, one channel at a time, in one server only, which has to be one with P2P channels. It has no slash commands, cannot read or post in ordinary channels, and each person is asked before their app connects to it. This cannot be changed after the bot is made.'
           : 'An ordinary bot talks to the server: slash commands, messages in ordinary channels. It is never in a P2P channel, and cannot be added to a full P2P server. This cannot be changed after the bot is made.'}
       </div>
       <label className="row"><input type="checkbox" checked={inVoice} onChange={e => setInVoice(e.target.checked)} /> <span>{direct ? 'Let it join P2P voice channels' : 'Let it join voice channels'}</span></label>
