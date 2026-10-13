@@ -28,9 +28,12 @@ export const NAME_EFFECTS: EffectKind[] = [
     presets: [['#ff7ab8', '#a3195b'], ['#fde047', '#422006'], ['#7dd3fc', '#0c2a4a'], ['#86efac', '#052e16'], ['#ffffff', '#111111'], ['#fdba74', '#431407']] },
   { id: 'pop', label: 'Pop', colors: [{ label: 'Letters', usual: '#ffffff' }, { label: 'Behind', usual: '#22c55e' }],
     presets: [['#ffffff', '#22c55e'], ['#ffffff', '#ef4444'], ['#fde047', '#7c3aed'], ['#22d3ee', '#be185d'], ['#ffffff', '#3b82f6'], ['#fda4af', '#1e3a8a']] },
-  { id: 'gummy', label: 'Gummy', colors: [{ label: 'From', usual: '#ff8fd0' }, { label: 'To', usual: '#8fc5ff' }], angle: 90,
-    presets: [['#ff8fd0', '#8fc5ff'], ['#fda4af', '#f0abfc'], ['#fdba74', '#fb7185'], ['#bef264', '#4ade80'], ['#93c5fd', '#5eead4'], ['#d8b4fe', '#f0abfc']] },
-  { id: 'prism', label: 'Prism', angle: 90,
+  // A colour for each letter in turn; every few seconds the letters are squashed flat and spring back.
+  { id: 'gummy', label: 'Jelly',
+    colors: [{ label: 'Color 1', usual: '#f4a6c8' }, { label: 'Color 2', usual: '#9bd0f5' }, { label: 'Color 3', usual: '#c7a8f7' }, { label: 'Color 4', usual: '#a9e3a6' }, { label: 'Color 5', usual: '#f7c59f' }],
+    presets: [['#f4a6c8', '#9bd0f5', '#c7a8f7', '#a9e3a6', '#f7c59f'], ['#ff8fb1', '#ff6f91', '#ff9671', '#ffc75f', '#f9f871'], ['#ffb3ba', '#ffdfba', '#ffffba', '#baffc9', '#bae1ff'],
+      ['#a0e7e5', '#b4f8c8', '#fbe7c6', '#ffaebc', '#a0e7e5'], ['#cdb4db', '#ffc8dd', '#ffafcc', '#bde0fe', '#a2d2ff'], ['#d4a5ff', '#a5b4fc', '#93c5fd', '#a5f3fc', '#99f6e4']] },
+  { id: 'prism', label: 'Spectrum', angle: 90,
     colors: [{ label: 'Color 1', usual: '#f97316' }, { label: 'Color 2', usual: '#22c55e' }, { label: 'Color 3', usual: '#eab308' }, { label: 'Color 4', usual: '#ec4899' }, { label: 'Color 5', usual: '#6366f1' }],
     presets: [['#f97316', '#22c55e', '#eab308', '#ec4899', '#6366f1'], ['#ef4444', '#f97316', '#eab308', '#f97316', '#ef4444'], ['#22d3ee', '#818cf8', '#c084fc', '#f472b6', '#fb7185'],
       ['#4ade80', '#22d3ee', '#3b82f6', '#22d3ee', '#4ade80'], ['#fde68a', '#fca5a5', '#f0abfc', '#a5b4fc', '#99f6e4'], ['#7f1d1d', '#ef4444', '#fbbf24', '#ef4444', '#7f1d1d']] },
@@ -89,14 +92,17 @@ export function lookOf(a: { nameColor?: string | null; nameColor2?: string | nul
   }
 }
 
-/** The class and the values index.css draws a look with. `layered` = it needs the name's own text handed to it (a second copy is drawn behind). */
-export function effectCss(look: NameLook): { className: string; vars: Record<string, string>; layered: boolean } {
-  if (look.kind.id === 'solid') return { className: '', vars: look.plain ? {} : { color: look.colors[0]! }, layered: false }
+/**
+ * The class and the values index.css draws a look with. `layered` = it needs the name's own text handed to it (a
+ * second copy is drawn behind). `letters` = it is drawn a letter at a time, each letter in the next of these colours.
+ */
+export function effectCss(look: NameLook): { className: string; vars: Record<string, string>; layered: boolean; letters: string[] | null } {
+  if (look.kind.id === 'solid') return { className: '', vars: look.plain ? {} : { color: look.colors[0]! }, layered: false, letters: null }
   const vars: Record<string, string> = {}
   look.colors.forEach((c, i) => { vars[`--n${i + 1}`] = c })
   if (look.angle !== null) vars['--na'] = `${look.angle}deg`
   vars['--ng'] = look.colors.join(', ')
-  return { className: `fx fx-${look.kind.id}`, vars, layered: look.kind.id === 'gummy' || look.kind.id === 'aurora' }
+  return { className: `fx fx-${look.kind.id}`, vars, layered: look.kind.id === 'aurora', letters: look.kind.id === 'gummy' ? [...look.colors] : null }
 }
 
 /**

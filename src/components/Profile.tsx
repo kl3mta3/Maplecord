@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import lottie, { type AnimationItem } from 'lottie-web/build/player/lottie_light'
 import { NAME_FONTS, animationColors, assetUrl, decorationUrl, initials, nameLook, nameStyle, shownName, withAnimationColors, type Appearance } from '../profile'
 import { NameEffectEditor } from './NameEffects'
+import { nameContent } from './NameLetters'
 import type { Store } from '../store'
 import { effectFileProblem } from '../effectCheck'
 import { Permission, hasPermission, type DecorationDto, type RoleDto, type UserProfileDto } from '../types'
@@ -98,7 +99,7 @@ export function UserName({ who, label, roleColor, className, style, onClick, onC
   return (
     <>
       <span className={'uname' + (look.className ? ' ' + look.className : '') + (onClick ? ' clickable' : '') + (className ? ' ' + className : '')} style={{ ...look.style, ...style }}
-        data-text={look.text ? label : undefined} onClick={onClick} onContextMenu={onContextMenu}>{label}</span>
+        data-text={look.text ? label : undefined} aria-label={look.letters ? label : undefined} onClick={onClick} onContextMenu={onContextMenu}>{nameContent(label, look.letters)}</span>
       {who?.tag && <TagPill tag={who.tag} />}
     </>
   )
@@ -373,7 +374,7 @@ export function ProfileEditor({ store, onClose }: { store: Store; onClose: () =>
             <span>Fill and crop</span>
           </label>
         )}
-        <span className="muted">A Lottie file (.lottie or .json), {kind === 'avatar' ? 'square' : cropEffect ? 'any shape (it fills the card, cropped)' : '300 × 420 or that shape'}, up to 50 KB, drawn shapes only.{kind === 'effect' ? ' No background, it can hide at most 35% of the card at once, and nothing in it can stay over the picture and the name.' : ''}</span>
+        <span className="muted">A Lottie file (.lottie or .json), {kind === 'avatar' ? 'square' : cropEffect ? 'any shape (it fills the card, cropped)' : '300 × 420 or that shape'}, up to {kind === 'avatar' ? 50 : 100} KB, drawn shapes only.{kind === 'effect' ? ' No background, it can hide at most 35% of the card at once, and nothing in it can stay over the picture and the name.' : ''}</span>
         <input ref={input} type="file" accept=".lottie,.json,application/json" hidden onChange={e => { const f = e.target.files?.[0]; if (f) void animation(kind, f); e.target.value = '' }} />
       </div>
     )

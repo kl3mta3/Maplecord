@@ -26,7 +26,9 @@ check(neon.kind.id === 'neon' && same(neon.colors, ['#ffffff', '#a855f7']) && ef
 const prism = lookOf({ nameColor: '#111111', nameColor2: '#222222', nameEffect: 'prism;10;#333333' })
 check(same(prism.colors, ['#111111', '#222222', '#333333', '#ec4899', '#6366f1']) && effectCss(prism).vars['--na'] === '10deg', 'the colours beyond two come with the effect')
 check(lookOf({ nameColor: '#ff0000', nameEffect: 'made-up' }).kind.id === 'solid' && lookOf({ nameColor: 'red', nameColor2: '<b>' }).plain, 'an effect this app does not know, or a colour that is not one, is drawn plainly')
-check(effectCss(lookOf({ nameEffect: 'gummy' })).layered && effectCss(lookOf({ nameEffect: 'aurora' })).layered && !effectCss(neon).layered, 'the two that draw a second copy behind say so')
+check(effectCss(lookOf({ nameEffect: 'aurora' })).layered && !effectCss(neon).layered && !effectCss(lookOf({ nameEffect: 'gummy' })).layered, 'the one that draws a second copy behind says so')
+const jelly = effectCss(lookOf({ nameColor: '#111111', nameColor2: '#222222', nameEffect: 'gummy;;#333333' }))
+check(same(jelly.letters, ['#111111', '#222222', '#333333', '#a9e3a6', '#f7c59f']) && effectCss(neon).letters === null && effectCss(lookOf(null)).letters === null, 'the one drawn a letter at a time gives the colours the letters take in turn')
 
 console.log('Choosing in the editor')
 check(same(chooseEffect('neon', { nameColor: '#00ff00' }), { nameColor: '#00ff00', nameColor2: '#a855f7', nameEffect: 'neon' }), 'a colour they have stays; the rest are the effect\'s')

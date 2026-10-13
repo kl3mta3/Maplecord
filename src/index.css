@@ -151,7 +151,8 @@ a.filechip:hover { border-color: var(--accent2); }
 .message .system { color: var(--muted); font-style: italic; }
 .message.ephemeral { background: rgba(0,221,255,0.06); }
 .composer { display: flex; gap: 8px; padding: 6px 12px 12px; align-items: flex-end; }
-.composer textarea { flex: 1; resize: none; max-height: 120px; min-height: 38px; }
+/* The message box is as tall as what is in it (Shell sets its height), up to this much; past that it scrolls. */
+.composer textarea { flex: 1; resize: none; max-height: min(45vh, 360px); min-height: 38px; overflow-y: auto; }
 .typing { padding: 0 18px 2px; height: 16px; }
 .error { margin: 2px 12px; padding: 6px 10px; background: rgba(255,0,140,0.2); border-radius: 4px; display: flex; gap: 8px; align-items: center; }
 .error .grow { white-space: pre-wrap; }
@@ -423,7 +424,7 @@ html.overlay-mode, html.overlay-mode body, html.overlay-mode #root { background:
 
 /* Name effects (see nameEffects.ts). --n1 to --n5 are the person's colours, --ng all of them as a list, --na the angle. */
 .uname.fx { position: relative; isolation: isolate; }
-.fx-gradient, .fx-prism, .fx-gummy, .fx-chrome, .fx-aurora, .fx-shimmer { -webkit-background-clip: text; background-clip: text; color: transparent; }
+.fx-gradient, .fx-prism, .fx-chrome, .fx-aurora, .fx-shimmer { -webkit-background-clip: text; background-clip: text; color: transparent; }
 .fx-gradient, .fx-prism, .fx-aurora { background-image: linear-gradient(var(--na, 90deg), var(--ng)); }
 .fx-neon { color: var(--n1); text-shadow: 0 0 .22em var(--n2), 0 0 .55em var(--n2), 0 0 1em var(--n2); }
 .fx-toon { color: var(--n1); text-shadow: -1px -1px 0 var(--n2), 1px -1px 0 var(--n2), -1px 1px 0 var(--n2), 1px 1px 0 var(--n2), 0 -1px 0 var(--n2), -1px 0 0 var(--n2), 1px 0 0 var(--n2), 0 2px 0 var(--n2), 1px 2px 0 var(--n2), -1px 2px 0 var(--n2); }
@@ -431,18 +432,72 @@ html.overlay-mode, html.overlay-mode body, html.overlay-mode #root { background:
 .fx-shadow { color: var(--n1); text-shadow: 0 .14em .1em var(--n2); }
 .fx-glitch { color: var(--n1); text-shadow: -.07em 0 var(--n2), .07em 0 var(--n3); }
 .fx-outline { color: transparent; -webkit-text-stroke: max(.6px, .04em) var(--n1); }
-/* A shine across the top half over the colours, and a darker copy of the name just under it, like something moulded. */
-.fx-gummy { background-image: linear-gradient(180deg, rgba(255, 255, 255, .45) 0%, rgba(255, 255, 255, 0) 42%), linear-gradient(var(--na, 90deg), var(--ng)); }
+/* Jelly: each letter is a piece of its own (see NameLetters) in its own colour, with a darker edge of that colour under it, like something moulded. */
+.fx-gummy { color: var(--n1); white-space: nowrap; }
+.fx-gummy .fxl { display: inline-block; white-space: pre; transform-origin: 50% 88%; text-shadow: 0 .07em 0 color-mix(in srgb, currentColor 58%, #000); }
 /* The copy behind is not given a place of its own: it then sits exactly where the name's own letters begin. */
-.fx-gummy::before { content: attr(data-text); position: absolute; z-index: -1; color: transparent; text-shadow: 0 .07em 0 color-mix(in srgb, var(--n1) 60%, #000); white-space: nowrap; pointer-events: none; }
 .fx-aurora::before { content: attr(data-text); position: absolute; z-index: -1; color: transparent; text-shadow: 0 0 .28em color-mix(in srgb, var(--n1) 75%, transparent), 0 0 .6em color-mix(in srgb, var(--n2) 60%, transparent); white-space: nowrap; pointer-events: none; }
-.fx-chrome { background-image: linear-gradient(180deg, #fff 0%, var(--n1) 40%, color-mix(in srgb, var(--n1), #000 60%) 50%, color-mix(in srgb, var(--n1), #fff 35%) 62%, #fff 100%); }
-/* A band of the second colour across the first. It only moves under the pointer and on a profile card. */
+/* A band of the second colour across the first. */
 .fx-shimmer { background-image: linear-gradient(110deg, var(--n1) 0%, var(--n1) 42%, var(--n2) 50%, var(--n1) 58%, var(--n1) 100%); background-size: 250% 100%; background-position: 50% 0; }
+
+/*
+ * The ones that move. A name moves all the time on a profile card and in the profile editor, and elsewhere while
+ * the pointer is on it or on the message or member row it is in: a long chat full of names that never stop moving
+ * would be drawn again many times a second for nothing. Nothing moves for someone whose system asks for less motion.
+ * Solid, Gradient, Toon, Outline and Shadow are still by nature.
+ */
 @media (prefers-reduced-motion: no-preference) {
-  .fx-shimmer:hover, .profilecard .fx-shimmer, .fxhead .fx-shimmer { animation: fx-sweep 2.4s linear infinite; }
+  /* Neon: it burns steadily, then flickers like a sign with a loose wire. */
+  :is(.profilecard, .preview, .fxeditor) .fx-neon, :is(.message, .member):hover .fx-neon, .fx-neon:hover { animation: fx-neon 3.6s linear infinite; }
+  /* Pop: the stack under the letters grows and the name swells a little with it. (A name has to be a box of its own to be scaled.) */
+  :is(.profilecard, .preview, .fxeditor) .fx-pop, :is(.message, .member):hover .fx-pop, .fx-pop:hover { display: inline-block; animation: fx-pop 1.6s ease-in-out infinite; }
+  /* Glitch: the letters jump, and the two ghosts with them. */
+  :is(.profilecard, .preview, .fxeditor) .fx-glitch, :is(.message, .member):hover .fx-glitch, .fx-glitch:hover { animation: fx-glitch 1.6s steps(1) infinite; }
+  /* Spectrum, Jelly and Aurora: the colours travel along the name. While they travel they run left to right, whatever angle they rest at. */
+  /* Spectrum: the colours run through the name like the lights on a keyboard, a part of them showing at a time. */
+  :is(.profilecard, .preview, .fxeditor) .fx-prism, :is(.message, .member):hover .fx-prism, .fx-prism:hover { background-image: linear-gradient(90deg, var(--ng), var(--n1)); background-size: 300% 100%; animation: fx-flow-wide 2.2s linear infinite; }
+  /* Jelly: the letters are squashed flat, spring up thin, and settle; then rest a while. It starts with the squash, so a pointer arriving sees it at once. */
+  :is(.profilecard, .preview, .fxeditor) .fx-gummy .fxl, :is(.message, .member):hover .fx-gummy .fxl, .fx-gummy:hover .fxl { animation: fx-jelly 4s ease-in-out infinite; }
+  :is(.profilecard, .preview, .fxeditor) .fx-aurora, :is(.message, .member):hover .fx-aurora, .fx-aurora:hover { background-image: linear-gradient(90deg, var(--ng), var(--n1)); background-size: 200% 100%; animation: fx-flow 7s linear infinite; }
+  :is(.profilecard, .preview, .fxeditor) .fx-aurora::before, :is(.message, .member):hover .fx-aurora::before, .fx-aurora:hover::before { animation: fx-breathe 3.5s ease-in-out infinite; }
+  /* Chrome: a line of light crosses the metal. */
+  :is(.profilecard, .preview, .fxeditor) .fx-chrome, :is(.message, .member):hover .fx-chrome, .fx-chrome:hover { animation: fx-glint 2.8s ease-in-out infinite; }
+  /* Shimmer: the band sweeps across. */
+  :is(.profilecard, .preview, .fxeditor) .fx-shimmer, :is(.message, .member):hover .fx-shimmer, .fx-shimmer:hover { animation: fx-sweep 2.4s linear infinite; }
 }
+/* Chrome's light is a second picture over the metal, kept off to one side until it is sent across. */
+.fx-chrome { background-image: linear-gradient(110deg, transparent 42%, rgba(255, 255, 255, .95) 50%, transparent 58%),
+    linear-gradient(180deg, #fff 0%, var(--n1) 40%, color-mix(in srgb, var(--n1), #000 60%) 50%, color-mix(in srgb, var(--n1), #fff 35%) 62%, #fff 100%);
+  background-size: 250% 100%, 100% 100%; background-repeat: no-repeat; background-position: 140% 0, 0 0; }
 @keyframes fx-sweep { from { background-position: 120% 0; } to { background-position: -20% 0; } }
+@keyframes fx-flow { from { background-position: 0% 0; } to { background-position: 200% 0; } }
+@keyframes fx-flow-wide { from { background-position: 0% 0; } to { background-position: 150% 0; } }
+@keyframes fx-glint { 0%, 55% { background-position: 140% 0, 0 0; } 100% { background-position: -40% 0, 0 0; } }
+@keyframes fx-neon {
+  0%, 4%, 7%, 11%, 15%, 21%, 100% { color: var(--n1); text-shadow: 0 0 .22em var(--n2), 0 0 .55em var(--n2), 0 0 1em var(--n2); }
+  2%, 9%, 18% { color: var(--n2); text-shadow: 0 0 .1em var(--n2), 0 0 .25em var(--n2); }
+}
+@keyframes fx-pop {
+  0%, 100% { transform: scale(1); text-shadow: 1px 1px 0 var(--n2), 2px 2px 0 var(--n2); }
+  50% { transform: scale(1.05); text-shadow: 1px 1px 0 var(--n2), 2px 2px 0 var(--n2), 3px 3px 0 var(--n2), 4px 4px 0 var(--n2); }
+}
+@keyframes fx-jelly {
+  0%, 26%, 100% { transform: scale(1, 1); }
+  5% { transform: scale(1.22, .5); }
+  11% { transform: scale(.78, 1.3); }
+  16% { transform: scale(1.1, .88); }
+  21% { transform: scale(.96, 1.05); }
+}
+@keyframes fx-breathe { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+@keyframes fx-glitch {
+  0%, 100% { left: 0; top: 0; text-shadow: -.07em 0 var(--n2), .07em 0 var(--n3); }
+  8% { left: -.06em; top: .02em; text-shadow: .1em 0 var(--n2), -.1em 0 var(--n3); }
+  12% { left: .05em; top: -.03em; text-shadow: -.14em .03em var(--n2), .04em -.03em var(--n3); }
+  16% { left: 0; top: 0; text-shadow: -.07em 0 var(--n2), .07em 0 var(--n3); }
+  58% { left: .04em; top: 0; text-shadow: .12em -.02em var(--n2), -.06em .04em var(--n3); }
+  62% { left: -.05em; top: .03em; text-shadow: -.03em 0 var(--n2), .15em 0 var(--n3); }
+  66% { left: 0; top: 0; text-shadow: -.07em 0 var(--n2), .07em 0 var(--n3); }
+}
 
 /* Choosing one, in the profile editor. */
 .fxeditor { display: flex; flex-direction: column; gap: 6px; }

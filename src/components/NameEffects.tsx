@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { NAME_EFFECTS, chooseEffect, effectCss, lookOf, withLook, type EffectId, type NameLook } from '../nameEffects'
 import { nameStyle } from '../profile'
+import { nameContent } from './NameLetters'
 
 type Colors = { nameColor: string | null; nameColor2: string | null; nameEffect: string | null }
 
@@ -8,8 +9,8 @@ type Colors = { nameColor: string | null; nameColor2: string | null; nameEffect:
 export function NameSample({ text, look, font }: { text: string; look: NameLook; font: string | null }) {
   const css = effectCss(look)
   return (
-    <span className={'uname ' + css.className} data-text={css.layered ? text : undefined}
-      style={{ ...nameStyle({ nameFont: font, nameColor: null, nameColor2: null }), ...css.vars } as CSSProperties}>{text}</span>
+    <span className={'uname ' + css.className} data-text={css.layered ? text : undefined} aria-label={css.letters ? text : undefined}
+      style={{ ...nameStyle({ nameFont: font, nameColor: null, nameColor2: null }), ...css.vars } as CSSProperties}>{nameContent(text, css.letters)}</span>
   )
 }
 

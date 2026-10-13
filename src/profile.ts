@@ -93,11 +93,12 @@ export function nameStyle(a: Pick<Appearance, 'nameFont' | 'nameColor' | 'nameCo
  * role colour is given, that colour alone, since it shows rank there. `text` = the element must carry the name as
  * its data-text too, because the effect draws a second copy of it behind.
  */
-export function nameLook(a: Pick<Appearance, 'nameFont' | 'nameColor' | 'nameColor2' | 'nameEffect'> | null | undefined, roleColor?: string | null): { className: string; style: CSSProperties; text: boolean } {
+export function nameLook(a: Pick<Appearance, 'nameFont' | 'nameColor' | 'nameColor2' | 'nameEffect'> | null | undefined, roleColor?: string | null): { className: string; style: CSSProperties; text: boolean; letters: string[] | null } {
   const font = nameStyle(a ? { nameFont: a.nameFont, nameColor: null, nameColor2: null } : null)
-  if (roleColor) return { className: '', style: { ...font, color: roleColor }, text: false }
+  if (roleColor) return { className: '', style: { ...font, color: roleColor }, text: false, letters: null }
   const css = effectCss(lookOf(a))
-  return { className: css.className, style: { ...font, ...css.vars } as CSSProperties, text: css.layered }
+  // `letters`: the effect is drawn a letter at a time, each in the next of these colours (see NameLetters).
+  return { className: css.className, style: { ...font, ...css.vars } as CSSProperties, text: css.layered, letters: css.letters }
 }
 
 const SERVER_PATH = /^\/api\/[A-Za-z0-9/_.-]+(\?v=\d+)?$/

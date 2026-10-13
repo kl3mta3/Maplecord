@@ -1,6 +1,6 @@
 import { CommunityPollDialog } from './CommunityPoll'
 import { TagCardDialog, onTagOpened } from './Tags'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { p2pMedia, type Store } from '../store'
 import { openSink, type TransferView } from '../transfer'
@@ -1081,6 +1081,28 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
     if (el && !marked) el.scrollTop = postsList ? 0 : el.scrollHeight
     // eslint-disable-next-line react-hooks/exhaustive-deps -- a mark fading must not send the list back to its end
   }, [shown.length, store.selectedChannel?.id, thread?.root.id, p2pRoot?.id, postsList])
+  // The message box grows with what is in it: a line for each line typed or wrapped, up to a share of the window
+  // (set in index.css), after which it scrolls. Someone reading the newest messages stays at the newest messages.
+  const boxRef = useRef<HTMLTextAreaElement>(null)
+  const fitBox = useCallback(() => {
+    const box = boxRef.current
+    if (!box) return
+    const list = listRef.current
+    const atEnd = !!list && !list.classList.contains('posts') && list.scrollHeight - list.scrollTop - list.clientHeight < 40
+    box.style.height = 'auto'
+    box.style.height = box.scrollHeight + (box.offsetHeight - box.clientHeight) + 'px'
+    if (atEnd && list) list.scrollTop = list.scrollHeight
+  }, [])
+  useLayoutEffect(fitBox, [fitBox, text, store.selectedChannel?.id, thread?.root.id, p2pRoot?.id])
+  // A narrower or wider box wraps its lines differently.
+  useEffect(() => {
+    const box = boxRef.current
+    if (!box || typeof ResizeObserver === 'undefined') return
+    let width = box.clientWidth
+    const watch = new ResizeObserver(() => { if (box.clientWidth !== width) { width = box.clientWidth; fitBox() } })
+    watch.observe(box)
+    return () => watch.disconnect()
+  }, [fitBox, store.selectedChannel?.id, thread?.root.id, p2pRoot?.id])
   useEffect(() => {
     if (!marked) return
     listRef.current?.querySelector(`[data-mid="${marked}"]`)?.scrollIntoView({ block: 'center' })
@@ -1507,7 +1529,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
           )}
           {canSendDirect && <button title={directSendTitle} aria-label="Send a file straight from your computer" onClick={() => directRef.current?.click()} disabled={!channel}><ArrowLeftRight size={17} /></button>}
           {((kept && !thread && channel?.type !== ChannelType.Gallery) || (p2p?.state === 'on' && (p2pTalk ? !p2pRoot : P2P_GALLERY_POLLS && !!p2pRoot))) && <button title={p2pGallery ? 'Ask a poll about this post' : 'Start a poll'} aria-label="Start a poll" onClick={() => setPanel('poll')} disabled={!channel}><ChartBarDecreasing size={17} /></button>}
-          <textarea
+          <textarea ref={boxRef}
             placeholder={!channel ? '' : p2pRoot ? (p2pGallery ? 'Say something about this post  ·  P2P' : 'Reply in this thread  ·  P2P') : thread ? (isPostsChannel(channel) ? 'Say something about this post' : 'Reply in this thread') : p2pChat ? `Message #${channel.name}  ·  P2P` : `Message ${channel.type === ChannelType.DirectMessage ? '@' : '#'}${channel.name}`}
             value={text} disabled={!channel || (p2pChat && p2p?.state !== 'on')} rows={1}
             onChange={e => { setText(e.target.value); if (e.target.value) store.notifyTyping() }}
