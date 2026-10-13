@@ -166,6 +166,24 @@ a.filechip:hover { border-color: var(--accent2); }
 .access h4:first-child { margin-top: 0; }
 .membergroup { padding: 12px 14px 3px; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .membergroup span { font-weight: 400; }
+/* A community poll. */
+.pollintro { white-space: pre-wrap; overflow-wrap: anywhere; }
+.pollq { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.pollq legend { padding: 0; margin-bottom: 4px; font-weight: 600; overflow-wrap: anywhere; }
+.pollq legend .muted { font-weight: 400; }
+.pollopt { position: relative; display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 8px; background: var(--bg0); overflow: hidden; }
+.pollopt > * { position: relative; z-index: 1; }
+.pollopt > i { position: absolute; z-index: 0; left: 0; top: 0; bottom: 0; background: var(--accent); opacity: .3; }
+.pollopt.chosen { box-shadow: inset 0 0 0 1px var(--accent); }
+.pollopt label { display: flex; align-items: center; gap: 8px; cursor: pointer; overflow-wrap: anywhere; }
+.pollopt b { font-weight: 600; white-space: nowrap; font-size: 12px; }
+/* Something to rate has its name on a line of its own, and the numbers under it. */
+.pollopt.rated { flex-wrap: wrap; row-gap: 6px; }
+.pollopt.rated > .grow { flex: 0 0 100%; overflow-wrap: anywhere; }
+.pollopt.rated > b { margin-left: auto; }
+.pollrate { display: flex; gap: 2px; flex-wrap: wrap; }
+.pollrate button { min-width: 26px; padding: 2px 0; font-size: 12px; }
+.pollrate button.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
 .nettest-relays { display: flex; flex-direction: column; gap: 4px; }
 .nettest-live, .nettest-found { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 8px; background: var(--bg3); }
 .nettest-rating { font-size: 20px; font-weight: 700; line-height: 1.2; }
@@ -402,6 +420,50 @@ html.overlay-mode, html.overlay-mode body, html.overlay-mode #root { background:
 .av .deco svg { display: block; }
 .uname { font-weight: 600; }
 .uname.clickable:hover { text-decoration: underline; text-decoration-color: currentColor; }
+
+/* Name effects (see nameEffects.ts). --n1 to --n5 are the person's colours, --ng all of them as a list, --na the angle. */
+.uname.fx { position: relative; isolation: isolate; }
+.fx-gradient, .fx-prism, .fx-gummy, .fx-chrome, .fx-aurora, .fx-shimmer { -webkit-background-clip: text; background-clip: text; color: transparent; }
+.fx-gradient, .fx-prism, .fx-aurora { background-image: linear-gradient(var(--na, 90deg), var(--ng)); }
+.fx-neon { color: var(--n1); text-shadow: 0 0 .22em var(--n2), 0 0 .55em var(--n2), 0 0 1em var(--n2); }
+.fx-toon { color: var(--n1); text-shadow: -1px -1px 0 var(--n2), 1px -1px 0 var(--n2), -1px 1px 0 var(--n2), 1px 1px 0 var(--n2), 0 -1px 0 var(--n2), -1px 0 0 var(--n2), 1px 0 0 var(--n2), 0 2px 0 var(--n2), 1px 2px 0 var(--n2), -1px 2px 0 var(--n2); }
+.fx-pop { color: var(--n1); text-shadow: 1px 1px 0 var(--n2), 2px 2px 0 var(--n2); }
+.fx-shadow { color: var(--n1); text-shadow: 0 .14em .1em var(--n2); }
+.fx-glitch { color: var(--n1); text-shadow: -.07em 0 var(--n2), .07em 0 var(--n3); }
+.fx-outline { color: transparent; -webkit-text-stroke: max(.6px, .04em) var(--n1); }
+/* A shine across the top half over the colours, and a darker copy of the name just under it, like something moulded. */
+.fx-gummy { background-image: linear-gradient(180deg, rgba(255, 255, 255, .45) 0%, rgba(255, 255, 255, 0) 42%), linear-gradient(var(--na, 90deg), var(--ng)); }
+/* The copy behind is not given a place of its own: it then sits exactly where the name's own letters begin. */
+.fx-gummy::before { content: attr(data-text); position: absolute; z-index: -1; color: transparent; text-shadow: 0 .07em 0 color-mix(in srgb, var(--n1) 60%, #000); white-space: nowrap; pointer-events: none; }
+.fx-aurora::before { content: attr(data-text); position: absolute; z-index: -1; color: transparent; text-shadow: 0 0 .28em color-mix(in srgb, var(--n1) 75%, transparent), 0 0 .6em color-mix(in srgb, var(--n2) 60%, transparent); white-space: nowrap; pointer-events: none; }
+.fx-chrome { background-image: linear-gradient(180deg, #fff 0%, var(--n1) 40%, color-mix(in srgb, var(--n1), #000 60%) 50%, color-mix(in srgb, var(--n1), #fff 35%) 62%, #fff 100%); }
+/* A band of the second colour across the first. It only moves under the pointer and on a profile card. */
+.fx-shimmer { background-image: linear-gradient(110deg, var(--n1) 0%, var(--n1) 42%, var(--n2) 50%, var(--n1) 58%, var(--n1) 100%); background-size: 250% 100%; background-position: 50% 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .fx-shimmer:hover, .profilecard .fx-shimmer, .fxhead .fx-shimmer { animation: fx-sweep 2.4s linear infinite; }
+}
+@keyframes fx-sweep { from { background-position: 120% 0; } to { background-position: -20% 0; } }
+
+/* Choosing one, in the profile editor. */
+.fxeditor { display: flex; flex-direction: column; gap: 6px; }
+.fxdrop { position: relative; }
+.fxhead { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 12px; background: var(--bg0); text-align: left; }
+.fxhead { overflow: hidden; }
+.fxhead .uname { font-size: 16px; white-space: nowrap; }
+.fxhead small { color: var(--muted); font-size: 11px; }
+.fxarrow { margin-left: auto; color: var(--muted); }
+.fxlist { margin-top: 4px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 8px; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; }
+.fxchoice { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 9px 4px 6px; background: var(--bg0); overflow: hidden; }
+.fxchoice .uname { white-space: nowrap; font-size: 15px; line-height: 22px; }
+.fxchoice small { color: var(--muted); font-size: 10px; font-weight: 500; }
+.fxchoice.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.fxoptions { display: flex; flex-direction: column; gap: 8px; }
+.fxcolor { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.fxcolor input { width: 34px; height: 24px; padding: 0; }
+.fxangle { display: flex; align-items: center; gap: 8px; }
+.fxangle input { flex: 1; }
+.fxpreset { width: 44px; height: 22px; padding: 0; border-radius: 6px; }
+.fxoptions button.sel { border-color: var(--accent); }
 .message .meta .uname.name { font-weight: 600; }
 .userpanel .self { cursor: pointer; overflow: hidden; }
 .userpanel .selfname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

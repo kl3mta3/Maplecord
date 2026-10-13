@@ -1,5 +1,5 @@
 import type {
-  AccountDeletionDto, MemberPageDto, ConnectionTestDto, ConnectionTestPassDto, CalendarEventDto, ApplicationDto, CommandRuleDto, CommandRulesDto, QrDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto, RollStatsDto, SearchResultDto, MediaItemDto, SignInMethodsDto, ContactEmailDto, ConnectionDto, ConnectionServiceDto, FriendLinkDto, FriendLinkOwnerDto } from './types'
+  AccountDeletionDto, MemberPageDto, ConnectionTestDto, ConnectionTestPassDto, CommunityPollDto, CommunityPollAnswerDto, CalendarEventDto, ApplicationDto, CommandRuleDto, CommandRulesDto, QrDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto, RollStatsDto, SearchResultDto, MediaItemDto, SignInMethodsDto, ContactEmailDto, ConnectionDto, ConnectionServiceDto, FriendLinkDto, FriendLinkOwnerDto } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -302,6 +302,12 @@ export class Api {
   commands(guildId: string) { return this.request<CommandDto[]>('GET', `/api/guilds/${guildId}/commands`) }
   /** STUN servers plus the relay for this voice channel (everyone in a channel is given the same one). */
   /** The rules for sharing video; with the voice channel we are in, also whether it has a stream server. */
+  /** The newest community poll there is to see, or null. */
+  latestPoll() { return this.request<{ poll: CommunityPollDto | null }>('GET', '/api/polls/latest').then(r => r.poll) }
+  /** Our answers to a poll: once, and for good. */
+  answerPoll(id: string, answers: CommunityPollAnswerDto[]) { return this.request<CommunityPollDto>('POST', `/api/polls/${id}/answers`, { answers }) }
+  /** "Not now": the app does not bring this poll up by itself again. */
+  declinePoll(id: string) { return this.request<CommunityPollDto>('POST', `/api/polls/${id}/decline`) }
   /** The relays a connection test can ping, and how long until this account may run a speed test again. */
   voiceTest() { return this.request<ConnectionTestDto>('GET', '/api/voice/test') }
   /** A pass for one speed test, on the least used of the relays near us by these pings. */

@@ -140,6 +140,15 @@ export function UserSettingsDialog({ store, initial, onOpen, onAllowDirect, onSi
 
           {section === 'app' && (
             <>
+              {store.communityPoll && (
+                <>
+                  <h4>Polls</h4>
+                  <div className="row">
+                    <button onClick={() => { onClose(); void store.showCommunityPoll() }}>Latest poll: {store.communityPoll.title}</button>
+                    <span className="muted">{store.communityPoll.mine === 'answered' ? 'You have answered it.' : store.communityPoll.ended ? 'It has ended.' : store.communityPoll.mayAnswer ? 'You have not answered it yet.' : ''}</span>
+                  </div>
+                </>
+              )}
               {installWay() && (
                 <>
                   <h4>On this device</h4>

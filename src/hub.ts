@@ -29,6 +29,8 @@ export interface ChatEvents {
   CalendarEventDeleted: (channelId: string, eventId: string) => void
   /** We were just asked along to an event. */
   EventInvited: (event: CalendarEventDto) => void
+  /** A community poll has been opened: the app asks for it and shows it once. */
+  CommunityPollOpened: (pollId: string) => void
   PollChanged: (channelId: string, messageId: string, userId: string, theirs: number[], counts: number[], voters: number, closed: boolean) => void
   MessagesRemoved: (channelId: string, authorId: string, since: string | null) => void
   /** P2P text channels: who connects and leaves, the set-up messages between two apps, and being taken out. */

@@ -3,7 +3,8 @@ import { ProfileConnections } from './Connections'
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
 // The "light" player draws to SVG only and has no expression support, so an animation file cannot run script.
 import lottie, { type AnimationItem } from 'lottie-web/build/player/lottie_light'
-import { NAME_FONTS, animationColors, assetUrl, decorationUrl, initials, nameStyle, shownName, withAnimationColors, type Appearance } from '../profile'
+import { NAME_FONTS, animationColors, assetUrl, decorationUrl, initials, nameLook, nameStyle, shownName, withAnimationColors, type Appearance } from '../profile'
+import { NameEffectEditor } from './NameEffects'
 import type { Store } from '../store'
 import { effectFileProblem } from '../effectCheck'
 import { Permission, hasPermission, type DecorationDto, type RoleDto, type UserProfileDto } from '../types'
@@ -93,10 +94,11 @@ export function UserName({ who, label, roleColor, className, style, onClick, onC
   who: Appearance | null | undefined; label: string; roleColor?: string | null; className?: string; style?: CSSProperties
   onClick?: (e: MouseEvent) => void; onContextMenu?: (e: MouseEvent) => void
 }) {
+  const look = nameLook(who, roleColor)
   return (
     <>
-      <span className={'uname' + (onClick ? ' clickable' : '') + (className ? ' ' + className : '')} style={{ ...nameStyle(who, roleColor), ...style }}
-        onClick={onClick} onContextMenu={onContextMenu}>{label}</span>
+      <span className={'uname' + (look.className ? ' ' + look.className : '') + (onClick ? ' clickable' : '') + (className ? ' ' + className : '')} style={{ ...look.style, ...style }}
+        data-text={look.text ? label : undefined} onClick={onClick} onContextMenu={onContextMenu}>{label}</span>
       {who?.tag && <TagPill tag={who.tag} />}
     </>
   )
@@ -112,7 +114,7 @@ export function ProfileCardBody({ profile, serverUrl, roles, nickname, serverNam
   const effect = decorationUrl(serverUrl, 'effect', profile.effect)
   const since = new Date(profile.createdAt)
   const who: Appearance = { userId: profile.id, username: profile.username, displayName: profile.displayName, avatarUrl: profile.avatarUrl,
-    nameFont: profile.nameFont, nameColor: profile.nameColor, nameColor2: profile.nameColor2, decoration: profile.decoration, tag: profile.tag ?? null }
+    nameFont: profile.nameFont, nameColor: profile.nameColor, nameColor2: profile.nameColor2, nameEffect: profile.nameEffect ?? null, decoration: profile.decoration, tag: profile.tag ?? null }
   return (
     <div className="profilecard">
       <div className="banner" style={banner ? { backgroundImage: `url("${banner}")` } : { background: profile.accentColor ?? undefined }} />
@@ -142,7 +144,7 @@ export function ProfileCardBody({ profile, serverUrl, roles, nickname, serverNam
 /** What we can show before the full profile arrives (and all we show if it cannot be fetched). */
 const sketch = (a: Appearance): UserProfileDto => ({
   id: a.userId, username: a.username, displayName: a.displayName, avatarUrl: a.avatarUrl, bannerUrl: null, accentColor: null, bio: null, pronouns: null,
-  nameFont: a.nameFont, nameColor: a.nameColor, nameColor2: a.nameColor2, decoration: a.decoration, effect: null, createdAt: '', isBot: false,
+  nameFont: a.nameFont, nameColor: a.nameColor, nameColor2: a.nameColor2, nameEffect: a.nameEffect ?? null, decoration: a.decoration, effect: null, createdAt: '', isBot: false,
 })
 
 /** A profile card at the pointer. */
@@ -274,7 +276,7 @@ export function ProfileEditor({ store, onClose }: { store: Store; onClose: () =>
 
   // Always build on the latest draft, so two changes close together (or an upload finishing mid-edit) cannot drop one.
   const set = (patch: Partial<UserProfileDto>) => setDraft(d => (d ? { ...d, ...patch } : d))
-  const dirty = (['displayName', 'bio', 'pronouns', 'accentColor', 'nameFont', 'nameColor', 'nameColor2', 'decoration', 'effect'] as const).some(k => (draft[k] ?? '') !== (saved[k] ?? ''))
+  const dirty = (['displayName', 'bio', 'pronouns', 'accentColor', 'nameFont', 'nameColor', 'nameColor2', 'nameEffect', 'decoration', 'effect'] as const).some(k => (draft[k] ?? '') !== (saved[k] ?? ''))
   const shown = draft.displayName?.trim() || draft.username
 
   const save = async () => {
@@ -283,7 +285,7 @@ export function ProfileEditor({ store, onClose }: { store: Store; onClose: () =>
       // Every field is sent; an empty string clears it.
       const p = await store.saveProfile({
         displayName: draft.displayName ?? '', bio: draft.bio ?? '', pronouns: draft.pronouns ?? '', accentColor: draft.accentColor ?? '',
-        nameFont: draft.nameFont ?? '', nameColor: draft.nameColor ?? '', nameColor2: draft.nameColor2 ?? '', decoration: draft.decoration ?? '', effect: draft.effect ?? '',
+        nameFont: draft.nameFont ?? '', nameColor: draft.nameColor ?? '', nameColor2: draft.nameColor2 ?? '', nameEffect: draft.nameEffect ?? '', decoration: draft.decoration ?? '', effect: draft.effect ?? '',
       })
       setSaved(p); setDraft(p); setNote('Saved.')
     } catch (e) { setNote(e instanceof Error ? e.message : String(e)) }
@@ -415,8 +417,7 @@ export function ProfileEditor({ store, onClose }: { store: Store; onClose: () =>
             ))}
           </div>
 
-          <ColorRow label="Name color" value={draft.nameColor} onChange={v => set({ nameColor: v, ...(v === null ? { nameColor2: null } : {}) })} hint="a server's role color takes its place there" />
-          {draft.nameColor && <ColorRow label="Second color" value={draft.nameColor2} onChange={v => set({ nameColor2: v })} hint="makes a gradient" />}
+          <NameEffectEditor name={shown} font={draft.nameFont} value={{ nameColor: draft.nameColor, nameColor2: draft.nameColor2, nameEffect: draft.nameEffect ?? null }} onChange={set} />
 
           <div className="muted">Avatar decoration <span>— animated; hover to preview</span></div>
           <div className="decogrid">

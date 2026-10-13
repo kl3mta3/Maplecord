@@ -46,11 +46,15 @@ export interface UserDto {
   nameFont?: string | null; nameColor?: string | null; nameColor2?: string | null; decoration?: string | null
   /** The server tag they wear beside their name. */
   tag?: TagDto | null
+  /** How their name is drawn beyond its colours (see nameEffects.ts). */
+  nameEffect?: string | null
 }
 export interface UserProfileDto {
   id: string; username: string; displayName: string | null; avatarUrl: string | null; bannerUrl: string | null; accentColor: string | null
   bio: string | null; pronouns: string | null; nameFont: string | null; nameColor: string | null; nameColor2: string | null
   decoration: string | null; effect: string | null; createdAt: string; isBot: boolean
+  /** How their name is drawn beyond its colours (see nameEffects.ts). */
+  nameEffect?: string | null
   /** Only on your own profile: the ids of the animations you uploaded, and whether uploading has been closed to this account. */
   ownDecoration?: string | null; ownEffect?: string | null; ownAnimationsOff?: boolean; tag?: TagDto | null
   /** The accounts on other services they have linked and chosen to show. */
@@ -69,7 +73,7 @@ export interface ContactEmailDto { email: string | null; changed: boolean; pendi
 /** A linked account as a profile shows it. */
 export interface ProfileConnectionDto { service: string; serviceName: string; name: string; url: string | null }
 /** Each field: undefined leaves it alone, '' clears it. */
-export type UpdateProfileRequest = Partial<Record<'displayName' | 'bio' | 'pronouns' | 'accentColor' | 'nameFont' | 'nameColor' | 'nameColor2' | 'decoration' | 'effect', string>>
+export type UpdateProfileRequest = Partial<Record<'displayName' | 'bio' | 'pronouns' | 'accentColor' | 'nameFont' | 'nameColor' | 'nameColor2' | 'decoration' | 'effect' | 'nameEffect', string>>
 export interface DecorationDto { id: string; name: string; kind: 'avatar' | 'effect'; url: string; /** The colors it is drawn in ("9000ff"), each of which can be swapped for your own. */ colors?: string[] | null }
 /** What a server says about itself before sign-in: the protocol it speaks and the oldest client protocol it accepts. */
 export interface ServerMetaDto { protocol: number; minClientProtocol: number; version: string; /** The server runs as several copies: see hubConnect.ts. */ webSocketsOnly?: boolean; /** What an invite link starts with on this server; the code follows. */ inviteBase?: string | null; /** What a link to an event starts with; the event's id follows. */ eventBase?: string | null }
@@ -109,6 +113,8 @@ export interface RoleDto { id: string; guildId: string; name: string; color: str
 export interface MemberDto {
   userId: string; username: string; avatarUrl: string | null; nickname: string | null; role: number; online: boolean; roleIds?: string[] | null; isBot?: boolean; /** A P2P bot: only in the P2P channels it was let into. */ directBot?: boolean
   displayName?: string | null; nameFont?: string | null; nameColor?: string | null; nameColor2?: string | null; decoration?: string | null; tag?: TagDto | null
+  /** How their name is drawn beyond its colours (see nameEffects.ts). */
+  nameEffect?: string | null
   /** Only on whole-server listings; changes arrive as PresenceStatus. */
   dnd?: boolean
   /** Online and idle. Only on whole-server listings; changes arrive as PresenceIdle. */
@@ -135,6 +141,23 @@ export interface GuildSummaryDto {
    * its bots, its owner and ourselves, and not everyone. The rest are read a page at a time (see memberPaging.ts).
    */
   membersPartial?: boolean
+}
+/** An answer to pick in a community poll, or a thing to rate. With totals, when those are shown: how many chose it, and for a rating the average. */
+export interface CommunityPollOptionDto { id: string; text: string; votes?: number | null; average?: number | null }
+/** kind: 0 = pick one, 1 = pick several, 2 = a number from 1 to 10 for each thing listed. */
+export interface CommunityPollQuestionDto { id: string; text: string; kind: number; options: CommunityPollOptionDto[] }
+/** One thing answered: an option picked (value 1), or the number from 1 to 10 given to the thing it names. */
+export interface CommunityPollAnswerDto { optionId: string; value: number }
+/**
+ * A community poll as we are sent it. `mine` is "none", "declined" (we said not now) or "answered". `answered` (how
+ * many people have) and the totals on the options are there only while the totals are being shown. `page` is where
+ * anyone can see it, if it is public.
+ */
+export interface CommunityPollDto {
+  id: string; title: string; intro?: string | null; openedAt: string; endsAt?: string | null; ended: boolean
+  questions: CommunityPollQuestionDto[]
+  mine: 'none' | 'declined' | 'answered'; mayAnswer: boolean; whyNot?: string | null; myAnswers?: CommunityPollAnswerDto[] | null
+  answered?: number | null; page?: string | null
 }
 /** A relay the connection test can be run against: its name, where it is (as its owner wrote it), and its test service's address. */
 export interface TestRelayDto { name: string; region?: string | null; url: string }

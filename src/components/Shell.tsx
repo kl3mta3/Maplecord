@@ -1,3 +1,4 @@
+import { CommunityPollDialog } from './CommunityPoll'
 import { TagCardDialog, onTagOpened } from './Tags'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -851,6 +852,9 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           onConfirm={store.leaveGuild} onClose={() => setDialog(null)} />
       )}
       {dialog?.kind === 'profile' && <ProfileEditor store={store} onClose={() => setDialog(null)} />}
+      {store.communityPollShown && store.communityPoll && (
+        <CommunityPollDialog key={store.communityPoll.id + store.communityPoll.mine} poll={store.communityPoll} onAnswer={store.answerCommunityPoll} onDecline={store.declineCommunityPoll} onClose={store.closeCommunityPoll} />
+      )}
       {dialog?.kind === 'invite' && <InviteDialog store={store} guildId={dialog.guildId} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'nickname' && (() => {
         const where = store.guilds.find(x => x.guild.id === dialog.guildId)

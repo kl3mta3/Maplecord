@@ -1,3 +1,4 @@
+import { effectCss, lookOf } from './nameEffects'
 import type { CSSProperties } from 'react'
 import type { MemberDto, UserDto, TagDto } from './types'
 
@@ -42,6 +43,8 @@ export interface Appearance {
   nameFont: string | null
   nameColor: string | null
   nameColor2: string | null
+  /** How the name is drawn beyond its colours (see nameEffects.ts). */
+  nameEffect?: string | null
   decoration: string | null
   /** The server tag they wear beside their name, if any. */
   tag?: TagDto | null
@@ -49,12 +52,12 @@ export interface Appearance {
 
 export const appearanceOfUser = (u: UserDto): Appearance => ({
   userId: u.id, username: u.username, displayName: u.displayName ?? null, avatarUrl: u.avatarUrl ?? null,
-  nameFont: u.nameFont ?? null, nameColor: u.nameColor ?? null, nameColor2: u.nameColor2 ?? null, decoration: u.decoration ?? null, tag: u.tag ?? null,
+  nameFont: u.nameFont ?? null, nameColor: u.nameColor ?? null, nameColor2: u.nameColor2 ?? null, nameEffect: u.nameEffect ?? null, decoration: u.decoration ?? null, tag: u.tag ?? null,
 })
 
 export const appearanceOfMember = (m: MemberDto): Appearance => ({
   userId: m.userId, username: m.username, displayName: m.displayName ?? null, avatarUrl: m.avatarUrl ?? null,
-  nameFont: m.nameFont ?? null, nameColor: m.nameColor ?? null, nameColor2: m.nameColor2 ?? null, decoration: m.decoration ?? null, tag: m.tag ?? null,
+  nameFont: m.nameFont ?? null, nameColor: m.nameColor ?? null, nameColor2: m.nameColor2 ?? null, nameEffect: m.nameEffect ?? null, decoration: m.decoration ?? null, tag: m.tag ?? null,
 })
 
 /** The name to show for someone: what they chose, or else what they registered with. */
@@ -83,6 +86,18 @@ export function nameStyle(a: Pick<Appearance, 'nameFont' | 'nameColor' | 'nameCo
     style.color = 'transparent'
   } else if (first) style.color = first
   return style
+}
+
+/**
+ * Everything a name is drawn with: its font, and its colours and effect (see nameEffects.ts) or, where a server's
+ * role colour is given, that colour alone, since it shows rank there. `text` = the element must carry the name as
+ * its data-text too, because the effect draws a second copy of it behind.
+ */
+export function nameLook(a: Pick<Appearance, 'nameFont' | 'nameColor' | 'nameColor2' | 'nameEffect'> | null | undefined, roleColor?: string | null): { className: string; style: CSSProperties; text: boolean } {
+  const font = nameStyle(a ? { nameFont: a.nameFont, nameColor: null, nameColor2: null } : null)
+  if (roleColor) return { className: '', style: { ...font, color: roleColor }, text: false }
+  const css = effectCss(lookOf(a))
+  return { className: css.className, style: { ...font, ...css.vars } as CSSProperties, text: css.layered }
 }
 
 const SERVER_PATH = /^\/api\/[A-Za-z0-9/_.-]+(\?v=\d+)?$/

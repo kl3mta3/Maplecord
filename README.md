@@ -85,7 +85,7 @@ nothing to unlock.
 - Profile effects: an animation that plays over your profile card, ours or one you made
 - Server tags: a server can have a tag, a symbol and up to five letters, for its members to wear beside their names
 - Profile banners, a colour of your own, a bio and pronouns
-- Name fonts and colours, including two-colour names
+- Name fonts, colours and effects (gradient, neon, outline and more)
 - Colour themes for the whole app
 - Custom sound packs
 

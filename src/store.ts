@@ -1,3 +1,5 @@
+import type { CommunityPollAnswerDto, CommunityPollDto } from './types'
+import { shouldAsk } from './communityPoll'
 import { inBatches, membersToAsk, mergeMembers } from './memberPaging'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Api, ApiError } from './api'
@@ -394,6 +396,13 @@ export function useMaplecord() {
   const [calendarChange, setCalendarChange] = useState<{ n: number; channelId: string; changed?: CalendarEventDto; deleted?: string } | null>(null)
   /** Events we have been invited to and have not answered: asked for once when the app starts, then kept up as invitations and answers arrive. */
   const [invitations, setInvitations] = useState<CalendarEventDto[]>([])
+  // The newest community poll, and whether it is on screen. It comes up by itself once: when it is opened while we
+  // are here, or when the app starts and we have neither answered it nor said "not now".
+  const [communityPoll, setCommunityPoll] = useState<CommunityPollDto | null>(null)
+  const [communityPollShown, setCommunityPollShown] = useState(false)
+  const lookForPoll = useCallback((bringUp: boolean) => {
+    api.latestPoll().then(poll => { setCommunityPoll(poll); if (bringUp && shouldAsk(poll)) setCommunityPollShown(true) }).catch(() => { /* a server from before there were polls */ })
+  }, [api])
   /** An event the calendar is to open on, when it is next shown: from a link, a posted event or an invitation. */
   const [calendarTarget, setCalendarTarget] = useState<{ n: number; event: CalendarEventDto } | null>(null)
   /** Changes a message wherever it is held: in the channel's list, in the open thread, or as that thread's first message. */
@@ -760,7 +769,7 @@ export function useMaplecord() {
       DmOpened: dm => setDms(ds => (ds.some(d => d.channelId === dm.channelId) ? ds : [{ ...dm, lastAt: dm.lastAt ?? new Date().toISOString() }, ...ds])),
       // Someone changed how they appear: update every place we hold a copy of them.
       UserUpdated: (u: UserDto) => {
-        const look = { avatarUrl: u.avatarUrl, displayName: u.displayName ?? null, nameFont: u.nameFont ?? null, nameColor: u.nameColor ?? null, nameColor2: u.nameColor2 ?? null, decoration: u.decoration ?? null, tag: u.tag ?? null }
+        const look = { avatarUrl: u.avatarUrl, displayName: u.displayName ?? null, nameFont: u.nameFont ?? null, nameColor: u.nameColor ?? null, nameColor2: u.nameColor2 ?? null, nameEffect: u.nameEffect ?? null, decoration: u.decoration ?? null, tag: u.tag ?? null }
         setGuilds(gs => gs.map(g => (g.members.some(m => m.userId === u.id) ? { ...g, members: g.members.map(m => (m.userId === u.id ? { ...m, ...look } : m)) } : g)))
         const swap = <T extends { user: UserDto }>(f: T): T => (f.user.id === u.id ? { ...f, user: u } : f)
         setFriends(fr => ({ friends: fr.friends.map(swap), incoming: fr.incoming.map(swap), outgoing: fr.outgoing.map(swap) }))
@@ -806,6 +815,7 @@ export function useMaplecord() {
         setCalendarChange(c => ({ n: (c?.n ?? 0) + 1, channelId, deleted: eventId }))
         setInvitations(list => list.filter(e => e.id !== eventId))
       },
+      CommunityPollOpened: () => lookForPoll(true),
       EventInvited: event => {
         setInvitations(list => [...list.filter(e => e.id !== event.id), event])
         const by = (event.participants ?? []).find(p => p.userId === me())?.invitedById
@@ -1038,6 +1048,7 @@ export function useMaplecord() {
     const [fr, dmList, decos] = await Promise.all([api.friends().catch(() => EMPTY_FRIENDS), api.dms().catch(() => [] as DmChannelDto[]), api.decorations().catch(() => [] as DecorationDto[])])
     // What we were invited to while away. Once, here: after this it is kept up by what arrives.
     void api.invitations().then(setInvitations).catch(() => {})
+    lookForPoll(true)
     setFriends(fr); setDms(dmList); dmsRef.current = dmList; setDecorations(decos)
     void api.privacy().then(p => {
       allowDirectRef.current = p.allowDirect; setAllowDirectState(p.allowDirect)
@@ -2389,7 +2400,7 @@ export function useMaplecord() {
   const applyOwnProfile = useCallback((p: UserProfileDto) => {
     const cur = settingsRef.current.user
     if (cur && cur.id === p.id) setOwnLook({ accentColor: p.accentColor, bannerUrl: p.bannerUrl })
-    if (cur && cur.id === p.id) updateSettings({ user: { ...cur, displayName: p.displayName, avatarUrl: p.avatarUrl, nameFont: p.nameFont, nameColor: p.nameColor, nameColor2: p.nameColor2, decoration: p.decoration } })
+    if (cur && cur.id === p.id) updateSettings({ user: { ...cur, displayName: p.displayName, avatarUrl: p.avatarUrl, nameFont: p.nameFont, nameColor: p.nameColor, nameColor2: p.nameColor2, nameEffect: p.nameEffect ?? null, decoration: p.decoration } })
   }, [updateSettings])
   /** Throws with the server's reason if a field is refused, so the editor can show it next to the form. */
   const saveProfile = useCallback(async (patch: UpdateProfileRequest) => { const p = await api.updateProfile(patch); applyOwnProfile(p); return p }, [api, applyOwnProfile])
@@ -3042,6 +3053,12 @@ export function useMaplecord() {
   return {
     api, hub, settings, updateSettings, ready, status, error, setError, systemMessages, dismissSystemMessage,
     guilds, selectedGuild, selectedChannel, selectedDm, home, friends, dms, dmUnread, messages, canLoadOlder, activeRoll, typing, commands, stats, setGuildCountRolls, setGuildWelcome,
+    communityPoll, communityPollShown,
+    /** Opens the newest poll from the link in settings, read afresh first. */
+    showCommunityPoll: async () => { const poll = await api.latestPoll().catch(() => null); setCommunityPoll(poll); setCommunityPollShown(!!poll); return poll },
+    closeCommunityPoll: () => setCommunityPollShown(false),
+    answerCommunityPoll: async (answers: CommunityPollAnswerDto[]) => { if (communityPoll) setCommunityPoll(await api.answerPoll(communityPoll.id, answers)) },
+    declineCommunityPoll: async () => { if (communityPoll) { setCommunityPoll(await api.declinePoll(communityPoll.id).catch(() => communityPoll)); setCommunityPollShown(false) } },
     thread, viewingPast, highlight, setHighlight, openThread, closeThread, loadOlderThread, createPost, editMessage, react, reactToPicture, calendarChange, invitations, calendarTarget, openEvent, eventLink, pinMessage, votePoll, closePoll,
     reactionChoices, loadPins, searchMessages, jumpTo, backToPresent,
     pendingFriendLink, openFriendLink, acceptFriendLink, dismissFriendLink, loadFriendLink, resetFriendLink,
