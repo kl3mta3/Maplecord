@@ -3,6 +3,7 @@ import type { Store } from '../store'
 import { EventAnswer, type CalendarEventDto, type PostedEventDto } from '../types'
 import { ContextMenu, type MenuEntry } from './ContextMenu'
 import { Dialog } from './Dialogs'
+import { Markdown, MarkdownBox } from './Markdown'
 
 // A calendar channel: a month of days as squares, with what is on each. Anyone who sees the channel reads it and says
 // whether they are coming; whoever may post events adds to it by opening a day, and adds the people it is for.
@@ -70,7 +71,7 @@ export function EventCard({ event, onOpen }: { event: PostedEventDto; onOpen?: (
     <div className="card eventcard" style={event.color && COLOR.test(event.color) ? { borderColor: event.color } : undefined}>
       <div className="title">📅 {event.title}</div>
       <div className="line" title={event.at ? 'Shown in your own time zone' : undefined}>{when}</div>
-      {event.note && <div className="body note">{event.note}</div>}
+      {event.note && (event.noteMarkdown ? <Markdown text={event.note} className="note" /> : <div className="body note">{event.note}</div>)}
       {onOpen && <div><button className="subtle" onClick={onOpen} title="Open the calendar on this event. What was posted here is the event as it was then">Open in the calendar</button></div>}
     </div>
   )
@@ -213,7 +214,7 @@ export function CalendarView({ store, channelId, name, mayPost, mayManage, maySh
             return (
               <div key={e.id} className="caldetail" style={e.color && COLOR.test(e.color) ? { borderLeft: `4px solid ${e.color}` } : undefined} onContextMenu={x => openMenu(x, e)}>
                 <div><b>{e.title}</b>{shownTime(e) && <span className="muted"> · {shownTime(e)}</span>}</div>
-                {e.note && <div className="note">{e.note}</div>}
+                {e.note && (e.noteMarkdown ? <Markdown text={e.note} /> : <div className="note">{e.note}</div>)}
                 {mine?.answer === EventAnswer.Invited && <div className="calasked">✉️ You were invited{mine.invitedById ? ` by ${nameOf(mine.invitedById, people.find(p => p.userId === mine.invitedById)?.name ?? e.authorName)}` : ''}. Are you coming?</div>}
                 {(e.inviteOnly || forRoles.length > 0) && (
                   <div className="calfor">
@@ -378,7 +379,7 @@ function ParticipantsDialog({ event, people, roles, onSave, onClose }: {
 /** A new event for a day, or one being changed: its title, the day, a time if it has one, and a note. */
 function EventDialog({ day, event, onSave, onClose }: {
   day: string; event?: CalendarEventDto
-  onSave: (body: { title: string; note: string | null; day: string; at: string | null; color: string | null }) => void | Promise<void>
+  onSave: (body: { title: string; note: string | null; day: string; at: string | null; color: string | null; noteMarkdown: boolean }) => void | Promise<void>
   onClose: () => void
 }) {
   const startsAt = event?.at ? new Date(event.at) : null
@@ -387,15 +388,16 @@ function EventDialog({ day, event, onSave, onClose }: {
   const [time, setTime] = useState(startsAt ? `${two(startsAt.getHours())}:${two(startsAt.getMinutes())}` : '')
   const [note, setNote] = useState(event?.note ?? '')
   const [color, setColor] = useState<string | null>(event?.color ?? null)
+  const [noteMarkdown, setNoteMarkdown] = useState(!!event?.noteMarkdown)
   const ready = title.trim().length > 0 && /^\d{4}-\d{2}-\d{2}$/.test(on)
   const save = () => {
     if (!ready) return
     // The time is this person's own clock on that day; it is sent as the moment it is, so everyone sees it in theirs.
     const at = time ? new Date(`${on}T${time}`) : null
-    void onSave({ title: title.trim(), note: note.trim() || null, day: on, at: at && !Number.isNaN(at.getTime()) ? at.toISOString() : null, color })
+    void onSave({ title: title.trim(), note: note.trim() || null, day: on, at: at && !Number.isNaN(at.getTime()) ? at.toISOString() : null, color, noteMarkdown: noteMarkdown && !!note.trim() })
   }
   return (
-    <Dialog title={event ? 'Edit the event' : 'Add an event'} onClose={onClose}>
+    <Dialog title={event ? 'Edit the event' : 'Add an event'} onClose={onClose} scrolls>
       <div className="muted">What</div>
       <input autoFocus value={title} maxLength={100} placeholder="Zakum run" onChange={e => setTitle(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') save() }} />
       <div className="row">
@@ -403,7 +405,7 @@ function EventDialog({ day, event, onSave, onClose }: {
         <label className="grow"><div className="muted">Time, if it has one</div><input type="time" value={time} onChange={e => setTime(e.target.value)} /></label>
       </div>
       <div className="muted">Note, if it needs one</div>
-      <textarea value={note} maxLength={1000} rows={3} onChange={e => setNote(e.target.value)} />
+      <MarkdownBox value={note} onChange={setNote} markdown={noteMarkdown} onMarkdown={setNoteMarkdown} rows={4} maxLength={1000} />
       {time && <div className="muted">The time is yours. Everyone sees it in their own time zone.</div>}
       <div className="muted">Colour, if you like</div>
       <div className="calcolors" role="radiogroup" aria-label="Colour">

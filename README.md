@@ -24,7 +24,7 @@ one.
 - Reply to a message, react to it, edit what you sent, and pin the ones worth keeping
 - Threads, to keep a side conversation out of the channel
 - Search a channel's messages, and polls
-- Forum channels: posts with a title, each with its own thread
+- Forum channels: posts with a title, each with its own thread. A post can be written in Markdown, with a preview
 - Gallery channels: every post is pictures with a title. Open one to see what is said about it, like it, and react
   to each of its pictures by itself
 - Calendar channels: a month of days with events on them, shown in your own time zone. Say whether you are coming,

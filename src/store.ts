@@ -1,3 +1,4 @@
+import { inBatches, membersToAsk, mergeMembers } from './memberPaging'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Api, ApiError } from './api'
 import { ChatHub } from './hub'
@@ -520,6 +521,66 @@ export function useMaplecord() {
   const patchGuild = useCallback((guildId: string, fn: (g: GuildState) => GuildState) =>
     setGuilds(gs => gs.map(g => (g.guild.id === guildId ? fn(g) : g))), [])
 
+  // ---- Large servers: the members we were not sent -----------------------------------
+  // A server with a great many members is sent the people who are there, not everyone (membersPartial). The rest
+  // come when they are wanted: a page at a time in the member list, by name when looked for, and by id when
+  // something of theirs is on screen.
+  /** Per server: the username the next page starts after; null once the last page was read. */
+  const memberCursor = useRef<Record<string, string | null>>({})
+  /** Per server: whom we have already asked about by id, so nobody is asked about twice. */
+  const membersAsked = useRef<Record<string, Set<string>>>({})
+  /** Per server: whom the request that is about to go out will ask about. */
+  const membersWanted = useRef<Record<string, Set<string>>>({})
+  const [membersEnded, setMembersEnded] = useState<Record<string, boolean>>({})
+  const takeMembers = useCallback((guildId: string, found: MemberDto[]) => {
+    if (found.length > 0) patchGuild(guildId, g => ({ ...g, members: mergeMembers(g.members, found) }))
+  }, [patchGuild])
+  /** The next hundred members of a large server, in order of username. */
+  const loadMoreMembers = useCallback(async (guildId: string) => {
+    const after = memberCursor.current[guildId]
+    if (after === null) return
+    try {
+      const page = await api.members(guildId, { after: after ?? undefined, limit: 100 })
+      memberCursor.current[guildId] = page.next ?? null
+      if (!page.next) setMembersEnded(e => ({ ...e, [guildId]: true }))
+      takeMembers(guildId, page.members)
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+  }, [api, takeMembers])
+  /** The members of a server whose name starts with what was typed. They are kept, so the rest of the app can show them. */
+  const findMembers = useCallback(async (guildId: string, q: string): Promise<MemberDto[]> => {
+    try {
+      const page = await api.members(guildId, { q, limit: 50 })
+      takeMembers(guildId, page.members)
+      return page.members
+    } catch { return [] }
+  }, [api, takeMembers])
+  /**
+   * Members of a large server we have come across and were not sent: they are asked for, once, all in one request.
+   * `soon` is for what one person did (opened someone's card). What turns up for everyone at once (a message from
+   * someone none of the open apps were sent) waits a few seconds chosen at random, so that a busy server's apps do
+   * not all ask in the same instant.
+   */
+  const needMembers = useCallback((guildId: string, userIds: string[], soon = true) => {
+    const g = guildsRef.current.find(x => x.guild.id === guildId)
+    if (!g?.membersPartial) return
+    const asked = (membersAsked.current[guildId] ??= new Set())
+    const wanted = (membersWanted.current[guildId] ??= new Set())
+    const fresh = membersToAsk(g.members, userIds, asked)
+    if (fresh.length === 0) return
+    const first = wanted.size === 0
+    for (const id of fresh) wanted.add(id)
+    if (!first) return
+    window.setTimeout(() => {
+      const ids = [...wanted]
+      wanted.clear()
+      for (const some of inBatches(ids, 100)) {
+        api.lookupMembers(guildId, some).then(found => takeMembers(guildId, found))
+          // Not answered: they may be asked about again later.
+          .catch(() => { for (const id of some) asked.delete(id) })
+      }
+    }, soon ? 60 : 400 + Math.random() * 2600)
+  }, [api, takeMembers])
+
   /** Guild channels and DMs alike; DMs come back with guild = null. */
   const findChannel = (channelId: string): { guild: GuildState | null; channel: ChannelDto } | null => {
     for (const g of guildsRef.current) {
@@ -564,6 +625,10 @@ export function useMaplecord() {
 
   const loadGuilds = useCallback(async () => {
     const list = await api.guilds()
+    memberCursor.current = {}
+    membersAsked.current = {}
+    membersWanted.current = {}
+    setMembersEnded({})
     setGuilds(prev => list.map(g => {
       const old = prev.find(p => p.guild.id === g.guild.id)
       return { ...g, unread: old?.unread ?? 0, channelUnread: old?.channelUnread ?? {} }
@@ -777,12 +842,15 @@ export function useMaplecord() {
         // No sound for this: the knock and the door are for people coming into and leaving the voice channel you are in.
         patchGuild(guildId, gs => ({ ...gs, members: gs.members.map(x => (x.userId === userId ? { ...x, online } : x)) }))
       },
-      MemberJoined: (guildId, member) => patchGuild(guildId, g => ({ ...g, members: [...g.members.filter(x => x.userId !== member.userId), member] })),
+      MemberJoined: (guildId, member) => patchGuild(guildId, g => ({
+        ...g, members: [...g.members.filter(x => x.userId !== member.userId), member],
+        memberCount: g.memberCount != null && !g.members.some(x => x.userId === member.userId) ? g.memberCount + 1 : g.memberCount,
+      })),
       MemberLeft: (guildId, userId) => {
         if (userId === me()) { setGuilds(gs => gs.filter(g => g.guild.id !== guildId)); return }
-        patchGuild(guildId, g => ({ ...g, members: g.members.filter(x => x.userId !== userId) }))
+        patchGuild(guildId, g => ({ ...g, members: g.members.filter(x => x.userId !== userId), memberCount: g.memberCount != null ? Math.max(0, g.memberCount - 1) : g.memberCount }))
       },
-      MemberUpdated: (guildId, member) => patchGuild(guildId, g => ({ ...g, members: g.members.map(x => (x.userId === member.userId ? member : x)) })),
+      MemberUpdated: (guildId, member) => patchGuild(guildId, g => ({ ...g, members: g.membersPartial ? mergeMembers(g.members, [member]) : g.members.map(x => (x.userId === member.userId ? member : x)) })),
       GuildUpdated: guild => patchGuild(guild.id, g => ({ ...g, guild })),
       GuildDeleted: guildId => setGuilds(gs => gs.filter(g => g.guild.id !== guildId)),
       ChannelCreated: c => { if (c.guildId) patchGuild(c.guildId, g => (g.channels.some(x => x.id === c.id) ? g : { ...g, channels: [...g.channels, c] })) },
@@ -1476,7 +1544,7 @@ export function useMaplecord() {
   }, [api, thread])
 
   /** A post in a forum or a gallery: its files are uploaded first, then it is posted with its title. */
-  const createPost = useCallback(async (title: string, text: string, files: File[], poll: NewPollDto | null = null): Promise<boolean> => {
+  const createPost = useCallback(async (title: string, text: string, files: File[], poll: NewPollDto | null = null, markdown = false): Promise<boolean> => {
     const channelId = selected.current.channel
     if (!channelId) return false
     let ok = false
@@ -1485,7 +1553,7 @@ export function useMaplecord() {
       try {
         for (const file of files) { setUploading(file.name); ids.push((await api.upload(channelId, file)).id) }
       } finally { setUploading(null) }
-      await hub.post({ channelId, content: text.trim(), attachmentIds: ids, title: title.trim(), poll })
+      await hub.post({ channelId, content: text.trim(), attachmentIds: ids, title: title.trim(), poll, markdown })
       ok = true
     })
     return ok
@@ -1987,7 +2055,8 @@ export function useMaplecord() {
     const own = voiceHub.connectionId
     ownViewers.current = 0
     if (own) setViewerCounts(counts => ({ ...counts, [own]: 0 }))
-    try { await streamEngine.start(media, kind, quality, pass) }
+    // In a P2P channel or call the video goes from this app to each viewer, and from the third viewer on the encodes are shared.
+    try { await streamEngine.start(media, kind, quality, pass, !!voiceRef.current?.directSince) }
     catch {
       media.getTracks().forEach(t => t.stop())
       try { await voiceHub.stopStream(null) } catch { /* not in voice any more */ }
@@ -2570,6 +2639,13 @@ export function useMaplecord() {
   const selectedDm = home ? dms.find(d => d.channelId === selectedChannelId) ?? null : null
   const selectedChannel = selectedDm ? dmChannel(selectedDm) : selectedGuild?.channels.find(c => c.id === selectedChannelId) ?? null
 
+  // In a large server, whoever wrote what is on screen and was not sent to us is asked for, so their name is drawn as theirs.
+  const partialGuildId = selectedGuild?.membersPartial ? selectedGuild.guild.id : null
+  useEffect(() => {
+    if (!partialGuildId) return
+    needMembers(partialGuildId, [...messages, ...(thread?.messages ?? [])].filter(m => !m.webhookId).map(m => m.authorId), false)
+  }, [messages, needMembers, partialGuildId, thread])
+
   // ---- P2P text: connected to the P2P channel being read, for as long as it is being read ------------------------------
   const p2pChannelId = !selectedDm && selectedChannel?.directSince ? selectedChannel.id : null
   const p2pSince = p2pChannelId ? selectedChannel?.directSince ?? null : null
@@ -2977,6 +3053,7 @@ export function useMaplecord() {
     partyChannel, partyLabel,
     setUserPrefs, setGuildPrefs, markGuildRead, mentionsMe,
     appearanceOf, decorations, loadProfile, saveProfile, setProfilePicture, setProfileAnimation, setNickname,
+    loadMoreMembers, findMembers, needMembers, membersEnded,
     plugins, pendingDrops, resolveItem, itemIcon, searchItems, acceptDrop, dismissDrop, simulateDrop,
     setPluginSettings, reloadPlugins, installPlugin, openPluginsFolder, pickPluginLog,
     soundPacks, reloadSoundPacks, openSoundsFolder,
@@ -2985,6 +3062,8 @@ export function useMaplecord() {
     createGuild, joinGuild, joinPublicGuild, tagSymbols, setGuildTag, removeGuildTag, wearTag, tagCard, setGuildListing, deleteMessage, disconnectMember, moveMember, setVoiceMuted, moveChannel, inviteToServer, openInvite, pendingInvite, acceptInvite, dismissInvite: () => setPendingInvite(null), createChannel, leaveGuild, kickMember, banMember, signOut,
     sharing, shareQuality: streamEngine.quality, localStream: streamEngine.localStream, shareViewers: streamEngine.viaServer ? { total: viewerCounts[voiceHub.connectionId ?? ''] ?? 0, relayed: 0 } : streamEngine.viewerCounts(), watching: streamEngine.watching(),
     streamOf: (streamer: string) => streamEngine.streamOf(streamer), viewerCounts, streamRules, loadStreamRules,
+    streamChoice: (streamer: string) => streamEngine.choiceOf(streamer),
+    chooseStreamQuality: (streamer: string, want: { height: number; fps: number } | null) => streamEngine.chooseQuality(streamer, want),
     startShare, stopShare, watchStream, unwatchStream, setStreamLimit: (streamer: string, kbps: number) => streamEngine.requestLimit(streamer, kbps),
     voice, isMuted, isSpeaking, joinVoice, leaveVoice, toggleMute,
     call, startCall, answerCall, declineCall, renameChannel, deleteChannel, deleteGroup, setChannelMuted,

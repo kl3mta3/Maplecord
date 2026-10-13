@@ -79,9 +79,16 @@ export const PERMISSION_GROUPS = [...new Set(PERMISSION_LABELS.map(p => p.group)
 
 const ROLE_SWATCHES = ['#9000ff', '#00ddff', '#ff008c', '#2cfc00', '#f19511', '#ff3b3b', '#ffd700', '#1abc9c', '#e91e63', '#3498db', '#95a5a6', '#ffffff']
 
-export function ServerSettingsDialog({ api, channels, guild, roles, members, myPermissions, meId, onRename, onIcon, onListing, tagSymbols, onSetTag, onRemoveTag, onCountRolls, onWelcome, onCreateRole, onUpdateRole, onDeleteRole, onSetMemberRoles, onClose }: {
+export function ServerSettingsDialog({ api, channels, guild, roles, members, findMembers, moreMembers, myPermissions, meId, onRename, onIcon, onListing, tagSymbols, onSetTag, onRemoveTag, onCountRolls, onWelcome, onCreateRole, onUpdateRole, onDeleteRole, onSetMemberRoles, onClose }: {
   api: Api; channels: ChannelDto[]
   guild: GuildDto; roles: RoleDto[]; members: MemberDto[]; myPermissions: number; meId: string
+  /**
+   * In a server with a great many members, `members` is not everyone. These fetch the ones whose name starts with
+   * what was typed, and the next part of the list; whoever they bring arrives in `members`. `moreMembers` is left
+   * out once the whole list was read.
+   */
+  findMembers?: (q: string) => Promise<unknown>
+  moreMembers?: () => void
   onRename: (name: string) => Promise<void>
   onIcon: (file: File | null) => Promise<void>
   onListing: (patch: { isPublic: boolean; description: string; topics: string[] }) => Promise<void>
@@ -113,6 +120,16 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, myP
   useEffect(() => { setDraft(role ? { name: role.name, color: role.color, permissions: role.permissions } : null) }, [role])
   const [memberId, setMemberId] = useState<string>('')
   const member = members.find(m => m.userId === memberId) ?? null
+  const [memberQuery, setMemberQuery] = useState('')
+  useEffect(() => {
+    const q = memberQuery.trim()
+    if (!findMembers || !q) return
+    // Asked once the typing pauses, not at every letter.
+    const wait = window.setTimeout(() => { void findMembers(q) }, 300)
+    return () => window.clearTimeout(wait)
+  }, [findMembers, memberQuery])
+  const starts = memberQuery.trim().replace(/^@/, '').toLowerCase()
+  const listedMembers = !findMembers || !starts ? members : members.filter(m => [m.username, m.nickname, m.displayName].some(n => n?.toLowerCase().startsWith(starts)))
   /** The bot whose command permissions are open. It takes the place of this dialog, and closing it comes back here. */
   const [managing, setManaging] = useState<ApplicationDto | null>(null)
 
@@ -245,13 +262,16 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, myP
       {tab === 'members' && (
         <div className="roles">
           <div className="rolelist">
+            {findMembers && <input value={memberQuery} onChange={e => setMemberQuery(e.target.value)} placeholder="Find a member" maxLength={32} spellCheck={false} style={{ marginBottom: 6 }} />}
             {/* People first, then bots: a bot is a member, and what it may do is set with roles like anyone else. */}
-            {[...members].sort((a, b) => Number(!!a.isBot) - Number(!!b.isBot) || a.username.localeCompare(b.username)).map(m => (
+            {[...listedMembers].sort((a, b) => Number(!!a.isBot) - Number(!!b.isBot) || a.username.localeCompare(b.username)).map(m => (
               <div key={m.userId} className={'r' + (m.userId === memberId ? ' sel' : '')} onClick={() => setMemberId(m.userId)}>
                 <span className="grow" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.nickname || m.username}{m.userId === guild.ownerId ? ' 👑' : ''}</span>
                 {m.isBot && <span className="bottag">BOT</span>}
               </div>
             ))}
+            {findMembers && starts && listedMembers.length === 0 && <div className="muted" style={{ padding: 6 }}>Nobody by that name</div>}
+            {moreMembers && !starts && <button className="subtle" style={{ marginTop: 6 }} onClick={moreMembers}>Show more people</button>}
           </div>
           {member ? (
             <div className="roleedit">

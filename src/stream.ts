@@ -13,6 +13,10 @@ import { isRelayed } from './transfer'
  * Every viewer costs the sharer another encode and another upload, which is why the server sets small viewer
  * limits and caps on resolution, frame rate and bitrate. They are applied here, on what is sent.
  *
+ * In a P2P channel or call, from the third viewer on, the encodes are shared: the picture is encoded once for each
+ * of a few qualities and every viewer is sent a copy of one of them (see streamLadder.ts). The upload is still one
+ * copy for each viewer.
+ *
  * Where the voice channel has a stream server, none of that connecting happens here. The sharer's app sends the
  * video to the stream server once, with a pass this server hands it, and each viewer's app collects it from there
  * with a pass of its own. Nobody's app talks to anybody else's, and a second viewer costs the sharer nothing.
@@ -22,6 +26,8 @@ import { isRelayed } from './transfer'
 const streamServer = () => import('livekit-client')
 import { letGo, openRoom } from './sealedRoom'
 import { makeGuard, READ_EVERY_MS } from './streamLimit'
+import { HEALTH_EVERY_MS, LADDER_AT, LADDER_OFF, SETTLE_MS, bestOption, judge, ladderLevels, ladderOptions, newHealth, optionAbove, optionBelow, sameOption, type Health, type LadderOption } from './streamLadder'
+import type { FromWorker, ToWorker } from './streamLadderWorker'
 
 /** Tried this many times in a row before a stream that keeps losing the stream server is given up on. */
 const RESEND_TRIES = 3
@@ -78,7 +84,7 @@ export function p2pVideoRate(usual: number, direct: boolean, own: number | undef
 export const P2P_VOICE_RATES = [32, 64, 96, 128, 192, 256]
 export const P2P_VIDEO_RATES = [1500, 2500, 5000, 8000, 12000, 15000, 20000, 30000, 50000]
 
-export const describeQuality = (q: StreamQuality) => `${q.height}p · ${q.fps} fps`
+export const describeQuality = (q: { height: number; fps: number }) => `${q.height}p · ${q.fps} fps`
 
 export interface StreamDeps {
   signal(target: string, kind: 'offer' | 'answer' | 'ice' | 'stop' | 'limit', payload: string): Promise<void>
@@ -102,7 +108,53 @@ interface Outgoing {
   pc: RTCPeerConnection; relayed: boolean | null; pendingIce: RTCIceCandidateInit[]
   /** The most this viewer asked to be sent, in kilobits a second. 0 = no wish of their own. */
   capKbps: number
+  /** What is sent to them passes through the copying worker, so they can be sent a shared level. Only in a P2P channel, in an app that can. */
+  tapped: boolean
+  video: RTCRtpSender | null
+  /** Connected, and it is known whether through a relay. */
+  admitted: boolean
+  /** The shared level they are to be sent, and how; null = an encode of their own, as it always was. */
+  option: LadderOption | null
+  /** What the worker says they are being sent right now: "own", or a level's id. It follows `option` a moment later. */
+  sentFrom: string
+  /** When they were last put on something new. */
+  sentSince: number
+  /** The most they asked for by name ("up to 720p at 30"), over the stream's own channel. */
+  want: { height: number; fps: number } | null
+  /** The most their connection has shown it can take, in kilobits a second; 0 = not held. Moved by the looks at their connection. */
+  heldKbps: number
+  health: Health
+  /** Where they are told what they can choose from, and say what they chose. */
+  channel: RTCDataChannel | null
 }
+
+/** One shared level being encoded: a connection from this app to an end inside this app, which exists to keep the encoder running. */
+interface OpenLevel {
+  id: string; a: RTCPeerConnection; b: RTCPeerConnection; sender: RTCRtpSender | null
+  asking: boolean; askedAt: number
+  /** Since when nobody has been on it. It is closed a few seconds after. */
+  unusedSince: number | null
+}
+
+/** A viewer on a shared level keeps an encoder of their own that makes next to nothing: a picture this many lines tall, this often. */
+const IDLE_HEIGHT = 90
+const IDLE_FPS = 5
+/** A level nobody is on is kept this long, in case someone comes back to it. */
+const LEVEL_LINGER_MS = 5000
+const OWN = 'own'
+
+type Tapped = { createEncodedStreams(): { readable: ReadableStream; writable: WritableStream } }
+
+/**
+ * Whether this app can send one encode to several viewers: it has to be able to take encoded frames off a
+ * connection and put copies of them onto others. The desktop app and Chrome can.
+ */
+export const canShareFrames = (): boolean =>
+  typeof RTCRtpSender !== 'undefined' && 'createEncodedStreams' in RTCRtpSender.prototype && typeof Worker === 'function'
+  && typeof RTCEncodedVideoFrame === 'function' && (RTCEncodedVideoFrame as unknown as { length: number }).length >= 1
+
+/** What a viewer of a shared stream is told they can choose from, and what they are being sent. */
+export interface StreamChoice { options: { height: number; fps: number; kbps: number }[]; on: { height: number; fps: number } | null }
 
 /** Whether this app can capture the computer's sound without also capturing the sound it is playing itself. */
 export const canShareSound = () => !!(navigator.mediaDevices?.getSupportedConstraints?.() as Record<string, boolean> | undefined)?.restrictOwnAudio
@@ -116,6 +168,10 @@ interface Incoming {
   viaServer?: boolean
   /** Asked for the smaller picture (a slow connection). */
   small?: boolean
+  /** The sharer's app is sending shared levels: what we can choose from, and where we say what we chose. */
+  choice?: StreamChoice | null
+  channel?: RTCDataChannel | null
+  want?: { height: number; fps: number } | null
 }
 
 const CONNECT_TIMEOUT = 25_000
@@ -135,6 +191,17 @@ export class StreamEngine {
    * into that one room and no other. So there is one connection per stream being watched, by its sharer.
    */
   private watchRooms = new Map<string, { room: Room | null; ready: Promise<Room> }>()
+  /** What we share is in a P2P channel or call, and goes from this app to each viewer. Only there are encodes shared. */
+  private direct = false
+  /** The shared levels and what they offer, while encodes are being shared. */
+  private ladder: { levels: StreamQuality[]; options: LadderOption[]; timer: number; layered: Map<number, boolean> } | null = null
+  /** The levels being encoded right now, by their place in the ladder. They outlast the ladder for a moment while viewers are moved off them. */
+  private levels = new Map<number, OpenLevel>()
+  private levelRuns = 0
+  private worker: Promise<Worker> | null = null
+  /** Sharing encodes turned out not to work here; every viewer keeps an encode of their own. */
+  private ladderBroken = false
+  private tidying: number | null = null
 
   constructor(deps: StreamDeps) { this.deps = deps }
 
@@ -160,11 +227,12 @@ export class StreamEngine {
    * Begin sharing `stream`. With a `pass` it is sent to the channel's stream server, which only takes it while
    * someone is watching. Without one nothing is sent yet, and each viewer is connected when they ask to watch.
    */
-  async start(stream: MediaStream, kind: StreamKind, quality: StreamQuality | null = null, pass: SfuPassDto | null = null) {
+  async start(stream: MediaStream, kind: StreamKind, quality: StreamQuality | null = null, pass: SfuPassDto | null = null, direct = false) {
     this.stopSharing()
     this.local = stream
     this.kind = kind
     this.chosen = quality
+    this.direct = direct && !pass
     for (const track of stream.getVideoTracks()) track.addEventListener('ended', () => { if (this.local === stream) this.deps.captureEnded() })
     this.deps.changed()
     if (pass) {
@@ -247,6 +315,7 @@ export class StreamEngine {
     void room?.disconnect()
     for (const [viewer, o] of this.out) { void this.deps.signal(viewer, 'stop', '').catch(() => {}); o.pc.close() }
     this.out.clear()
+    this.closeLadder()
     this.local?.getTracks().forEach(t => t.stop())
     this.local = null
     this.kind = null
@@ -264,27 +333,49 @@ export class StreamEngine {
   /** Someone asked to watch: connect to them and send the video. */
   async viewerRequested(viewer: string) {
     if (!this.local) { void this.deps.signal(viewer, 'stop', 'That stream has ended.').catch(() => {}); return }
-    this.out.get(viewer)?.pc.close()
-    const pc = new RTCPeerConnection(this.deps.rtcConfig())
-    const o: Outgoing = { pc, relayed: null, pendingIce: [], capKbps: 0 }
+    const before = this.out.get(viewer)
+    if (before) this.forget(viewer, before)
+    // In a P2P channel, where this app can, what the viewer is sent goes through the copying worker from the start:
+    // untouched while they have an encode of their own, and ready to be swapped for a shared level without connecting again.
+    const local = this.local
+    const worker = this.direct && !this.ladderBroken && canShareFrames() ? await this.copier().catch(() => null) : null
+    if (this.local !== local) return
+    const tapped = worker !== null
+    const pc = new RTCPeerConnection(tapped ? { ...this.deps.rtcConfig(), encodedInsertableStreams: true } as RTCConfiguration : this.deps.rtcConfig())
+    const o: Outgoing = { pc, relayed: null, pendingIce: [], capKbps: 0, tapped, video: null, admitted: false, option: null, sentFrom: OWN, sentSince: 0, want: null, heldKbps: 0, health: newHealth(), channel: null }
     this.out.set(viewer, o)
     pc.onicecandidate = e => { if (e.candidate) void this.deps.signal(viewer, 'ice', JSON.stringify(e.candidate.toJSON())).catch(() => {}) }
     pc.onconnectionstatechange = () => {
       if (this.out.get(viewer) !== o) return
       if (pc.connectionState === 'connected') void this.admit(viewer, o)
-      else if (pc.connectionState === 'failed' || pc.connectionState === 'closed') { this.out.delete(viewer); pc.close(); this.deps.changed() }
+      else if (pc.connectionState === 'failed' || pc.connectionState === 'closed') { this.forget(viewer, o); this.deps.changed() }
     }
     try {
       // The picture, and the sound if it was shared with it.
       for (const track of this.local.getTracks()) {
         const sender = pc.addTrack(track, this.local)
-        if (track.kind === 'video') await this.limit(sender, track, o)
+        if (worker) {
+          const frames = (sender as unknown as Tapped).createEncodedStreams()
+          const hand: ToWorker = track.kind === 'video' ? { t: 'viewer', id: viewer, readable: frames.readable, writable: frames.writable } : { t: 'pipe', readable: frames.readable, writable: frames.writable }
+          worker.postMessage(hand, [frames.readable, frames.writable])
+        }
+        if (track.kind !== 'video') continue
+        o.video = sender
+        // Shared frames are VP8, which is also what a viewer is sent when nothing is said; here it is said.
+        if (tapped) this.preferVp8(pc, sender)
+        await this.limit(sender, track, o)
+      }
+      if (tapped) {
+        // The stream's own channel, between the two apps: the viewer is told what they can choose, and says what they chose.
+        const channel = pc.createDataChannel('quality')
+        o.channel = channel
+        channel.onopen = () => this.tellViewer(o)
+        channel.onmessage = e => this.viewerChose(viewer, o, e.data)
       }
       await pc.setLocalDescription(await pc.createOffer())
       await this.deps.signal(viewer, 'offer', JSON.stringify(pc.localDescription))
     } catch {
-      this.out.delete(viewer)
-      pc.close()
+      this.forget(viewer, o)
     }
     this.deps.changed()
   }
@@ -292,9 +383,16 @@ export class StreamEngine {
   viewerLeft(viewer: string) {
     const o = this.out.get(viewer)
     if (!o) return
-    this.out.delete(viewer)
-    o.pc.close()
+    this.forget(viewer, o)
     this.deps.changed()
+  }
+
+  /** A viewer's connection is over, however it ended. */
+  private forget(viewer: string, o: Outgoing) {
+    if (this.out.get(viewer) === o) this.out.delete(viewer)
+    o.pc.close()
+    if (o.tapped) void this.worker?.then(w => w.postMessage({ t: 'dropViewer', id: viewer } satisfies ToWorker), () => {})
+    this.rebalance()
   }
 
   /** Applies the server's caps, and the viewer's own wish if it is lower, to what one viewer is sent. */
@@ -303,6 +401,8 @@ export class StreamEngine {
     // The sharer's choice (already within what the server allows here), or the server's ordinary limits without one.
     const picked: StreamQuality | null = this.chosen ?? (rules ? { height: rules.maxHeight, fps: rules.maxFps, kbps: rules.maxKbps } : null)
     if (!picked) return
+    // On a shared level their own encoder is kept idle (see idle); it is set to this again when they come off it.
+    if (o.option) return
     // In a P2P channel the picked quality may be far above what the relay is meant to carry. A viewer whose
     // connection fell back to the relay (or is not yet known not to have) gets the ordinary relayed limits instead.
     const held = o.relayed !== false && !!rules
@@ -333,13 +433,303 @@ export class StreamEngine {
         ? 'This stream cannot take more viewers on this server right now.'
         : 'This stream already has as many relayed viewers as this server allows.').catch(() => {})
       setTimeout(() => o.pc.close(), 300)
+      if (o.tapped) void this.worker?.then(w => w.postMessage({ t: 'dropViewer', id: viewer } satisfies ToWorker), () => {})
+      this.rebalance()
       this.deps.changed()
       return
     }
     // Now that we know how this viewer is reached, what they are sent is set again: the full picked quality for a
     // direct viewer, the relayed limits for one on the relay.
     for (const sender of o.pc.getSenders()) if (sender.track?.kind === 'video') await this.limit(sender, sender.track, o)
+    o.admitted = true
+    this.rebalance()
     this.deps.changed()
+  }
+
+  // ---- Shared encoding in a P2P channel (see streamLadder.ts) -----------------------------------------------------
+
+  /** The worker that copies frames, started the first time it is needed. */
+  private copier(): Promise<Worker> {
+    this.worker ??= import('./streamLadderWorker?worker').then(({ default: CopyWorker }) => {
+      const worker = new CopyWorker()
+      worker.onmessage = (e: MessageEvent<FromWorker>) => this.workerSaid(e.data)
+      return worker
+    })
+    return this.worker
+  }
+  private toWorker(message: ToWorker) { void this.worker?.then(w => w.postMessage(message), () => {}) }
+
+  private preferVp8(pc: RTCPeerConnection, sender: RTCRtpSender) {
+    try {
+      const all = RTCRtpSender.getCapabilities('video')?.codecs ?? []
+      const vp8 = all.filter(c => c.mimeType.toLowerCase() === 'video/vp8')
+      if (vp8.length > 0) pc.getTransceivers().find(x => x.sender === sender)?.setCodecPreferences([...vp8, ...all.filter(c => !vp8.includes(c))])
+    } catch { /* the engine's own order stands */ }
+  }
+
+  /** Whether a viewer can be sent a shared level: connected, tapped, and being sent the kind of video the levels are. */
+  private canTake(o: Outgoing) {
+    if (!o.tapped || !o.admitted || !o.video) return false
+    try { return o.video.getParameters().codecs?.[0]?.mimeType.toLowerCase() === 'video/vp8' } catch { return false }
+  }
+
+  /** Starts or ends the sharing of encodes as viewers come and go, and puts every viewer on what they should now be sent. */
+  private rebalance() {
+    if (!this.local) return
+    const able = [...this.out.values()].filter(o => this.canTake(o)).length
+    if (!this.ladder && this.direct && !this.ladderBroken && able >= LADDER_AT) this.beginLadder()
+    else if (this.ladder && able <= LADDER_OFF) this.endLadder()
+    for (const [viewer, o] of this.out) this.place(viewer, o)
+    this.tidyLevels()
+  }
+
+  private beginLadder() {
+    const top = this.quality
+    if (!top) return
+    const levels = ladderLevels(top, qualityChoices(this.deps.settings(), true))
+    // Half the frames a second is not offered until a level's own frames have shown that it can be done (see the worker).
+    this.ladder = { levels, options: ladderOptions(levels, () => false), timer: window.setInterval(() => { void this.lookAtViewers() }, HEALTH_EVERY_MS), layered: new Map() }
+  }
+
+  /** A level's frames have shown whether every other one can be left out: what is offered follows, and so does everyone on it. */
+  private layersKnown(index: number, layered: boolean) {
+    const ladder = this.ladder
+    if (!ladder || ladder.layered.get(index) === layered) return
+    ladder.layered.set(index, layered)
+    // A level not yet running is taken to do as the ones that are: it is the same encoder with the same settings.
+    const all = [...ladder.layered.values()].every(Boolean)
+    ladder.options = ladderOptions(ladder.levels, level => ladder.layered.get(level) ?? all)
+    for (const [viewer, o] of this.out) { this.place(viewer, o); this.tellViewer(o) }
+    this.tidyLevels()
+  }
+
+  /** Everyone goes back to an encode of their own. The levels close once nobody is being sent them. */
+  private endLadder() {
+    if (!this.ladder) return
+    window.clearInterval(this.ladder.timer)
+    this.ladder = null
+  }
+
+  /** Sharing has stopped: nothing of the ladder is kept. */
+  private closeLadder() {
+    this.endLadder()
+    for (const level of this.levels.values()) { level.a.close(); level.b.close() }
+    this.levels.clear()
+    if (this.tidying !== null) { window.clearTimeout(this.tidying); this.tidying = null }
+    const worker = this.worker
+    this.worker = null
+    void worker?.then(w => w.terminate(), () => {})
+  }
+
+  /** The most a viewer may be sent because of how they are reached: someone on the relay is held to the server's ordinary limits. */
+  private relayCeiling(o: Outgoing) {
+    const rules = this.deps.settings()
+    return o.relayed !== false && rules ? { height: rules.maxHeight, fps: rules.maxFps, kbps: rules.maxKbps } : null
+  }
+
+  /** The best a viewer may be sent, leaving aside what their connection has shown. */
+  private allowed(o: Outgoing) {
+    return this.ladder ? this.ladder.options.filter(option => bestOption([option], this.relayCeiling(o)) !== null) : []
+  }
+
+  /** Puts one viewer on the best level they may have and can take, or back on an encode of their own. */
+  private place(viewer: string, o: Outgoing) {
+    const option = this.ladder && this.canTake(o)
+      ? bestOption(this.ladder.options, this.relayCeiling(o), { kbps: o.capKbps }, o.want, { kbps: o.heldKbps })
+      : null
+    if (sameOption(option, o.option)) return
+    o.option = option
+    if (option) {
+      const level = this.openLevel(option.level)
+      this.toWorker({ t: 'set', viewer, source: level.id, half: option.half })
+    } else if (o.tapped) {
+      // Their own encoder first has to be making the real picture again; the worker changes over on its next keyframe.
+      const track = o.video?.track
+      void (o.video && track ? this.limit(o.video, track, o) : Promise.resolve()).then(() => this.toWorker({ t: 'set', viewer, source: null, half: false }))
+    }
+    this.tellViewer(o)
+  }
+
+  /** A viewer on a shared level: their own encoder is turned down to nearly nothing. What it makes is not sent. */
+  private async idle(o: Outgoing) {
+    const sender = o.video
+    if (!sender || !this.ladder) return
+    try {
+      const params = sender.getParameters()
+      const height = sender.track?.getSettings().height ?? 720
+      for (const encoding of params.encodings ?? []) {
+        // The connection still has to be allowed to carry the level's rate, which is not this encoder's.
+        encoding.maxBitrate = this.ladder.options[0]!.kbps * 1000
+        encoding.maxFramerate = IDLE_FPS
+        encoding.scaleResolutionDownBy = Math.max(1, height / IDLE_HEIGHT)
+      }
+      await sender.setParameters(params)
+    } catch { /* it keeps encoding the full picture, unsent: wasteful, not wrong */ }
+  }
+
+  private workerSaid(m: FromWorker) {
+    if (m.t === 'key') {
+      const level = [...this.levels.values()].find(l => l.id === m.level)
+      if (level) void this.keyFrame(level)
+    } else if (m.t === 'ownKey') {
+      const sender = this.out.get(m.viewer)?.video
+      if (sender) void this.askKeyFrame(sender)
+    } else if (m.t === 'on') {
+      const o = this.out.get(m.viewer)
+      if (!o) return
+      o.sentFrom = m.source
+      o.sentSince = performance.now()
+      if (m.source !== OWN && o.option) void this.idle(o)
+      this.tellViewer(o)
+      this.tidyLevels()
+    } else if (m.t === 'layers') {
+      const index = [...this.levels].find(([, l]) => l.id === m.level)?.[0]
+      if (index !== undefined) this.layersKnown(index, m.layered)
+    } else if (m.t === 'unsupported') {
+      // The frames cannot be shared in this engine after all: everyone keeps an encode of their own from here on.
+      this.ladderBroken = true
+      this.endLadder()
+      for (const [viewer, o] of this.out) this.place(viewer, o)
+      this.tidyLevels()
+    }
+  }
+
+  private async askKeyFrame(sender: RTCRtpSender) {
+    try { await (sender.setParameters as (p: RTCRtpSendParameters, o: unknown) => Promise<void>).call(sender, sender.getParameters(), { encodingOptions: [{ keyFrame: true }] }) }
+    catch { /* the engine makes one by itself soon enough */ }
+  }
+
+  private async keyFrame(level: OpenLevel) {
+    if (!level.sender || level.asking || performance.now() - level.askedAt < 300) return
+    level.asking = true
+    level.askedAt = performance.now()
+    await this.askKeyFrame(level.sender)
+    level.asking = false
+  }
+
+  /** The encoder for one level, started if it is not running. */
+  private openLevel(index: number): OpenLevel {
+    const open = this.levels.get(index)
+    if (open) { open.unusedSince = null; return open }
+    // Both ends are in this app, and it reaches itself without anyone's help: no servers are asked for anything.
+    const a = new RTCPeerConnection({ iceServers: [], encodedInsertableStreams: true } as RTCConfiguration)
+    const b = new RTCPeerConnection({ iceServers: [] })
+    const level: OpenLevel = { id: `level${index}.${++this.levelRuns}`, a, b, sender: null, asking: false, askedAt: 0, unusedSince: null }
+    this.levels.set(index, level)
+    void this.runLevel(index, level).catch(() => {
+      // It could not be started: whoever was to be on it goes back to an encode of their own, and nothing more is shared.
+      if (this.levels.get(index) === level) this.levels.delete(index)
+      a.close(); b.close()
+      this.ladderBroken = true
+      this.endLadder()
+      for (const [viewer, o] of this.out) this.place(viewer, o)
+    })
+    return level
+  }
+
+  private async runLevel(index: number, level: OpenLevel) {
+    const quality = this.ladder?.levels[index]
+    const track = this.local?.getVideoTracks()[0]
+    const worker = await this.copier()
+    if (!quality || !track || !this.local || this.levels.get(index) !== level) throw new Error('The stream ended.')
+    const { a, b } = level
+    a.onicecandidate = e => { if (e.candidate) void b.addIceCandidate(e.candidate).catch(() => {}) }
+    b.onicecandidate = e => { if (e.candidate) void a.addIceCandidate(e.candidate).catch(() => {}) }
+    const sender = a.addTrack(track, this.local)
+    level.sender = sender
+    this.preferVp8(a, sender)
+    const frames = (sender as unknown as Tapped).createEncodedStreams()
+    worker.postMessage({ t: 'level', id: level.id, readable: frames.readable, writable: frames.writable } satisfies ToWorker, [frames.readable, frames.writable])
+    const offer = await a.createOffer()
+    await a.setLocalDescription(offer)
+    await b.setRemoteDescription(offer)
+    const answer = await b.createAnswer()
+    await b.setLocalDescription(answer)
+    // Left to itself the engine starts every stream small and soft and takes many seconds to work up to the rate it
+    // was given, in case the line cannot take it. This line is inside the computer: it is told to start at its rate.
+    const rate = `x-google-start-bitrate=${quality.kbps};x-google-min-bitrate=${Math.round(quality.kbps / 2)};x-google-max-bitrate=${quality.kbps}`
+    const sdp = (answer.sdp ?? '')
+      .replace(/a=rtpmap:(\d+) VP8\/90000\r\n/g, (line: string, pt: string) => ((answer.sdp ?? '').includes(`a=fmtp:${pt} `) ? line : `${line}a=fmtp:${pt} ${rate}\r\n`))
+    await a.setRemoteDescription({ type: 'answer', sdp })
+    const params = sender.getParameters()
+    const height = track.getSettings().height ?? 0
+    for (const encoding of params.encodings ?? []) {
+      encoding.maxBitrate = quality.kbps * 1000
+      encoding.maxFramerate = quality.fps
+      encoding.scaleResolutionDownBy = height > quality.height * 1.02 ? height / quality.height : 1
+      // At 60 a second every other frame is one nothing else is built on, so it can be left out for whoever wants 30.
+      if (quality.fps >= 50) (encoding as RTCRtpEncodingParameters & { scalabilityMode?: string }).scalabilityMode = 'L1T2'
+    }
+    await sender.setParameters(params)
+  }
+
+  /** Closes the levels nobody has been on for a little while. */
+  private tidyLevels() {
+    const now = performance.now()
+    let waiting = false
+    for (const [index, level] of this.levels) {
+      const used = [...this.out.values()].some(o => o.option?.level === index || o.sentFrom === level.id)
+      if (used) { level.unusedSince = null; continue }
+      level.unusedSince ??= now
+      if (now - level.unusedSince < LEVEL_LINGER_MS) { waiting = true; continue }
+      this.levels.delete(index)
+      this.toWorker({ t: 'dropLevel', id: level.id })
+      level.a.close(); level.b.close()
+    }
+    if (waiting && this.tidying === null) this.tidying = window.setTimeout(() => { this.tidying = null; this.tidyLevels() }, LEVEL_LINGER_MS + 200)
+  }
+
+  /** Every couple of seconds: is each viewer's connection keeping up with what it is being sent? */
+  private async lookAtViewers() {
+    const ladder = this.ladder
+    if (!ladder) return
+    for (const [viewer, o] of this.out) {
+      const current = o.option
+      // Only once they are really being sent the level they were put on.
+      if (!current || o.sentFrom !== this.levels.get(current.level)?.id) continue
+      let availableKbps: number | null = null, lost: number | null = null
+      try {
+        const stats = await o.pc.getStats()
+        stats.forEach(s => {
+          if (s.type === 'candidate-pair' && s.nominated && s.state === 'succeeded' && typeof s.availableOutgoingBitrate === 'number') availableKbps = s.availableOutgoingBitrate / 1000
+          if (s.type === 'remote-inbound-rtp' && s.kind === 'video' && typeof s.fractionLost === 'number') lost = s.fractionLost
+        })
+      } catch { continue }
+      if (this.ladder !== ladder || this.out.get(viewer) !== o || o.option !== current) continue
+      // What they may have at the most, their connection aside.
+      const most = bestOption(ladder.options, this.relayCeiling(o), { kbps: o.capKbps }, o.want)
+      const above = optionAbove(ladder.options, current)
+      const verdict = judge(o.health, { availableKbps, lost }, current, above && most && above.kbps <= most.kbps ? above : null, performance.now() - o.sentSince < SETTLE_MS)
+      if (verdict === 'down') {
+        const below = optionBelow(ladder.options, current)
+        if (!below) continue
+        o.heldKbps = below.kbps
+      } else if (verdict === 'up' && above) o.heldKbps = above === most ? 0 : above.kbps
+      else continue
+      this.place(viewer, o)
+    }
+  }
+
+  /** Tells a viewer's app what it can choose from and what it is being sent. Nothing to choose from = an encode of their own. */
+  private tellViewer(o: Outgoing) {
+    if (o.channel?.readyState !== 'open') return
+    const on = o.option && o.sentFrom !== OWN ? { height: o.option.height, fps: o.option.fps } : null
+    const choice: StreamChoice = { options: o.option ? this.allowed(o).map(({ height, fps, kbps }) => ({ height, fps, kbps })) : [], on }
+    try { o.channel.send(JSON.stringify(choice)) } catch { /* the connection is closing */ }
+  }
+
+  /** A viewer said the most they want ("up to 720p at 30"), or that they want the best again. */
+  private viewerChose(viewer: string, o: Outgoing, said: unknown) {
+    if (this.out.get(viewer) !== o || typeof said !== 'string' || said.length > 200) return
+    let want: unknown
+    try { want = (JSON.parse(said) as { want?: unknown }).want } catch { return }
+    const w = want as { height?: unknown; fps?: unknown } | null | undefined
+    o.want = w && typeof w.height === 'number' && typeof w.fps === 'number' && w.height > 0 && w.fps > 0 ? { height: w.height, fps: w.fps } : null
+    // Their choice is theirs: what their connection showed before is forgotten, and found out again if need be.
+    o.heldKbps = 0
+    o.health = newHealth()
+    this.place(viewer, o)
+    this.tellViewer(o)
   }
 
   // ---- Watching --------------------------------------------------------------------------------------------------
@@ -488,6 +878,21 @@ export class StreamEngine {
     void this.deps.signal(streamer, 'limit', String(Math.max(0, Math.round(kbps)))).catch(() => { /* the stream is ending */ })
   }
 
+  /** What a stream we are watching can be sent to us at, when its sharer's app is sharing levels; null otherwise. */
+  choiceOf(streamer: string): (StreamChoice & { want: { height: number; fps: number } | null }) | null {
+    const entry = this.incoming.get(streamer)
+    return entry?.choice && entry.choice.options.length > 0 ? { ...entry.choice, want: entry.want ?? null } : null
+  }
+
+  /** Say the most we want of a stream ("up to 720p at 30"), or null for the best our connection takes. */
+  chooseQuality(streamer: string, want: { height: number; fps: number } | null) {
+    const entry = this.incoming.get(streamer)
+    if (!entry) return
+    entry.want = want
+    if (entry.channel?.readyState === 'open') try { entry.channel.send(JSON.stringify({ want })) } catch { /* the stream is ending */ }
+    this.deps.changed()
+  }
+
   watching(): Watching[] { return [...this.incoming.values()].map(i => ({ ...i.view })) }
   streamOf(streamer: string): MediaStream | null { return this.incoming.get(streamer)?.stream ?? null }
 
@@ -526,6 +931,7 @@ export class StreamEngine {
         if (!sending) return
         sending.capKbps = Math.max(0, Math.min(1_000_000, parseInt(payload, 10) || 0))
         for (const sender of sending.pc.getSenders()) if (sender.track?.kind === 'video') await this.limit(sender, sender.track, sending)
+        this.place(from, sending)
       } else if (kind === 'offer' && receiving) {
         receiving.pc?.close()
         const pc = new RTCPeerConnection(this.deps.rtcConfig())
@@ -535,6 +941,21 @@ export class StreamEngine {
           if (this.incoming.get(from) !== receiving) return
           receiving.stream = e.streams[0] ?? new MediaStream([e.track])
           this.deps.changed()
+        }
+        // The stream's own channel, when the sharer's app opens one: what we can choose from, and where we say what we chose.
+        pc.ondatachannel = e => {
+          if (e.channel.label !== 'quality' || this.incoming.get(from) !== receiving || receiving.pc !== pc) return
+          receiving.channel = e.channel
+          e.channel.onopen = () => { if (receiving.want) try { e.channel.send(JSON.stringify({ want: receiving.want })) } catch { /* closing */ } }
+          e.channel.onmessage = m => {
+            if (typeof m.data !== 'string' || m.data.length > 4000) return
+            try {
+              const told = JSON.parse(m.data) as StreamChoice
+              const sized = (x: unknown): x is { height: number; fps: number; kbps: number } => !!x && typeof (x as { height: unknown }).height === 'number' && typeof (x as { fps: unknown }).fps === 'number'
+              receiving.choice = { options: Array.isArray(told.options) ? told.options.filter(sized).slice(0, 12).map(o => ({ height: o.height, fps: o.fps, kbps: Number(o.kbps) || 0 })) : [], on: sized(told.on) ? { height: told.on.height, fps: told.on.fps } : null }
+              this.deps.changed()
+            } catch { /* not for us */ }
+          }
         }
         pc.onconnectionstatechange = () => {
           if (this.incoming.get(from) !== receiving || receiving.pc !== pc) return

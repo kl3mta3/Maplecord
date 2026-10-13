@@ -126,7 +126,24 @@ export interface SfuPassDto {
 }
 /** A quality a stream can be sent at, and the most kilobits a second it may use. Set by the server's owner. */
 export interface StreamRateDto { height: number; fps: number; kbps: number }
-export interface GuildSummaryDto { guild: GuildDto; channels: ChannelDto[]; members: MemberDto[]; roles?: RoleDto[] | null; myPermissions: number; voice?: Record<string, VoiceParticipantDto[]> | null }
+export interface GuildSummaryDto {
+  guild: GuildDto; channels: ChannelDto[]; members: MemberDto[]; roles?: RoleDto[] | null; myPermissions: number; voice?: Record<string, VoiceParticipantDto[]> | null
+  /** How many members the server has. */
+  memberCount?: number
+  /**
+   * A server with a great many members: `members` is then the people who are there (online or in a voice channel),
+   * its bots, its owner and ourselves, and not everyone. The rest are read a page at a time (see memberPaging.ts).
+   */
+  membersPartial?: boolean
+}
+/** A relay the connection test can be run against: its name, where it is (as its owner wrote it), and its test service's address. */
+export interface TestRelayDto { name: string; region?: string | null; url: string }
+/** The relays to ping, and how many seconds until this account may run a speed test again (0 = now). */
+export interface ConnectionTestDto { relays: TestRelayDto[]; waitSeconds: number }
+/** A pass for one speed test: the relay to run it against, and what to show its test service. */
+export interface ConnectionTestPassDto { name: string; region?: string | null; url: string; pass: string }
+/** Some of a server's members, in order of their username. `next` is what to ask for the following page with; null when there are no more. */
+export interface MemberPageDto { members: MemberDto[]; next?: string | null }
 export interface ItemIconDto { path: string }
 /** contentType is what the server found the file to be: image/* and video/* can be shown in place, anything else is a download. */
 export interface AttachmentDto {
@@ -143,9 +160,9 @@ export const EventAnswer = { Invited: 0, Going: 1, NotGoing: 2, Unsure: 3, WhyMe
 export type EventAnswer = (typeof EventAnswer)[keyof typeof EventAnswer]
 /** Someone on an event's list. `invitedById` is who asked them along; missing for someone who answered without being asked. */
 export interface EventParticipantDto { userId: string; name: string; answer: EventAnswer; invitedById?: string | null }
-export interface CalendarEventDto { id: string; channelId: string; authorId: string; authorName: string; title: string; note?: string | null; day: string; at?: string | null; createdAt: string; editedAt?: string | null; participants?: EventParticipantDto[] | null; /** The colour it is shown in, as #rrggbb. */ color?: string | null; /** Only the people on its list and members of its roles may answer. */ inviteOnly?: boolean; /** The roles added to it: everyone with one counts as invited. */ roleIds?: string[] | null }
+export interface CalendarEventDto { id: string; channelId: string; authorId: string; authorName: string; title: string; note?: string | null; day: string; at?: string | null; createdAt: string; editedAt?: string | null; participants?: EventParticipantDto[] | null; /** The colour it is shown in, as #rrggbb. */ color?: string | null; /** Only the people on its list and members of its roles may answer. */ inviteOnly?: boolean; /** The note is Markdown. */ noteMarkdown?: boolean; /** The roles added to it: everyone with one counts as invited. */ roleIds?: string[] | null }
 /** An event as it was when someone posted it into a channel. It is not kept up afterwards. */
-export interface PostedEventDto { eventId: string; calendarId: string; title: string; note?: string | null; day: string; at?: string | null; color?: string | null }
+export interface PostedEventDto { eventId: string; calendarId: string; title: string; note?: string | null; day: string; at?: string | null; color?: string | null; noteMarkdown?: boolean }
 /** A file offered straight from someone's app. available = their app is still connected and has not withdrawn it. */
 /** `available`: the sender is online with the file. Not available comes back when they are, unless `withdrawn`. */
 export interface FileOfferDto { id: string; fileName: string; size: number; available: boolean; withdrawn?: boolean }
@@ -190,6 +207,8 @@ export interface MessageDto {
   poll?: PollDto | null
   /** On an event posted from a calendar: the event as it was then. Drawn as a card in place of the text. */
   event?: PostedEventDto | null
+  /** The text is Markdown, to be drawn as such. Only a post in a forum can be. */
+  markdown?: boolean
   /** Buttons under a bot's message. Pressing one tells the bot who pressed which. */
   buttons?: ButtonDto[] | null
   /** Files on a message from a P2P channel. They are not on the server: their contents come from other people's apps. */
@@ -216,7 +235,7 @@ export interface PollOptionDto { text: string; votes: number; mine?: boolean }
 export interface PollDto { options: PollOptionDto[]; multi: boolean; closesAt: string | null; voters: number; closed?: boolean }
 /** A poll being started: two to ten choices, whether several may be picked, and for how many hours it stays open (null: until closed). */
 export interface NewPollDto { options: string[]; multi: boolean; hours: number | null }
-export interface PostRequest { channelId: string; content: string | null; attachmentIds?: string[] | null; replyToId?: string | null; threadId?: string | null; title?: string | null; poll?: NewPollDto | null }
+export interface PostRequest { channelId: string; content: string | null; attachmentIds?: string[] | null; replyToId?: string | null; threadId?: string | null; title?: string | null; poll?: NewPollDto | null; /** On a post in a forum: its text is Markdown. */ markdown?: boolean }
 export interface SearchResultDto { messages: MessageDto[]; before: string | null; more: boolean }
 /** One picture or video of a channel, and the message it is on (and the thread that message is in, if it is in one). */
 export interface MediaItemDto { file: AttachmentDto; messageId: string; threadId: string | null; authorId: string; authorName: string; at: string }

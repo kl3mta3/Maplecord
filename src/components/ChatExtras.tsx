@@ -3,6 +3,8 @@ import type { AttachmentDto, MediaItem, MessageDto, NewPollDto, PollDto, Reactio
 import { isElectron } from '../platform'
 import { Dialog } from './Dialogs'
 import { postedWhen } from './Calendar'
+import { MarkdownBox } from './Markdown'
+import { markdownFirstLine } from '../markdown'
 
 // The parts of the chat that belong to one message beyond its text: what it answers, its reactions, its poll, the
 // thread hanging off it. And the lists a channel can be looked at through: its pins, a search, a forum's posts, a
@@ -131,8 +133,11 @@ export function PollDialog({ onSubmit, onClose }: { onSubmit: (question: string,
 
 /** A new post in a forum (a title and what it says) or a gallery (a title and its pictures). */
 export function NewPostDialog({ gallery, mostPictures, mostText = 4000, onSubmit, onClose }: {
-  gallery: boolean; mostPictures: number; mostText?: number; onSubmit: (title: string, text: string, files: File[]) => Promise<boolean>; onClose: () => void
+  gallery: boolean; mostPictures: number; mostText?: number
+  /** `markdown`: the text of a forum post was written as Markdown. */
+  onSubmit: (title: string, text: string, files: File[], markdown: boolean) => Promise<boolean>; onClose: () => void
 }) {
+  const [markdown, setMarkdown] = useState(false)
   const [title, setTitle] = useState('')
   const [text, setText] = useState('')
   const [files, setFiles] = useState<File[]>([])
@@ -146,12 +151,15 @@ export function NewPostDialog({ gallery, mostPictures, mostText = 4000, onSubmit
   }, [files])
   const add = (picked: File[]) => setFiles(all => [...all, ...picked.filter(f => !gallery || f.type.startsWith('image/'))].slice(0, mostPictures))
   const ok = title.trim().length > 0 && (gallery ? files.length > 0 : text.trim().length > 0 || files.length > 0) && !busy
-  const post = async () => { setBusy(true); try { if (await onSubmit(title.trim(), text, files)) onClose() } finally { setBusy(false) } }
+  const post = async () => { setBusy(true); try { if (await onSubmit(title.trim(), text, files, !gallery && markdown)) onClose() } finally { setBusy(false) } }
   return (
     <Dialog title={gallery ? 'Post pictures' : 'New post'} onClose={onClose} wide scrolls>
       <input autoFocus placeholder="Title" maxLength={100} value={title} onChange={e => setTitle(e.target.value)} />
-      <textarea rows={gallery ? 2 : 6} placeholder={gallery ? 'Say something about them (optional)' : 'What do you want to say?'} maxLength={mostText} value={text} onChange={e => setText(e.target.value)}
-        onPaste={e => { const pasted = Array.from(e.clipboardData.files); if (pasted.length > 0 && !e.clipboardData.getData('text/plain')) { e.preventDefault(); add(pasted) } }} />
+      {gallery
+        ? <textarea rows={2} placeholder="Say something about them (optional)" maxLength={mostText} value={text} onChange={e => setText(e.target.value)}
+            onPaste={e => { const pasted = Array.from(e.clipboardData.files); if (pasted.length > 0 && !e.clipboardData.getData('text/plain')) { e.preventDefault(); add(pasted) } }} />
+        : <MarkdownBox value={text} onChange={setText} markdown={markdown} onMarkdown={setMarkdown} rows={8} maxLength={mostText} placeholder="What do you want to say?"
+            onPaste={e => { const pasted = Array.from(e.clipboardData.files); if (pasted.length > 0 && !e.clipboardData.getData('text/plain')) { e.preventDefault(); add(pasted) } }} />}
       <input ref={pickRef} type="file" hidden multiple accept={gallery ? 'image/png,image/jpeg,image/gif,image/webp' : undefined} onChange={e => { add(Array.from(e.target.files ?? [])); e.target.value = '' }} />
       <div className="postfiles" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); e.stopPropagation(); add(Array.from(e.dataTransfer.files)) }}>
         {files.map((f, i) => (
@@ -279,7 +287,7 @@ export function ForumList({ posts, nameOf, onOpen }: { posts: MessageDto[]; name
       {ordered.map(m => (
         <button key={m.id} className="forumpost" onClick={() => onOpen(m)}>
           <div className="posttitle">{m.pinnedAt && <span title="Pinned">📌 </span>}{m.title ?? firstLine(m.content, 80)}</div>
-          <div className="said muted">{m.event ? '📅 ' + postedWhen(m.event) : firstLine(m.content) || (m.attachments.length > 0 ? 'Files attached' : m.poll ? 'A poll' : '')}</div>
+          <div className="said muted">{m.event ? '📅 ' + postedWhen(m.event) : (m.markdown ? markdownFirstLine(m.content, 160) : firstLine(m.content)) || (m.attachments.length > 0 ? 'Files attached' : m.poll ? 'A poll' : '')}</div>
           <div className="postfoot muted">
             <span>{nameOf(m)}</span>
             <span>💬 {m.threadCount ?? 0}</span>

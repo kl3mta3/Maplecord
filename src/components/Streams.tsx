@@ -1,3 +1,4 @@
+import { ConnectionTestDialog } from './ConnectionTest'
 import { useEffect, useRef, useState } from 'react'
 import type { Store } from '../store'
 import { bridge, type ShareSource } from '../platform'
@@ -13,6 +14,7 @@ import { openPopout, type Popout } from '../popout'
  */
 export function SharePicker({ store, onClose }: { store: Store; onClose: () => void }) {
   const desktop = bridge()
+  const [testing, setTesting] = useState(false)
   const [sources, setSources] = useState<ShareSource[] | null>(null)
   const [tab, setTab] = useState<'window' | 'screen'>('window')
   const [hint, setHint] = useState<'motion' | 'detail'>('motion')
@@ -40,7 +42,7 @@ export function SharePicker({ store, onClose }: { store: Store; onClose: () => v
   const shown = (sources ?? []).filter(s => s.kind === tab)
 
   return (
-    <Dialog title="Share with the voice channel" onClose={onClose} wide>
+    <Dialog title="Share with the voice channel" onClose={testing ? () => {} : onClose} wide>
       {rules && (
         <div className="muted">
           {rules.streamServer && !direct
@@ -98,7 +100,11 @@ export function SharePicker({ store, onClose }: { store: Store; onClose: () => v
           <span className="muted">everything it plays except Maplecord</span>
         </label>
       ) : <div className="muted">Only the picture is sent from this browser. Your microphone carries on as normal.</div>}
-      <div className="row"><span className="grow" /><button onClick={onClose}>Cancel</button></div>
+      <div className="row">
+        <button className="subtle" title="How fast your connection is, and how many viewers it carries" onClick={() => setTesting(true)}>Test connection</button>
+        <span className="grow" /><button onClick={onClose}>Cancel</button>
+      </div>
+      {testing && <ConnectionTestDialog api={store.api} rules={rules} onClose={() => setTesting(false)} />}
     </Dialog>
   )
 }
@@ -235,6 +241,20 @@ function WatchedTile({ store, streamer, userId, title, detail, state, error, can
   useEffect(() => { if (state === 'live' && limitKbps > 0) sendLimit.current(streamer, limitKbps) }, [state, limitKbps, streamer])
   const chooseLimit = (kbps: number) => { setLimitKbps(kbps); store.setStreamLimit(streamer, kbps) }
   const most = store.streamRules?.maxKbps ?? 2500
+  // A P2P stream with several viewers is sent at a few set qualities: we can say the most we want of them.
+  const choice = store.streamChoice(streamer)
+  const sameSize = (a: { height: number; fps: number } | null, b: { height: number; fps: number } | null) => !!a && !!b && a.height === b.height && a.fps === b.fps
+  const qualityEntries = (): MenuEntry[] => (choice
+    ? [
+        { kind: 'label', text: choice.on ? `Quality sent to you · now ${describeQuality(choice.on)}` : 'Quality sent to you' },
+        { kind: 'item', label: 'Best your connection takes', checked: !choice.want, onClick: () => store.chooseStreamQuality(streamer, null) },
+        ...choice.options.map(o => ({ kind: 'item', label: `Up to ${describeQuality(o)}`, checked: sameSize(choice.want, o), onClick: () => store.chooseStreamQuality(streamer, { height: o.height, fps: o.fps }) } as MenuEntry)),
+      ]
+    : [
+        { kind: 'label', text: 'Quality sent to you' },
+        { kind: 'item', label: 'Best available', checked: limitKbps === 0, onClick: () => chooseLimit(0) },
+        ...[1500, 800, 400].filter(k => k < most).map(k => ({ kind: 'item', label: `Up to ${k >= 1000 ? (k / 1000).toFixed(1) + ' Mbps' : k + ' kbps'}${k === 400 ? ' · slow connections' : ''}`, checked: limitKbps === k, onClick: () => chooseLimit(k) } as MenuEntry)),
+      ])
   const menuEntries = (): MenuEntry[] => [
     { kind: 'label', text: title },
     ...(hasSound
@@ -244,9 +264,7 @@ function WatchedTile({ store, streamer, userId, title, detail, state, error, can
         ]
       : [{ kind: 'item', label: 'This stream has no sound', disabled: true, onClick: () => {} } as MenuEntry]),
     { kind: 'sep' },
-    { kind: 'label', text: 'Quality sent to you' },
-    { kind: 'item', label: 'Best available', checked: limitKbps === 0, onClick: () => chooseLimit(0) },
-    ...[1500, 800, 400].filter(k => k < most).map(k => ({ kind: 'item', label: `Up to ${k >= 1000 ? (k / 1000).toFixed(1) + ' Mbps' : k + ' kbps'}${k === 400 ? ' · slow connections' : ''}`, checked: limitKbps === k, onClick: () => chooseLimit(k) } as MenuEntry)),
+    ...qualityEntries(),
     { kind: 'sep' },
     { kind: 'item', label: 'Full screen', icon: '⛶', onClick: () => { setMenu(null); toggleFullScreen(videoRef.current?.parentElement ?? null) } },
     { kind: 'item', label: 'Stop watching', icon: '✕', onClick: () => { void store.unwatchStream(streamer) } },

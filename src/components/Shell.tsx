@@ -56,9 +56,10 @@ import { DropBanner, PluginsDialog } from './Plugins'
 import { SharePicker, StreamStage } from './Streams'
 import { CHAT_LEAST, COLUMNS, ColumnGrip, clampColumn, type Column } from './ColumnGrip'
 import { channelMembers, mayManageMessagesIn, mayWriteIn } from '../channelViewers'
-import { memberGroups } from '../memberGroups'
+import { memberGroups, type MemberGroup } from '../memberGroups'
 import { dropInRail, railEntries, type RailThing, type RailWhere } from '../railOrder'
 import { CalendarView, EventCard } from './Calendar'
+import { Markdown } from './Markdown'
 import { ForumList, GalleryGrid, MediaGrid, NewPostDialog, PinsDialog, PollDialog, PollView, QUICK_REACTIONS, ReactionPicker, Reactions, ReplyQuote, SearchDialog } from './ChatExtras'
 
 type DialogState =
@@ -321,10 +322,10 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
     setMenu({ kind, x: box.left, y: box.top - 8 })
   }
   const openGuildMenu = (e: React.MouseEvent, guildId: string) => { e.preventDefault(); e.stopPropagation(); setMenu({ kind: 'guild', guildId, x: e.clientX, y: e.clientY }) }
-  const openUserMenu = (e: React.MouseEvent, userId: string, username: string) => { e.preventDefault(); e.stopPropagation(); setMenu({ kind: 'user', userId, username, x: e.clientX, y: e.clientY }) }
+  const openUserMenu = (e: React.MouseEvent, userId: string, username: string) => { e.preventDefault(); e.stopPropagation(); if (g) store.needMembers(g.guild.id, [userId]); setMenu({ kind: 'user', userId, username, x: e.clientX, y: e.clientY }) }
   /** The profile card shown when you click someone. */
   const [card, setCard] = useState<{ userId: string; name: string; x: number; y: number } | null>(null)
-  const openCard = (e: React.MouseEvent, userId: string, name: string) => { e.stopPropagation(); setCard({ userId, name, x: e.clientX + 12, y: e.clientY - 40 }) }
+  const openCard = (e: React.MouseEvent, userId: string, name: string) => { e.stopPropagation(); if (g) store.needMembers(g.guild.id, [userId]); setCard({ userId, name, x: e.clientX + 12, y: e.clientY - 40 }) }
   const serverUrl = store.settings.serverUrl
   const mine = me ? store.appearanceOf(me.id) : null
   /** What to call a member here: their nickname on this server, else the name they chose, else their username. */
@@ -464,6 +465,27 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   // but the P2P bots, which are only ever in particular channels.
   const inChannel = g && store.selectedChannel?.guildId === g.guild.id ? g.channels.find(c => c.id === store.selectedChannel?.id) ?? null : null
   const listed = useMemo(() => (!g ? [] : inChannel ? channelMembers(g, inChannel) : g.members.filter(m => !m.directBot)), [g, inChannel])
+
+  // A large server is not sent everyone: its list can be looked through by name, and the people found are kept.
+  const partialId = g?.membersPartial ? g.guild.id : null
+  const [memberQuery, setMemberQuery] = useState('')
+  const [memberHits, setMemberHits] = useState<string[] | null>(null)
+  useEffect(() => { setMemberQuery(''); setMemberHits(null) }, [partialId])
+  const findMembers = store.findMembers
+  useEffect(() => {
+    const q = memberQuery.trim()
+    if (!partialId || !q) { setMemberHits(null); return }
+    let stale = false
+    // Asked once the typing pauses, not at every letter.
+    const wait = window.setTimeout(() => { void findMembers(partialId, q).then(found => { if (!stale) setMemberHits(found.map(m => m.userId)) }) }, 300)
+    return () => { stale = true; window.clearTimeout(wait) }
+  }, [findMembers, memberQuery, partialId])
+  const shownGroups = useMemo((): MemberGroup[] => {
+    if (!g) return []
+    if (!memberHits) return memberGroups(listed, g.roles)
+    const found = memberHits.map(id => g.members.find(m => m.userId === id)).filter((m): m is MemberDto => !!m)
+    return [{ key: 'found', name: found.length > 0 ? 'Found' : 'Nobody by that name', color: null, members: found }]
+  }, [g, listed, memberHits])
 
   /** Voice channel click: join (if not already there) and open its chat. */
   const openVoice = (channelId: string) => {
@@ -768,12 +790,14 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           </>
         ) : (
           <>
-            <div className="header" title={inChannel ? `The people who can see ${inChannel.name}` : undefined}>Members <span className="muted">{listed.filter(m => m.online).length} online</span></div>
+            <div className="header" title={inChannel ? `The people who can see ${inChannel.name}` : undefined}>Members <span className="muted">{listed.filter(m => m.online).length} online{g?.membersPartial ? ` · ${(g.memberCount ?? 0).toLocaleString()} members` : ''}</span></div>
+            {g?.membersPartial && <input className="memberfind" value={memberQuery} onChange={e => setMemberQuery(e.target.value)} placeholder="Find a member" maxLength={32} spellCheck={false} />}
             <div className="list">
               {/* Whoever is online, under their highest role; everyone offline in one group at the bottom. */}
-              {g && memberGroups(listed, g.roles).map(group => (
+              {g && shownGroups.map(group => (
                 <div key={group.key}>
-                <div className="membergroup">{group.name} <span>— {group.members.length}</span></div>
+                {/* In a large server the offline group is the offline people read so far, and says so. */}
+                <div className="membergroup">{group.name} {!(group.key === 'found' && group.members.length === 0) && <span>— {group.members.length}{g.membersPartial && group.key === 'offline' ? ' shown' : ''}</span>}</div>
                 {group.members.map(m => (
                 <div key={m.userId} className={'member' + (m.online ? ' online' : ' offline') + (m.online && store.dndUsers.has(m.userId) ? ' dnd' : m.online && store.idleUsers.has(m.userId) ? ' idle' : '') + (ignored(m.userId) ? ' ignoredmember' : '')} title={'@' + m.username + ' — click for profile, right-click for options'}
                   onClick={e => openCard(e, m.userId, memberName(m))} onContextMenu={e => openUserMenu(e, m.userId, memberName(m))}>
@@ -789,6 +813,9 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
                 ))}
                 </div>
               ))}
+              {g?.membersPartial && !memberHits && !store.membersEnded[g.guild.id] && (
+                <button className="subtle morepeople" onClick={() => void store.loadMoreMembers(g.guild.id)}>Show more people</button>
+              )}
             </div>
           </>
         )}
@@ -918,6 +945,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       )}
       {dialog?.kind === 'server' && g && (
         <ServerSettingsDialog api={store.api} channels={g.channels} guild={g.guild} roles={g.roles ?? []} members={g.members} myPermissions={myPerms} meId={me?.id ?? ''}
+          findMembers={g.membersPartial ? q => store.findMembers(g.guild.id, q) : undefined} moreMembers={g.membersPartial && !store.membersEnded[g.guild.id] ? () => void store.loadMoreMembers(g.guild.id) : undefined}
           onRename={store.renameGuild} onIcon={store.setGuildIcon} onListing={store.setGuildListing} tagSymbols={store.tagSymbols} onSetTag={store.setGuildTag} onRemoveTag={store.removeGuildTag} onCountRolls={store.setGuildCountRolls} onWelcome={store.setGuildWelcome} onCreateRole={store.createRole} onUpdateRole={store.updateRole} onDeleteRole={store.deleteRole} onSetMemberRoles={store.setMemberRoles}
           onClose={() => setDialog(null)} />
       )}
@@ -1344,7 +1372,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
       {panel === 'search' && channel && <SearchDialog where={(channel.type === ChannelType.DirectMessage ? '@' : '#') + channel.name} search={p2pChat ? store.searchP2p : store.searchMessages} nameOf={nameOfMessage} onJump={goTo} onClose={() => setPanel(null)} />}
       {panel === 'poll' && <PollDialog onSubmit={(question, poll) => void store.sendMessage(question, null, { poll })} onClose={() => setPanel(null)} />}
       {panel === 'post' && channel && <NewPostDialog gallery={channel.type === ChannelType.Gallery} mostPictures={10} mostText={p2pGallery ? MAX_P2P_TEXT - P2P_META_ROOM : 4000}
-        onSubmit={p2pGallery ? store.createP2pPost : store.createPost} onClose={() => setPanel(null)} />}
+        onSubmit={p2pGallery ? store.createP2pPost : (title, text, files, markdown) => store.createPost(title, text, files, null, markdown)} onClose={() => setPanel(null)} />}
       {store.pendingDrops[0] && !store.pendingDrops[0].auto && <DropBanner drop={store.pendingDrops[0]} more={store.pendingDrops.length - 1} channel={store.partyChannel} onAccept={store.acceptDrop} onDismiss={store.dismissDrop} />}
       {store.activeRoll && <RollPanel store={store} meId={me?.id ?? ''} />}
       {store.activeRps && <RpsPanel store={store} meId={me?.id ?? ''} />}
@@ -1627,6 +1655,9 @@ function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu,
           ) : m.event ? (
             // An event posted from a calendar: the card says it, with the time in our own time zone, in place of the text.
             <EventCard event={m.event} onOpen={onEvent ? () => onEvent(m.event!.eventId) : undefined} />
+          ) : m.markdown && !extras?.editor ? (
+            // A forum post written in Markdown: drawn, where any other text is shown exactly as typed.
+            <div className="body"><Markdown text={m.content} />{m.editedAt && <span className="edited muted" title={`Edited ${new Date(m.editedAt).toLocaleString()}`}> (edited)</span>}</div>
           ) : extras?.editor ?? <div className="body">{withInviteLinks(m.content, onInvite)}{m.editedAt && <span className="edited muted" title={`Edited ${new Date(m.editedAt).toLocaleString()}`}> (edited)</span>}</div>}
         {m.attachments.map(a => <AttachmentView key={a.id} file={a} pictures={extras?.pictures} />)}
         {p2pFiles}

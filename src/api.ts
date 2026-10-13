@@ -1,5 +1,5 @@
 import type {
-  AccountDeletionDto, CalendarEventDto, ApplicationDto, CommandRuleDto, CommandRulesDto, QrDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto, RollStatsDto, SearchResultDto, MediaItemDto, SignInMethodsDto, ContactEmailDto, ConnectionDto, ConnectionServiceDto, FriendLinkDto, FriendLinkOwnerDto } from './types'
+  AccountDeletionDto, MemberPageDto, ConnectionTestDto, ConnectionTestPassDto, CalendarEventDto, ApplicationDto, CommandRuleDto, CommandRulesDto, QrDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto, RollStatsDto, SearchResultDto, MediaItemDto, SignInMethodsDto, ContactEmailDto, ConnectionDto, ConnectionServiceDto, FriendLinkDto, FriendLinkOwnerDto } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -76,6 +76,16 @@ export class Api {
   me() { return this.request<UserDto>('GET', '/api/me') }
   guilds() { return this.request<GuildSummaryDto[]>('GET', '/api/guilds') }
   guild(id: string) { return this.request<GuildSummaryDto>('GET', `/api/guilds/${id}`) }
+  /** A server's members in order of username, after the one given; with q, only those whose name starts with it. */
+  members(guildId: string, opts: { after?: string; q?: string; limit?: number } = {}) {
+    const query = new URLSearchParams()
+    if (opts.after) query.set('after', opts.after)
+    if (opts.q) query.set('q', opts.q)
+    if (opts.limit) query.set('limit', String(opts.limit))
+    return this.request<MemberPageDto>('GET', `/api/guilds/${guildId}/members?${query}`)
+  }
+  /** Particular members by id, at most a hundred at once. Ids that are not members are left out. */
+  lookupMembers(guildId: string, userIds: string[]) { return this.request<MemberDto[]>('POST', `/api/guilds/${guildId}/members/lookup`, { userIds }) }
   createGuild(name: string, isPublic = false, kind: 'standard' | 'hybrid' | 'p2p' = 'standard') { return this.request<GuildSummaryDto>('POST', '/api/guilds', { name, isPublic, kind }) }
   deleteGuild(id: string) { return this.request<void>('DELETE', `/api/guilds/${id}`) }
   leaveGuild(id: string) { return this.request<void>('POST', `/api/guilds/${id}/leave`) }
@@ -268,8 +278,8 @@ export class Api {
   dms() { return this.request<DmChannelDto[]>('GET', '/api/dms') }
   /** A calendar channel's events from one day to another (year-month-day, 100 days at most). */
   events(channelId: string, from: string, to: string) { return this.request<CalendarEventDto[]>('GET', `/api/channels/${channelId}/events?from=${from}&to=${to}`) }
-  postEvent(channelId: string, event: { title: string; note: string | null; day: string; at: string | null; color: string | null }) { return this.request<CalendarEventDto>('POST', `/api/channels/${channelId}/events`, event) }
-  editEvent(eventId: string, event: { title: string; note: string | null; day: string; at: string | null; color: string | null }) { return this.request<CalendarEventDto>('PATCH', `/api/events/${eventId}`, event) }
+  postEvent(channelId: string, event: { title: string; note: string | null; day: string; at: string | null; color: string | null; noteMarkdown: boolean }) { return this.request<CalendarEventDto>('POST', `/api/channels/${channelId}/events`, event) }
+  editEvent(eventId: string, event: { title: string; note: string | null; day: string; at: string | null; color: string | null; noteMarkdown: boolean }) { return this.request<CalendarEventDto>('PATCH', `/api/events/${eventId}`, event) }
   deleteEvent(eventId: string) { return this.request<void>('DELETE', `/api/events/${eventId}`) }
   /** One event, if we can see its calendar. */
   event(eventId: string) { return this.request<CalendarEventDto>('GET', `/api/events/${eventId}`) }
@@ -292,6 +302,10 @@ export class Api {
   commands(guildId: string) { return this.request<CommandDto[]>('GET', `/api/guilds/${guildId}/commands`) }
   /** STUN servers plus the relay for this voice channel (everyone in a channel is given the same one). */
   /** The rules for sharing video; with the voice channel we are in, also whether it has a stream server. */
+  /** The relays a connection test can ping, and how long until this account may run a speed test again. */
+  voiceTest() { return this.request<ConnectionTestDto>('GET', '/api/voice/test') }
+  /** A pass for one speed test, on the least used of the relays near us by these pings. */
+  voiceTestPass(pings: { name: string; ms: number }[]) { return this.request<ConnectionTestPassDto>('POST', '/api/voice/test/pass', { pings }) }
   streamSettings(channelId?: string | null) { return this.request<StreamSettingsDto>('GET', '/api/voice/streams/settings' + (channelId ? `?channelId=${channelId}` : '')) }
   /** How the server wants voice sent (see the admin panel's voice quality). Older servers do not have this. */
   voiceSettings() { return this.request<{ audioKbps: number }>('GET', '/api/voice/settings') }
