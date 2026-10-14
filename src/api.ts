@@ -200,6 +200,8 @@ export class Api {
   }
   pins(channelId: string) { return this.request<MessageDto[]>('GET', `/api/channels/${channelId}/pins`) }
   /** Just the pictures and videos of a channel, newest first; `before` is the moment on the last one of the page before. */
+  /** A new address for a file whose old one has run out, if this person can still see its channel. */
+  attachmentLink(attachmentId: string) { return this.request<{ url: string }>('GET', `/api/attachments/${attachmentId}/link`) }
   media(channelId: string, before?: string | null, limit = 60) {
     return this.request<MediaItemDto[]>('GET', `/api/channels/${channelId}/media?limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ''}`)
   }

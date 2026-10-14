@@ -35,6 +35,7 @@ import { OverlaySettingsDialog, ServerSettingsDialog } from './Settings'
 import Friends from './Home'
 import { serverMediaUrl } from '../itemIcons'
 import { bridge, isElectron } from '../platform'
+import { linkRanOut, useFileLink } from '../fileLinks'
 import { MAX_P2P_TEXT, P2P_PICTURE, type P2PFile } from '../p2pText'
 import { foldP2p, foldP2pChat, P2P_GALLERY_POLLS, P2P_META_ROOM, P2P_REACTIONS } from '../p2pPosts'
 import { soundPackNames } from '../sounds'
@@ -1886,26 +1887,40 @@ function AttachmentView({ file, pictures }: { file: AttachmentDto; pictures?: Me
   const [gone, setGone] = useState(false)
   const desktop = isElectron()
   const kind = file.contentType.startsWith('image/') ? 'image' : file.contentType.startsWith('video/') ? 'video' : file.contentType.startsWith('audio/') ? 'audio' : 'file'
-  const src = desktop ? `maplecord-plugin://files/${file.id}/${encodeURIComponent(file.fileName)}?u=${encodeURIComponent(file.url)}` : file.url
+  // The address the server gave is good for a day or two. An app open longer asks for a new one (see fileLinks.ts).
+  const { url, refresh } = useFileLink(file)
+  const src = desktop ? `maplecord-plugin://files/${file.id}/${encodeURIComponent(file.fileName)}?u=${encodeURIComponent(url)}` : url
+  // It would not load: once, a new address is asked for and tried. Only if there is none is the file gone.
+  const failed = () => { void refresh().then(next => { if (!next || next === url) setGone(true) }) }
+  const download = (e: React.MouseEvent) => {
+    if (!linkRanOut(url)) return
+    e.preventDefault()
+    void refresh().then(next => {
+      if (!next) { setGone(true); return }
+      const a = document.createElement('a')
+      a.href = next; a.download = file.fileName
+      a.click()
+    })
+  }
   const expired = <div className="filechip expired" title="The server keeps files for a limited time."><span className="ico">⌛</span><span className="grow"><b>{file.fileName}</b><span className="muted"> · no longer available</span></span></div>
 
   // Without a copy of our own (the web version, or any plain download) an expired file is simply gone.
   if (gone || (file.expired && (!desktop || kind === 'file'))) return expired
   if (kind === 'image') return (
     <>
-      <Picture src={src} name={file.fileName} onError={() => setGone(true)} />
+      <Picture src={src} name={file.fileName} onError={failed} />
       {pictures && <Reactions reactions={file.reactions ?? []} onToggle={(emoji, on) => pictures.toggle(file.id, emoji, on)} onMore={e => pictures.more(file.id, e)} />}
     </>
   )
-  if (kind === 'video') return <video className="attachment" src={src} controls preload={desktop ? 'none' : 'metadata'} title={file.fileName} onError={() => setGone(true)} />
+  if (kind === 'video') return <video className="attachment" src={src} controls preload={desktop ? 'none' : 'metadata'} title={file.fileName} onError={failed} />
   if (kind === 'audio') return (
     <div className="soundchip" title={file.fileName}>
       <span className="muted">{file.fileName.startsWith('voice-message') ? 'Voice message' : file.fileName} · {fileSize(file.size)}</span>
-      <audio src={src} controls preload="metadata" onError={() => setGone(true)} />
+      <audio src={src} controls preload="metadata" onError={failed} />
     </div>
   )
   return (
-    <a className="filechip" href={file.url} download={file.fileName} title={`Download ${file.fileName}`}>
+    <a className="filechip" href={url} download={file.fileName} title={`Download ${file.fileName}`} onClick={download}>
       <span className="ico">📄</span>
       <span className="grow"><b>{file.fileName}</b><span className="muted"> · {fileSize(file.size)}</span></span>
       <span className="get">Download</span>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AttachmentDto, MediaItem, MessageDto, NewPollDto, PollDto, ReactionDto, ReplyToDto, SearchResultDto } from '../types'
 import { isElectron } from '../platform'
+import { useFileLink } from '../fileLinks'
 import { Dialog } from './Dialogs'
 import { postedWhen } from './Calendar'
 import { MarkdownBox } from './Markdown'
@@ -208,8 +209,10 @@ export function MediaGrid({ items, more, busy, nameOf, onOpen, onMore, picture }
 /** A picture the server holds. The desktop app shows it through its own copies, as it does in the chat. */
 function MediaPicture({ file }: { file: AttachmentDto }) {
   const [gone, setGone] = useState(false)
-  const src = isElectron() ? `maplecord-plugin://files/${file.id}/${encodeURIComponent(file.fileName)}?u=${encodeURIComponent(file.url)}` : file.url
-  return gone ? <span className="muted">No longer kept</span> : <img src={src} alt={file.fileName} loading="lazy" onError={() => setGone(true)} />
+  const { url, refresh } = useFileLink(file)
+  const src = isElectron() ? `maplecord-plugin://files/${file.id}/${encodeURIComponent(file.fileName)}?u=${encodeURIComponent(url)}` : url
+  return gone ? <span className="muted">No longer kept</span>
+    : <img src={src} alt={file.fileName} loading="lazy" onError={() => { void refresh().then(next => { if (!next || next === url) setGone(true) }) }} />
 }
 
 /** One message as a line in a list (pins, search results): who, when, and the start of what it says. */

@@ -256,6 +256,8 @@ html.overlay-mode, html.overlay-mode body, html.overlay-mode #root { background:
 
 /* ---- Dialog ---- */
 .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: grid; place-items: center; z-index: 10; }
+/* Waiting in line to get in: over everything, since nothing behind it works until the server lets this app in. */
+.backdrop.waitline { z-index: 60; background: rgba(0,0,0,0.82); }
 .dialog { background: var(--bg1); border: 1px solid var(--border); border-radius: 10px; padding: 20px; width: 420px; max-width: 95vw; display: flex; flex-direction: column; gap: 10px; position: relative; }
 /* A button in the top right corner of a dialog, level with its title. */
 .dialog .dialogcorner { position: absolute; top: 14px; right: 16px; padding: 5px 12px; }

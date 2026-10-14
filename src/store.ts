@@ -4,6 +4,7 @@ import { inBatches, membersToAsk, mergeMembers } from './memberPaging'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Api, ApiError } from './api'
 import { ChatHub } from './hub'
+import { setFileLinkSource } from './fileLinks'
 import { bridge, isHandheld, type OverlayAction } from './platform'
 import { IdleWatch } from './idle'
 import { DEFAULT_GATE_LEVEL, DEFAULT_NOTIFY, defaultPluginSettings, gateThreshold, loadSettings, saveSettings, type GuildPrefs, type PluginSettings, type Settings, type UserPrefs } from './settings'
@@ -134,6 +135,8 @@ export function useMaplecord() {
   // Held in state, not useMemo: these own live connections, and a memo is recomputed when the dev server hot-reloads
   // a module, which would silently swap in fresh, unconnected ones under a running app.
   const [api] = useState(() => new Api(() => settingsRef.current.serverUrl, () => settingsRef.current.accessToken))
+  // Where a new address for a file comes from once the one a message came with has run out (see fileLinks.ts).
+  useEffect(() => { setFileLinkSource(id => api.attachmentLink(id).then(r => r.url)); return () => setFileLinkSource(null) }, [api])
   const [hub] = useState(() => new ChatHub(() => settingsRef.current.serverUrl, () => settingsRef.current.accessToken))
   const [voiceHub] = useState(() => new VoiceHub(() => settingsRef.current.serverUrl, () => settingsRef.current.accessToken))
 
@@ -419,6 +422,8 @@ export function useMaplecord() {
   const [error, setError] = useState<string | null>(null)
   /** Said on the sign-in screen after the account was deleted, in place of whatever the closing connections reported. */
   const [farewell, setFarewell] = useState<string | null>(null)
+  /** While the server is full and this app waits in line to get in: roughly how many are ahead (0 = next). Null otherwise. */
+  const [queueAhead, setQueueAhead] = useState<number | null>(null)
   /** Messages from the server's admin, shown until dismissed. */
   const [systemMessages, setSystemMessages] = useState<SystemMessageDto[]>([])
   /** signOut is defined further down; the connection's status handler needs to reach it. */
@@ -648,6 +653,7 @@ export function useMaplecord() {
   const connect = useCallback(async () => {
     setFarewell(null)
     let wasConnected = false
+    hub.onQueue = setQueueAhead
     hub.onStatus = s => {
       // Back after a drop: the P2P channel being read has to be connected to afresh, and whatever the server told
       // its connected apps while this one was away (a channel made or deleted, someone joining or leaving, a role
@@ -3085,7 +3091,7 @@ export function useMaplecord() {
     voice, isMuted, isSpeaking, joinVoice, leaveVoice, toggleMute,
     call, startCall, answerCall, declineCall, renameChannel, deleteChannel, deleteGroup, setChannelMuted,
     preferences, savePreferences, blocked, setBlocked, dndUsers, idleUsers, makeInvite, loadInvites, revokeInvite, inviteBase, inviteQr, deafened, toggleDeafen, ownLook, transferLimits,
-    farewell, deleteStep, openDeleteAccount: (step: 'explain' | 'confirm' = 'explain') => setDeleteStep(step), closeDeleteAccount: () => setDeleteStep(null), reauthenticateForDelete, deleteAccount,
+    farewell, queueAhead, deleteStep, openDeleteAccount: (step: 'explain' | 'confirm' = 'explain') => setDeleteStep(step), closeDeleteAccount: () => setDeleteStep(null), reauthenticateForDelete, deleteAccount,
     p2pText, askDirectText, setP2pSubscribed, setP2pBroadcast, p2pFiles, loadP2pFile, saveP2pFile, p2pNewApps, acceptP2pApp, p2pBotsWaiting, acceptP2pBot, dismissP2pBot,
     allowDirect, setAllowDirect, reauthenticateForDirect, reauthProviders, directPrompt, confirmDirect, dismissDirectPrompt: () => setDirectPrompt(null), setChannelDirect,
     setAudioDevices, me: () => settingsRef.current.user,

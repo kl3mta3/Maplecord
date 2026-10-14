@@ -79,11 +79,37 @@ export interface ChatEvents {
   UserUpdated: (user: UserDto) => void
 }
 
+/** A place in the line to get in when the server is full: this app's ticket, and the ticket at the front. */
+type QueuePlace = { ticket: number; head: number }
+
+/**
+ * Waits on a connection the server is keeping in line, saying how many are ahead as that changes, until the server
+ * says there is room. A connection that drops comes back by itself and its person keeps their ticket; one that is
+ * closed for good ends the wait with an error.
+ */
+function waitInLine(conn: HubConnection, place: QueuePlace, tell: (ahead: number) => void): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let ticket = place.ticket
+    const say = (head: number) => tell(Math.max(0, ticket - head))
+    say(place.head)
+    conn.on('QueueMoved', (head: number) => say(head))
+    conn.on('Admitted', () => resolve())
+    conn.onreconnected(() => {
+      // Let in while the connection was away: there is no place to be told any more.
+      void conn.invoke<QueuePlace | null>('QueuePlace').then(now => { if (!now) resolve(); else { ticket = now.ticket; say(now.head) } }).catch(() => { /* asked again when the line moves */ })
+    })
+    conn.onclose(() => reject(new Error('The connection was lost while waiting to get in.')))
+  })
+}
+
 /** SignalR chat hub wrapper: typed `on` for pushes, methods mirroring IChatHub for calls. */
 export class ChatHub {
   private conn: HubConnection | null = null
   readonly state = { status: 'disconnected' as 'disconnected' | 'connecting' | 'connected' | 'reconnecting' }
   onStatus: ((s: string) => void) | null = null
+  /** While the server keeps this app in line to get in: roughly how many are ahead (0 = next). Null once it is in, or was never kept waiting. */
+  onQueue: ((ahead: number | null) => void) | null = null
+  private waiting = false
   /** How the server knows this app on the chat hub; file transfers are arranged between two of these. */
   get connectionId() { return this.ownId ?? this.conn?.connectionId ?? null }
   private ownId: string | null = null
@@ -147,7 +173,7 @@ export class ChatHub {
     return this.connecting
   }
 
-  private async connectCore(handlers: Partial<ChatEvents>) {
+  private async connectCore(handlers: Partial<ChatEvents>): Promise<void> {
     await this.disconnect()
     const conn = new HubConnectionBuilder()
       // withCredentials=false: we authenticate with the bearer token, which lets the server use a permissive CORS policy.
@@ -177,10 +203,22 @@ export class ChatHub {
     const forget = () => { this.presentedOn = null; this.fileKeys.clear(); this.outbox.clear(); this.inbox.clear() }
     conn.onreconnecting(() => { this.ownId = null; this.setStatus('reconnecting') })
     // A connection that came back is a new one to the server, with a new id; it is known before anyone is told we are back.
-    conn.onreconnected(() => { forget(); void connectionIdOf(conn).then(id => { this.ownId = id; this.setStatus('connected') }) })
+    conn.onreconnected(() => { forget(); if (this.waiting) return; void connectionIdOf(conn).then(id => { this.ownId = id; this.setStatus('connected') }) })
     conn.onclose(() => this.setStatus('disconnected'))
     this.setStatus('connecting')
     await conn.start()
+    // A full server keeps new arrivals in line. Where this app stands is asked first: on a connection that is
+    // waiting, nothing else is answered. (A server from before there was a line has no such question, and nobody waits.)
+    const place = await conn.invoke<QueuePlace | null>('QueuePlace').catch(() => null)
+    if (place) {
+      // Held as the connection, so that signing out or closing ends the wait.
+      this.conn = conn
+      this.waiting = true
+      try { await waitInLine(conn, place, ahead => this.onQueue?.(ahead)) }
+      finally { this.waiting = false; this.onQueue?.(null) }
+      // Let in. An ordinary connection now, made afresh: the one that waited was never subscribed to anything.
+      return this.connectCore(handlers)
+    }
     // start() resolves at the handshake, before the server has subscribed this connection to our channels.
     // A hub call is only answered after that, so this closes the window where an incoming message would be missed.
     await conn.invoke('Ready')

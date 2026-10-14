@@ -120,6 +120,15 @@ function MainApp() {
           ))}
         </div>
       )}
+      {store.queueAhead !== null && (
+        <div className="backdrop waitline" role="status" aria-live="polite">
+          <div className="dialog">
+            <h3>Maplecord is full right now</h3>
+            <div>{store.queueAhead === 0 ? 'You are next in line.' : store.queueAhead === 1 ? 'About 1 person is ahead of you in line.' : `About ${store.queueAhead.toLocaleString()} people are ahead of you in line.`}</div>
+            <div className="muted">You are let in as soon as there is room. Keep Maplecord open to keep your place.</div>
+          </div>
+        </div>
+      )}
       <Shell store={store} onSignedOut={() => setSignedIn(false)} />
     </>
   )
