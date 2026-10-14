@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { Store } from '../store'
 import { UserStatus } from '../types'
-import { DEFAULT_THEME, EDITABLE, THEMES, colorsOf, contrast, ownColors } from '../theme'
+import { DEFAULT_THEME, EDITABLE, MOST_SAVED_THEMES, SAVED_THEME_NAME, THEMES, colorsOf, contrast, fromThemeCode, ownColors, themeCode, withSaved } from '../theme'
 import { isElectron } from '../platform'
 import { shownName } from '../profile'
 import { Dialog } from './Dialogs'
@@ -45,6 +45,29 @@ export function UserSettingsDialog({ store, initial, onOpen, onAllowDirect, onSi
   const own = ownColors(theme.custom ?? colorsOf(theme.preset))
   const setOwn = (name: string, value: string) => store.updateSettings({ theme: { ...theme, preset: 'custom', accent: null, custom: { ...own, [name]: value } } })
   const hardToRead = contrast(own['--text']!, own['--bg1']!) < 4.5 || contrast(own['--text']!, own['--bg0']!) < 4.5
+  // The theme in use as a code, to copy (a built-in one with its accent if one was picked), and one pasted to use.
+  const inUse = theme.preset === 'custom' ? own : { ...colorsOf(theme.preset), ...(theme.accent ? { '--accent': theme.accent } : {}) }
+  const [codeCopied, setCodeCopied] = useState(false)
+  const [pasted, setPasted] = useState('')
+  const [pasteProblem, setPasteProblem] = useState<string | null>(null)
+  const copyThemeCode = () => { void navigator.clipboard.writeText(themeCode(inUse)).then(() => { setCodeCopied(true); setTimeout(() => setCodeCopied(false), 1500) }) }
+  // Themes saved on this device under names. Each is kept as its code; using one makes it the Custom theme.
+  const saved = store.settings.savedThemes ?? []
+  const codeInUse = themeCode(inUse)
+  const [saveName, setSaveName] = useState('')
+  const [saveProblem, setSaveProblem] = useState<string | null>(null)
+  const saveTheme = () => {
+    const next = withSaved(saved, saveName, codeInUse)
+    if (!next) { setSaveProblem(`You can keep ${MOST_SAVED_THEMES} themes. Delete one first, or save over one by using its name.`); return }
+    store.updateSettings({ savedThemes: next }); setSaveName(''); setSaveProblem(null)
+  }
+  const useSaved = (code: string) => { const colors = fromThemeCode(code); if (colors) store.updateSettings({ theme: { ...theme, preset: 'custom', accent: null, custom: colors } }) }
+  const usePasted = () => {
+    const colors = fromThemeCode(pasted)
+    if (!colors) { setPasteProblem('That is not a Maplecord theme code. Copy all of it and try again.'); return }
+    store.updateSettings({ theme: { ...theme, preset: 'custom', accent: null, custom: colors } })
+    setPasted(''); setPasteProblem(null)
+  }
   const desktop = isElectron()
   const copyId = () => { if (me) void navigator.clipboard.writeText(me.id).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }) }
 
@@ -138,6 +161,43 @@ export function UserSettingsDialog({ store, initial, onOpen, onAllowDirect, onSi
                   <span>Custom</span>
                 </button>
               </div>
+              <h4>Saved themes</h4>
+              {saved.length > 0 && (
+                <div className="savedthemes">
+                  {saved.map(t => {
+                    const c = fromThemeCode(t.code)
+                    if (!c) return null
+                    const using = theme.preset === 'custom' && t.code === codeInUse
+                    return (
+                      <div key={t.name} className={'savedtheme' + (using ? ' on' : '')} style={{ background: c['--bg1'], color: c['--text'], borderColor: using ? c['--accent'] : c['--border'] }}>
+                        <span className="swatches"><i style={{ background: c['--accent'] }} /><i style={{ background: c['--accent2'] }} /><i style={{ background: c['--bg3'] }} /></span>
+                        <span className="grow" title={t.name}>{t.name}</span>
+                        {using ? <span className="small">In use</span> : <button className="subtle" onClick={() => useSaved(t.code)}>Use</button>}
+                        <button className="subtle" title={`Copy the code of ${t.name}`} aria-label={`Copy the code of ${t.name}`} onClick={() => void navigator.clipboard.writeText(t.code)}>Copy</button>
+                        <button className="subtle danger" title={`Delete ${t.name}`} aria-label={`Delete ${t.name}`} onClick={() => store.updateSettings({ savedThemes: saved.filter(x => x.name !== t.name) })}>×</button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              <div className="row">
+                <input className="grow" value={saveName} maxLength={SAVED_THEME_NAME} placeholder="A name for the theme in use" aria-label="Name to save the theme under"
+                  onChange={e => { setSaveName(e.target.value); setSaveProblem(null) }} onKeyDown={e => e.key === 'Enter' && saveName.trim() && saveTheme()} />
+                <button disabled={!saveName.trim()} onClick={saveTheme}>Save</button>
+              </div>
+              {saveProblem ? <div className="muted">{saveProblem}</div>
+                : <div className="muted small">Kept on this device, up to {MOST_SAVED_THEMES}. Saving under a name that is already there replaces it.</div>}
+              <h4>Theme code</h4>
+              <div className="row">
+                <button onClick={copyThemeCode}>{codeCopied ? 'Copied' : 'Copy theme code'}</button>
+                <span className="grow muted">The theme in use, as a code to paste on another device or give to a friend.</span>
+              </div>
+              <div className="row">
+                <input className="grow" value={pasted} placeholder="Paste a theme code" spellCheck={false} aria-label="Theme code"
+                  onChange={e => { setPasted(e.target.value); setPasteProblem(null) }} onKeyDown={e => e.key === 'Enter' && pasted.trim() && usePasted()} />
+                <button className="accent" disabled={!pasted.trim()} onClick={usePasted}>Use it</button>
+              </div>
+              {pasteProblem && <div className="muted">{pasteProblem}</div>}
               {theme.preset === 'custom' ? (
                 <>
                   <h4>Your theme</h4>

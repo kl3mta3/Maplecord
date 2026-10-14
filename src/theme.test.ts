@@ -1,5 +1,5 @@
 // Run with: node src/theme.test.ts
-import { EDITABLE, THEMES, colorsOf, contrast, ownColors } from './theme.ts'
+import { EDITABLE, MOST_SAVED_THEMES, SAVED_THEME_NAME, THEMES, colorsOf, contrast, fromThemeCode, ownColors, themeCode, withSaved } from './theme.ts'
 
 let failures = 0
 const check = (ok: boolean, what: string) => { console.log(`${ok ? '  ok  ' : '  FAIL'} ${what}`); if (!ok) failures++ }
@@ -18,6 +18,29 @@ console.log('Whether text can be read')
 check(Math.abs(contrast('#000000', '#ffffff') - 21) < 0.01 && Math.abs(contrast('#777777', '#777777') - 1) < 0.01, 'black on white is 21, a colour on itself is 1')
 check(contrast('#e8e8f0', '#14141c') > 4.5 && contrast('#e8e8f0', '#f4f4f8') < 4.5, 'the usual text reads on the usual panels, and not on a light one')
 check(contrast('#14141c', '#e8e8f0') === contrast('#e8e8f0', '#14141c'), 'either way round')
+
+console.log('A theme as a code')
+const sakura = colorsOf('sakura')
+const code = themeCode(sakura)
+check(/^[A-Za-z0-9+/]+$/.test(code) && code.length < 45, `it is letters and digits, and short (${code.length}): ${code}`)
+check(JSON.stringify(fromThemeCode(code)) === JSON.stringify(sakura), 'read back, it gives the same colours')
+check(JSON.stringify(fromThemeCode('  ' + code.slice(0, 20) + '\n' + code.slice(20) + ' ')) === JSON.stringify(sakura), 'spaces and line breaks picked up when copying do not matter')
+check(themeCode(colorsOf('forest')) !== code, 'another theme, another code')
+const typo = code.slice(0, 10) + (code[10] === 'A' ? 'B' : 'A') + code.slice(11)
+check(fromThemeCode(typo) === null && fromThemeCode(code.slice(0, -4)) === null && fromThemeCode('') === null && fromThemeCode('CYGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWoMbNjxMDMmlZmZmBMDWmZbGzY') === null && fromThemeCode('<script>alert(1)</script>') === null,
+  'a mistyped, cut-short or made-up code, or something else entirely, is refused')
+
+console.log('Themes saved under names')
+const one = withSaved(undefined, '  Raid   night ', code)
+check(JSON.stringify(one) === JSON.stringify([{ name: 'Raid night', code }]), 'saved under its name, tidied')
+const two = withSaved(one!, 'Pastel', themeCode(colorsOf('forest')))
+check(two!.length === 2 && two![0]!.name === 'Pastel', 'the newest comes first')
+const again = withSaved(two!, 'raid NIGHT', themeCode(colorsOf('slate')))
+check(again!.length === 2 && again![0]!.name === 'raid NIGHT' && again![0]!.code === themeCode(colorsOf('slate')), 'saving under a name that is there already replaces that one')
+check(withSaved(two!, '   ', code) === null && withSaved(two!, 'Broken', 'not a code') === null, 'no name, or no real theme, is not saved')
+const full = Array.from({ length: MOST_SAVED_THEMES }, (_, i) => ({ name: 'T' + i, code }))
+check(withSaved(full, 'One more', code) === null && withSaved(full, 't3', code)!.length === MOST_SAVED_THEMES, `at most ${MOST_SAVED_THEMES}; one already there can still be replaced`)
+check(withSaved(undefined, 'x'.repeat(80), code)![0]!.name.length === SAVED_THEME_NAME, 'a long name is cut short')
 
 console.log(failures === 0 ? 'theme: all passed' : `theme: ${failures} FAILED`)
 if (failures > 0) throw new Error(`${failures} theme checks failed`)

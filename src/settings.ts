@@ -58,6 +58,8 @@ export interface Settings {
   voiceGateLevel?: number
   /** The app's colours on this device (see theme.ts). */
   theme?: { preset: string; accent: string | null; custom?: Record<string, string> | null }
+  /** Themes saved on this device under names of their own, each kept as its theme code (see theme.ts). */
+  savedThemes?: { name: string; code: string }[]
   /** How the QR code of the friend link was last drawn on this device (see FriendLink.tsx). */
   qrLook?: string
   /** The card that code was last put on, if any (see friendCard.ts). */

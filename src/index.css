@@ -641,6 +641,13 @@ button.danger:hover { background: var(--red); color: #fff; }
 .usersettings .themeeditor { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 8px; margin-bottom: 8px; }
 .themetile { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 10px; border-width: 2px; border-radius: 8px; color: #e8e8f0; font-weight: 600; }
 .themetile .swatches { display: inline-flex; gap: 4px; }
+/* Themes saved under names: one row each, drawn in its own colours. */
+.usersettings .savedthemes { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.usersettings .savedtheme { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 2px solid; border-radius: 8px; font-weight: 600; }
+.usersettings .savedtheme .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usersettings .savedtheme .swatches { display: inline-flex; gap: 4px; }
+.usersettings .savedtheme .swatches i { width: 12px; height: 12px; border-radius: 6px; display: inline-block; }
+.usersettings .savedtheme button { color: inherit; }
 .themetile .swatches i { width: 18px; height: 18px; border-radius: 50%; display: inline-block; }
 
 /* The panel sits under the server rail and the channel list together, as its own row of the layout. */

@@ -54,6 +54,50 @@ export function contrast(a: string, b: string): number {
   return (x! + 0.05) / (y! + 0.05)
 }
 
+// ---- A theme as a code, to copy to another device or give to a friend -----------------------------------------------
+// The nine colours, in the order of EDITABLE, three bytes each, after a mark saying which kind of code this is and
+// followed by a check over all of it, written out in letters and digits (base64). A code that was cut short, mistyped
+// or is not one of these is refused rather than read as some other colours. Nothing in it can be anything but colours.
+
+const CODE_MARK = 0x4d
+
+/** The theme code for these colours. */
+export function themeCode(colors: Record<string, string>): string {
+  const own = ownColors(colors)
+  const bytes = [CODE_MARK, ...EDITABLE.flatMap(e => [1, 3, 5].map(i => parseInt(own[e.name]!.slice(i, i + 2), 16)))]
+  bytes.push(bytes.reduce((sum, b, i) => (sum + b * (i + 1)) % 251, 0))
+  return btoa(String.fromCharCode(...bytes)).replace(/=+$/, '')
+}
+
+/** The colours in a theme code, or null if it is not one. Spaces and line breaks in what was pasted are ignored. */
+export function fromThemeCode(code: string): Record<string, string> | null {
+  const text = code.replace(/\s+/g, '')
+  if (!/^[A-Za-z0-9+/]{30,60}$/.test(text)) return null
+  let raw: string
+  try { raw = atob(text + '='.repeat((4 - (text.length % 4)) % 4)) } catch { return null }
+  const bytes = [...raw].map(c => c.charCodeAt(0))
+  if (bytes.length !== 2 + EDITABLE.length * 3 || bytes[0] !== CODE_MARK) return null
+  const check = bytes.pop()!
+  if (bytes.reduce((sum, b, i) => (sum + b * (i + 1)) % 251, 0) !== check) return null
+  const hex = (b: number) => b.toString(16).padStart(2, '0')
+  return Object.fromEntries(EDITABLE.map((e, i) => [e.name, '#' + hex(bytes[1 + i * 3]!) + hex(bytes[2 + i * 3]!) + hex(bytes[3 + i * 3]!)]))
+}
+
+/** How many themes can be saved on one device, and how long a saved one's name can be. */
+export const MOST_SAVED_THEMES = 30, SAVED_THEME_NAME = 40
+
+/**
+ * The saved themes with one saved: under a name of its own (tidied), replacing one of the same name, newest first.
+ * Null when there is no name, or the list is full and this would be a new one.
+ */
+export function withSaved(saved: { name: string; code: string }[] | undefined, name: string, code: string): { name: string; code: string }[] | null {
+  const clean = name.replace(/\s+/g, ' ').trim().slice(0, SAVED_THEME_NAME)
+  if (!clean || !fromThemeCode(code)) return null
+  const others = (saved ?? []).filter(t => t.name.toLowerCase() !== clean.toLowerCase())
+  if (others.length >= MOST_SAVED_THEMES) return null
+  return [{ name: clean, code }, ...others]
+}
+
 export function applyTheme(choice: ThemeChoice | undefined) {
   const root = document.documentElement.style
   for (const name of ALL_VARS) root.removeProperty(name)
