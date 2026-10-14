@@ -98,6 +98,24 @@ function createWindow() {
   })
 
   stayOnApp(win)
+
+  // Right-click in a text box: suggestions for a word underlined as misspelt, and a way to add it to the dictionary,
+  // then cut, copy and paste. Electron shows no menu of its own, so without this a misspelt word could be seen but not
+  // put right. The words come from the spell checker on this computer; nothing is sent anywhere.
+  const typing = win
+  typing.webContents.on('context-menu', (_event, params) => {
+    if (!params.isEditable) return
+    const items: Electron.MenuItemConstructorOptions[] = []
+    if (params.misspelledWord) {
+      for (const word of params.dictionarySuggestions.slice(0, 6)) items.push({ label: word, click: () => typing.webContents.replaceMisspelling(word) })
+      if (params.dictionarySuggestions.length === 0) items.push({ label: 'No suggestions', enabled: false })
+      items.push({ label: 'Add to dictionary', click: () => typing.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord) })
+      items.push({ type: 'separator' })
+    }
+    items.push({ role: 'cut', enabled: params.editFlags.canCut }, { role: 'copy', enabled: params.editFlags.canCopy }, { role: 'paste', enabled: params.editFlags.canPaste },
+      { type: 'separator' }, { role: 'selectAll' })
+    Menu.buildFromTemplate(items).popup({ window: typing })
+  })
   win.webContents.setAudioMuted(appMuted)
   if (VITE_DEV_SERVER_URL) win.loadURL(VITE_DEV_SERVER_URL)
   else win.loadFile(path.join(RENDERER_DIST, 'index.html'))

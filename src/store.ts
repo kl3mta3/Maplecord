@@ -418,7 +418,8 @@ export function useMaplecord() {
   const activeRpsRef = useRef<ActiveRps | null>(null)
   const rpsClearTimer = useRef<number | undefined>(undefined)
   useEffect(() => { activeRpsRef.current = activeRps }, [activeRps])
-  const [typing, setTyping] = useState<string | null>(null)
+  /** Who is typing in the open channel: their id, and the name the server sent, used only if the app knows no better one. */
+  const [typing, setTyping] = useState<{ userId: string; name: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   /** Said on the sign-in screen after the account was deleted, in place of whatever the closing connections reported. */
   const [farewell, setFarewell] = useState<string | null>(null)
@@ -847,7 +848,9 @@ export function useMaplecord() {
       },
       Typing: (channelId, userId, username) => {
         if (selected.current.channel !== channelId || userId === me() || isIgnored(userId)) return
-        setTyping(`${username} is typing…`)
+        // The name is worked out where it is shown, from what the app knows of them now: the server sends the username
+        // from the sign-in the typist made, which can be out of date (their name was changed since, by an admin).
+        setTyping({ userId, name: username })
         window.clearTimeout(typingTimer.current)
         typingTimer.current = window.setTimeout(() => setTyping(null), 4000)
       },

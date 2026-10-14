@@ -76,7 +76,19 @@ export interface ProfileConnectionDto { service: string; serviceName: string; na
 export type UpdateProfileRequest = Partial<Record<'displayName' | 'bio' | 'pronouns' | 'accentColor' | 'nameFont' | 'nameColor' | 'nameColor2' | 'decoration' | 'effect' | 'nameEffect', string>>
 export interface DecorationDto { id: string; name: string; kind: 'avatar' | 'effect'; url: string; /** The colors it is drawn in ("9000ff"), each of which can be swapped for your own. */ colors?: string[] | null }
 /** What a server says about itself before sign-in: the protocol it speaks and the oldest client protocol it accepts. */
-export interface ServerMetaDto { protocol: number; minClientProtocol: number; version: string; /** The server runs as several copies: see hubConnect.ts. */ webSocketsOnly?: boolean; /** What an invite link starts with on this server; the code follows. */ inviteBase?: string | null; /** What a link to an event starts with; the event's id follows. */ eventBase?: string | null }
+export interface SupportLinkDto { name: string; url: string; note?: string | null }
+export interface SupportCostDto { name: string; amount: number }
+/** What the support window shows (see Support.tsx). Everything after showCosts is only there when it is true. */
+export interface SupportReportDto {
+  message: string; links: SupportLinkDto[]; showCosts: boolean; currency: string
+  costs?: { backend: number; relays: SupportCostDto[]; other: SupportCostDto[]; total: number } | null
+  raised?: { kofi: number; patreon: number; byHand: number; total: number; patreonProblem?: string | null; patrons?: number | null } | null
+  goal?: { name: string; cost: number; short: number } | null
+  estimates?: { id: string; name: string; mbps: number; relays: number; cost: number }[] | null
+  measured?: { monthlyUsers: number; peakVoice: number; peakStreams: number; peakViewers: number; since: string } | null
+  quality?: string | null
+}
+export interface ServerMetaDto { /** Whether to show the support button (the admin panel's Support page). */ support?: boolean; protocol: number; minClientProtocol: number; version: string; /** The server runs as several copies: see hubConnect.ts. */ webSocketsOnly?: boolean; /** What an invite link starts with on this server; the code follows. */ inviteBase?: string | null; /** What a link to an event starts with; the event's id follows. */ eventBase?: string | null }
 /** What an invite leads to, shown before joining. */
 export interface InvitePreviewDto { code: string; guild: GuildDto; memberCount: number }
 export interface TokenResponse { accessToken: string; expiresAt: string; user: UserDto }

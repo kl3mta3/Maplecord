@@ -255,6 +255,20 @@ html.overlay-mode, html.overlay-mode body, html.overlay-mode #root { background:
 .overlay .hint { text-align: center; font-size: 9px; margin-top: 6px; }
 
 /* ---- Dialog ---- */
+/* The support button: small, at the top right, out of the way. */
+.supportbtn { position: fixed; top: 6px; right: 10px; z-index: 9; display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; font-size: 12px; border-radius: 999px; background: var(--bg2); color: var(--muted); border: 1px solid var(--border); }
+.supportbtn:hover { color: var(--text); border-color: var(--accent); }
+@media (max-width: 767px) { .supportbtn { top: auto; bottom: 74px; right: 8px; } }
+.support { display: flex; flex-direction: column; gap: 10px; max-height: 70vh; overflow-y: auto; }
+.supportlinks { display: flex; flex-wrap: wrap; gap: 8px; }
+.supportlink { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg2); color: var(--text); text-decoration: none; }
+.supportlink:hover { border-color: var(--accent); }
+.supportbar { height: 10px; border-radius: 5px; background: var(--bg3); overflow: hidden; }
+.supportbar > span { display: block; height: 100%; background: var(--accent); }
+.supporttable { width: 100%; border-collapse: collapse; margin: 6px 0; font-size: 13px; }
+.supporttable td { padding: 3px 4px; border-bottom: 1px solid var(--border); }
+.supporttable td:last-child { text-align: right; }
+.supporttable tr.total td { font-weight: 600; }
 .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: grid; place-items: center; z-index: 10; }
 /* Waiting in line to get in: over everything, since nothing behind it works until the server lets this app in. */
 .backdrop.waitline { z-index: 60; background: rgba(0,0,0,0.82); }
@@ -1085,3 +1099,9 @@ button.chip { cursor: pointer; }
 .message .eventcard .line { font-size: 13px; color: var(--text); }
 .message .eventcard .note { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); }
 @media (max-width: 700px) { .calday .calevent { font-size: 10px; padding: 0 3px; } .calgrid, .calweek { gap: 3px; padding-left: 6px; padding-right: 6px; } }
+
+/* On a touch screen, holding a finger on a person, a channel or a server opens its menu (see longPress.ts). There, the
+   phone's own text selection and link callout would get in the way, so they are off on those, and only those. */
+@media (hover: none) {
+  .voice-users .u, .member, .uname, .av, .channel, .rail .guild, .sidebar .category, .message .name { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+}

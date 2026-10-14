@@ -36,6 +36,7 @@ import Friends from './Home'
 import { serverMediaUrl } from '../itemIcons'
 import { bridge, isElectron } from '../platform'
 import { linkRanOut, useFileLink } from '../fileLinks'
+import { SupportDialog } from './Support'
 import { CALENDAR_BACKGROUNDS } from '../calendarLooks'
 import { MAX_P2P_TEXT, P2P_PICTURE, type P2PFile } from '../p2pText'
 import { foldP2p, foldP2pChat, P2P_GALLERY_POLLS, P2P_META_ROOM, P2P_REACTIONS } from '../p2pPosts'
@@ -46,7 +47,7 @@ import type { GuildFolder } from '../settings'
 import { Avatar, ProfileEditor, ProfilePopout, ProfileColumn, UserName } from './Profile'
 import { assetUrl, initials, shownName, type Appearance } from '../profile'
 import { STATUSES, UserSettingsDialog } from './UserSettings'
-import { ArrowLeftRight, AudioLines, ChartBarDecreasing, ChevronDown, ChevronRight, HeadphoneOff, Headphones, Images, LoaderCircle, Menu, Mic, MicOff, MonitorUp, Paperclip, Phone, PhoneOff, Pin, Plus, Search, Settings as SettingsIcon, Signal, Users, Video } from 'lucide-react'
+import { ArrowLeftRight, AudioLines, ChartBarDecreasing, ChevronDown, ChevronRight, HeadphoneOff, Headphones, Heart, Images, LoaderCircle, Menu, Mic, MicOff, MonitorUp, Paperclip, Phone, PhoneOff, Pin, Plus, Search, Settings as SettingsIcon, Signal, Users, Video } from 'lucide-react'
 import { AddServerDialog, CreateServerDialog, DiscoverDialog, JoinServerDialog } from './Servers'
 import { ChannelAccessDialog } from './ChannelAccess'
 import { InviteDialog } from './Invites'
@@ -68,7 +69,7 @@ import { ForumList, GalleryGrid, MediaGrid, NewPostDialog, PinsDialog, PollDialo
 type DialogState =
   | { kind: 'createGuild' } | { kind: 'joinGuild' } | { kind: 'addGuild' } | { kind: 'discover' } | { kind: 'channelAccess'; channelId: string } | { kind: 'deleteGroup'; channelId: string; name: string } | { kind: 'createChannel'; category?: boolean } | { kind: 'startRoll'; rollKind: RollKind }
   | { kind: 'leaveGuild' } | { kind: 'kick'; member: MemberDto } | { kind: 'ban'; member: MemberDto }
-  | { kind: 'audio' } | { kind: 'allowDirect' } | { kind: 'channelKind'; channelId: string; name: string; direct: boolean } | { kind: 'p2pCall'; userId: string; name: string } | { kind: 'share' } | { kind: 'settings' } | { kind: 'renameChannel'; channelId: string; name: string; group?: boolean } | { kind: 'deleteChannel'; channelId: string; name: string } | { kind: 'renameFolder'; folderId: string } | { kind: 'overlay' } | { kind: 'server' } | { kind: 'plugins' } | { kind: 'profile' }
+  | { kind: 'support' } | { kind: 'audio' } | { kind: 'allowDirect' } | { kind: 'channelKind'; channelId: string; name: string; direct: boolean } | { kind: 'p2pCall'; userId: string; name: string } | { kind: 'share' } | { kind: 'settings' } | { kind: 'renameChannel'; channelId: string; name: string; group?: boolean } | { kind: 'deleteChannel'; channelId: string; name: string } | { kind: 'renameFolder'; folderId: string } | { kind: 'overlay' } | { kind: 'server' } | { kind: 'plugins' } | { kind: 'profile' }
   | { kind: 'nickname'; guildId: string; userId: string } | { kind: 'invite'; guildId: string } | null
 
 export default function Shell({ store, onSignedOut }: { store: Store; onSignedOut: () => void }) {
@@ -311,9 +312,11 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   const colorOf = (userId: string) => (g ? roleColor(userId, g) : undefined)
 
   const [inviteBase, setInviteBase] = useState<string | null>(null)
+  // Whether whoever runs this Maplecord switched the support button on: asked with the rest as the app starts.
+  const [supportOn, setSupportOn] = useState(false)
   // Asked as the new-server dialog opens, so that it offers only the kinds that can be made right now.
   const newServerKinds = useCallback(() => store.api.newServerKinds(), [store.api])
-  useEffect(() => { void store.api.meta(store.settings.serverUrl).then(meta => setInviteBase(meta?.inviteBase ?? null)) }, [store.api, store.settings.serverUrl])
+  useEffect(() => { void store.api.meta(store.settings.serverUrl).then(meta => { setInviteBase(meta?.inviteBase ?? null); setSupportOn(!!meta?.support) }) }, [store.api, store.settings.serverUrl])
 
   // ---- Right-click menus ------------------------------------------------------
   // What they change about other people and servers is yours alone and kept on this device; nobody is told.
@@ -917,6 +920,8 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       ]} onClose={() => setMenu(null)} />}
       {dialog?.kind === 'kick' && <ConfirmDialog title={`Kick ${dialog.member.username}?`} message="They can rejoin with an invite." onConfirm={() => store.kickMember(dialog.member)} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'ban' && <BanDialog name={dialog.member.username} onBan={deleteDays => store.banMember(dialog.member, deleteDays)} onClose={() => setDialog(null)} />}
+      {supportOn && <button className="supportbtn" title="Support Maplecord" onClick={() => setDialog({ kind: 'support' })}><Heart size={13} /> Support</button>}
+      {dialog?.kind === 'support' && <SupportDialog api={store.api} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'share' && <SharePicker store={store} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'allowDirect' && <AllowDirectStep store={store} onClose={() => setDialog({ kind: 'audio' })} />}
       {dialog?.kind === 'channelKind' && (
@@ -1501,7 +1506,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
           <button className="subtle" aria-label="Stop replying" title="Stop replying" onClick={() => setReplyingTo(null)}>×</button>
         </div>
       )}
-      <div className="typing muted">{store.typing}</div>
+      <div className="typing muted">{store.typing && `${nameIn(store.typing.userId, store.typing.name)} is typing…`}</div>
       {store.error && <div className="error"><span className="grow">{store.error}</span><button className="subtle" onClick={() => store.setError(null)}>×</button></div>}
 
       <div style={{ position: 'relative' }}>
