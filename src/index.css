@@ -637,6 +637,8 @@ button.danger:hover { background: var(--red); color: #fff; }
 .usersettings .idrow code { background: var(--bg0); padding: 3px 6px; border-radius: 4px; font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
 .usersettings .blockedrow { background: var(--bg2); border-radius: 6px; padding: 4px 4px 4px 10px; }
 .usersettings .themes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+/* One's own theme: a picker for each of its colours. */
+.usersettings .themeeditor { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 8px; margin-bottom: 8px; }
 .themetile { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 10px; border-width: 2px; border-radius: 8px; color: #e8e8f0; font-weight: 600; }
 .themetile .swatches { display: inline-flex; gap: 4px; }
 .themetile .swatches i { width: 18px; height: 18px; border-radius: 50%; display: inline-block; }
@@ -1002,6 +1004,9 @@ button.chip { cursor: pointer; }
 
 /* ---- A calendar channel: a month of days as squares ---- */
 .chat.calendar { overflow: hidden; }
+/* Over a background the squares are a little see-through, and the rows above them let it show; what is written stays readable. */
+.chat.calendar.hasbg > .header, .chat.calendar.hasbg .calweek { background: transparent; }
+.chat.calendar.hasbg .calday { background: color-mix(in srgb, var(--bg1) 78%, transparent); backdrop-filter: blur(2px); }
 .chat.calendar .header .calmonth { align-self: center; min-width: 150px; text-align: center; }
 .calweek { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; padding: 8px 12px 0; color: var(--muted); font-size: 12px; text-align: center; }
 .calgrid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-template-rows: repeat(6, minmax(0, 1fr)); gap: 6px; padding: 6px 12px 12px; }

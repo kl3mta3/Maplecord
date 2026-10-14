@@ -57,7 +57,7 @@ export interface Settings {
   voiceGate?: boolean
   voiceGateLevel?: number
   /** The app's colours on this device (see theme.ts). */
-  theme?: { preset: string; accent: string | null }
+  theme?: { preset: string; accent: string | null; custom?: Record<string, string> | null }
   /** How the QR code of the friend link was last drawn on this device (see FriendLink.tsx). */
   qrLook?: string
   /** The card that code was last put on, if any (see friendCard.ts). */

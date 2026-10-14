@@ -1,5 +1,5 @@
 import type {
-  AccountDeletionDto, MemberPageDto, ConnectionTestDto, ConnectionTestPassDto, CommunityPollDto, CommunityPollAnswerDto, CalendarEventDto, ApplicationDto, CommandRuleDto, CommandRulesDto, QrDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto, RollStatsDto, SearchResultDto, MediaItemDto, SignInMethodsDto, ContactEmailDto, ConnectionDto, ConnectionServiceDto, FriendLinkDto, FriendLinkOwnerDto } from './types'
+  AccountDeletionDto, MemberPageDto, ConnectionTestDto, ConnectionTestPassDto, CommunityPollDto, CommunityPollAnswerDto, CalendarEventDto, ApplicationDto, CommandRuleDto, CommandRulesDto, QrDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, NewServerKinds, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto, RollStatsDto, SearchResultDto, MediaItemDto, SignInMethodsDto, ContactEmailDto, ConnectionDto, ConnectionServiceDto, FriendLinkDto, FriendLinkOwnerDto } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -96,6 +96,9 @@ export class Api {
   /** Whether rolls in a server's P2P channels add to people's roll totals. */
   /** A server's welcome channel (null for none), and whether a line is posted there when someone joins. */
   setGuildWelcome(id: string, channelId: string | null, messages: boolean) { return this.request<GuildDto>('PUT', `/api/guilds/${id}/welcome`, { channelId, messages }) }
+  /** Which kinds of server can be made right now. An older server has no such list: then every kind is offered, and it says no itself. */
+  newServerKinds() { return this.request<NewServerKinds>('GET', '/api/guilds/kinds') }
+  setGuildHideOwner(id: string, hideOwnerRole: boolean) { return this.request<GuildDto>('PATCH', `/api/guilds/${id}`, { hideOwnerRole }) }
   setGuildCountRolls(id: string, countRolls: boolean) { return this.request<GuildDto>('PATCH', `/api/guilds/${id}`, { countRolls }) }
   /** One's own roll totals. */
   rollStats() { return this.request<RollStatsDto>('GET', '/api/me/roll-stats') }
@@ -168,6 +171,8 @@ export class Api {
   deleteChannel(id: string) { return this.request<void>('DELETE', `/api/channels/${id}`) }
   /** Deletes a group of channels and every channel in it. Only called after the person has been asked, twice. */
   deleteGroup(id: string) { return this.request<void>('DELETE', `/api/channels/${id}?withChannels=true`) }
+  /** A calendar's background: one of calendarLooks.ts, or '' for none. */
+  setCalendarBackground(id: string, background: string) { return this.request<ChannelDto>('PATCH', `/api/channels/${id}`, { background }) }
   renameChannel(id: string, name: string) { return this.request<ChannelDto>('PATCH', `/api/channels/${id}`, { name }) }
   kick(guildId: string, userId: string) { return this.request<void>('DELETE', `/api/guilds/${guildId}/members/${userId}`) }
   /** deleteDays: also delete what they wrote in the server in the last 1, 3 or 7 days, or (0) all of it. Null deletes nothing. */
@@ -230,8 +235,8 @@ export class Api {
   }
   deleteGuildIcon(guildId: string) { return this.request<void>('DELETE', `/api/guilds/${guildId}/icon`) }
 
-  setNickname(guildId: string, userId: string, nickname: string | null) {
-    return this.request<MemberDto>('PUT', `/api/guilds/${guildId}/members/${userId}/nickname`, { nickname })
+  setNickname(guildId: string, userId: string, nickname: string | null, hideRoleColor?: boolean) {
+    return this.request<MemberDto>('PUT', `/api/guilds/${guildId}/members/${userId}/nickname`, { nickname, hideRoleColor })
   }
 
   // ---- profiles ----

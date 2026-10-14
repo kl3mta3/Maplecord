@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ChevronRight, Compass, Link, Plus, Search } from 'lucide-react'
 import type { Api } from '../api'
-import type { DiscoverGuildDto } from '../types'
+import type { DiscoverGuildDto, NewServerKinds } from '../types'
 import { Dialog } from './Dialogs'
 
 const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]?.toUpperCase() ?? '').join('') || '?'
@@ -30,32 +30,55 @@ export function AddServerDialog({ onCreate, onJoin, onDiscover, onClose }: { onC
  * Making a server: its name, who can join it, and for a private one how its voice and video travel. A public server
  * is always the standard kind, because P2P is for people who know each other.
  */
-export function CreateServerDialog({ onCreate, onClose }: { onCreate: (name: string, isPublic: boolean, kind: 'standard' | 'hybrid' | 'p2p') => void; onClose: () => void }) {
+export function CreateServerDialog({ kinds, onCreate, onClose }: {
+  /** Which kinds can be made right now, asked of the server as the dialog opens. Until it answers (or if it cannot), every kind is offered. */
+  kinds?: () => Promise<NewServerKinds>
+  onCreate: (name: string, isPublic: boolean, kind: 'standard' | 'hybrid' | 'p2p') => void; onClose: () => void
+}) {
   const [name, setName] = useState('')
   // Public unless they say otherwise.
   const [open, setOpen] = useState(true)
   const [kind, setKind] = useState<'standard' | 'hybrid' | 'p2p'>('standard')
-  const submit = () => { if (name.trim()) { onCreate(name.trim(), open, open ? 'standard' : kind); onClose() } }
+  const [may, setMay] = useState<NewServerKinds>({ public: true, private: true, hybrid: true, p2P: true })
+  useEffect(() => {
+    let gone = false
+    void kinds?.().then(now => {
+      if (gone) return
+      setMay(now)
+      // What was chosen to begin with may not be on offer: the first thing that is, is chosen instead.
+      const anyPrivate = now.private || now.hybrid || now.p2P
+      if (!now.public && anyPrivate) setOpen(false)
+      setKind(now.private ? 'standard' : now.hybrid ? 'hybrid' : 'p2p')
+    }).catch(() => { /* an older server: it says no itself */ })
+    return () => { gone = true }
+  }, [kinds])
+  const mayPrivate = may.private || may.hybrid || may.p2P
+  const none = !may.public && !mayPrivate
+  const allowed = open ? may.public : kind === 'standard' ? may.private : kind === 'hybrid' ? may.hybrid : may.p2P
+  const off = <span className="muted"> · cannot be made right now</span>
+  const submit = () => { if (name.trim() && allowed) { onCreate(name.trim(), open, open ? 'standard' : kind); onClose() } }
   return (
     <Dialog title="Create a server" onClose={onClose}>
       <div className="listing">
         <div className="muted">Server name</div>
         <input autoFocus value={name} maxLength={100} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()} aria-label="Server name" />
         <div className="muted">Who can join</div>
-        <label className="choice"><input type="radio" name="newlisting" checked={open} onChange={() => setOpen(true)} /><span><b>Public</b> <span className="muted">Listed for everyone to find and join *</span></span></label>
-        <label className="choice"><input type="radio" name="newlisting" checked={!open} onChange={() => setOpen(false)} /><span><b>Private</b> <span className="muted">Only people with an invite</span></span></label>
+        <label className="choice"><input type="radio" name="newlisting" checked={open} disabled={!may.public} onChange={() => setOpen(true)} /><span><b>Public</b> <span className="muted">Listed for everyone to find and join *</span>{!may.public && off}</span></label>
+        <label className="choice"><input type="radio" name="newlisting" checked={!open} disabled={!mayPrivate} onChange={() => setOpen(false)} /><span><b>Private</b> <span className="muted">Only people with an invite</span>{!mayPrivate && off}</span></label>
         {!open && (
           <>
             <div className="muted">Kind of server</div>
-            <label className="choice"><input type="radio" name="newkind" checked={kind === 'standard'} onChange={() => setKind('standard')} /><span><b>Standard</b> <span className="muted">Voice and video go through the relay. Nobody sees anyone's IP address.</span></span></label>
-            <label className="choice"><input type="radio" name="newkind" checked={kind === 'hybrid'} onChange={() => setKind('hybrid')} /><span><b>Hybrid</b> <span className="muted">Text is kept by the server. Voice and video are P2P: people in the voice channel connect straight to each other and can find each other's IP address.</span></span></label>
-            <label className="choice"><input type="radio" name="newkind" checked={kind === 'p2p'} onChange={() => setKind('p2p')} /><span><b>Full P2P</b> <span className="muted">Text, voice and video are all P2P, and stay so: every channel made in it later is P2P too. What is typed is kept only on people's own devices: the server keeps none of it, so someone who was not connected at the time does not get it.</span></span></label>
+            <label className="choice"><input type="radio" name="newkind" checked={kind === 'standard'} disabled={!may.private} onChange={() => setKind('standard')} /><span><b>Standard</b> <span className="muted">Voice and video go through the relay. Nobody sees anyone's IP address.</span>{!may.private && off}</span></label>
+            <label className="choice"><input type="radio" name="newkind" checked={kind === 'hybrid'} disabled={!may.hybrid} onChange={() => setKind('hybrid')} /><span><b>Hybrid</b> <span className="muted">Text is kept by the server. Voice and video are P2P: people in the voice channel connect straight to each other and can find each other's IP address.</span>{!may.hybrid && off}</span></label>
+            <label className="choice"><input type="radio" name="newkind" checked={kind === 'p2p'} disabled={!may.p2P} onChange={() => setKind('p2p')} /><span><b>Full P2P</b> <span className="muted">Text, voice and video are all P2P, and stay so: every channel made in it later is P2P too. What is typed is kept only on people's own devices: the server keeps none of it, so someone who was not connected at the time does not get it.</span>{!may.p2P && off}</span></label>
           </>
         )}
+        {none && <div className="muted"><b>New servers cannot be made on this Maplecord right now.</b></div>}
+        {!none && !open && (!may.private || !may.hybrid || !may.p2P) && <div className="muted">A kind that is greyed out cannot be made on this Maplecord right now.</div>}
         <div className="muted">You can add and change channels afterwards.</div>
         <div className="muted">* A public server cannot have P2P channels.</div>
       </div>
-      <div className="buttons"><button onClick={onClose}>Cancel</button><button className="accent" disabled={!name.trim()} onClick={submit}>Create</button></div>
+      <div className="buttons"><button onClick={onClose}>Cancel</button><button className="accent" disabled={!name.trim() || !allowed} onClick={submit}>Create</button></div>
     </Dialog>
   )
 }
@@ -176,7 +199,7 @@ export function ListingSettings({ isPublic, description, topics, onSave }: {
     <div className="listing">
       <div className="muted">Who can join</div>
       <label className="choice"><input type="radio" name="listing" checked={!open} onChange={() => setOpen(false)} /><span><b>Private</b> <span className="muted">Only people with an invite</span></span></label>
-      <label className="choice"><input type="radio" name="listing" checked={open} onChange={() => setOpen(true)} /><span><b>Public</b> <span className="muted">Listed for everyone to find and join. A public server cannot have P2P channels.</span></span></label>
+      <label className="choice"><input type="radio" name="listing" checked={open} disabled={!isPublic} onChange={() => setOpen(true)} /><span><b>Public</b> <span className="muted">Listed for everyone to find and join. A public server cannot have P2P channels.{!isPublic && ' A private server stays private: only a server made public when it was created can be public.'}</span></span></label>
       <div className="muted">Description (shown in the list of public servers)</div>
       <textarea rows={2} maxLength={300} value={about} onChange={e => setAbout(e.target.value)} aria-label="Server description" />
       <div className="muted">Topics, separated by commas (up to 5), for example: maplestory, raids, casual</div>

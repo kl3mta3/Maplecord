@@ -36,6 +36,7 @@ import Friends from './Home'
 import { serverMediaUrl } from '../itemIcons'
 import { bridge, isElectron } from '../platform'
 import { linkRanOut, useFileLink } from '../fileLinks'
+import { CALENDAR_BACKGROUNDS } from '../calendarLooks'
 import { MAX_P2P_TEXT, P2P_PICTURE, type P2PFile } from '../p2pText'
 import { foldP2p, foldP2pChat, P2P_GALLERY_POLLS, P2P_META_ROOM, P2P_REACTIONS } from '../p2pPosts'
 import { soundPackNames } from '../sounds'
@@ -310,6 +311,8 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   const colorOf = (userId: string) => (g ? roleColor(userId, g) : undefined)
 
   const [inviteBase, setInviteBase] = useState<string | null>(null)
+  // Asked as the new-server dialog opens, so that it offers only the kinds that can be made right now.
+  const newServerKinds = useCallback(() => store.api.newServerKinds(), [store.api])
   useEffect(() => { void store.api.meta(store.settings.serverUrl).then(meta => setInviteBase(meta?.inviteBase ?? null)) }, [store.api, store.settings.serverUrl])
 
   // ---- Right-click menus ------------------------------------------------------
@@ -759,7 +762,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       {store.home && !store.selectedChannel
         ? <Friends store={store} />
         : g && store.selectedChannel?.type === ChannelType.Calendar
-        ? <CalendarView store={store} channelId={store.selectedChannel.id} name={store.selectedChannel.name} mayPost={can(Permission.PostEvents)} mayManage={can(Permission.ManageMessages)} mayShare={can(Permission.ShareEvents)} nameOf={nameIn}
+        ? <CalendarView store={store} channelId={store.selectedChannel.id} name={store.selectedChannel.name} background={store.selectedChannel.background} mayPost={can(Permission.PostEvents)} mayManage={can(Permission.ManageMessages)} mayShare={can(Permission.ShareEvents)} nameOf={nameIn}
             // Where an event can be posted: the text channels and forums this person can write in. A P2P channel's text never passes the server.
             postTo={!g ? [] : g.channels.filter(c => (c.type === ChannelType.Text || c.type === ChannelType.Forum) && !c.directSince && (!me || mayWriteIn(g, me.id, c))).sort((a, b) => a.position - b.position)
               .map(c => ({ id: c.id, name: c.name, forum: c.type === ChannelType.Forum }))}
@@ -824,7 +827,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       </div>
 
       {tagOpen && <TagCardDialog guildId={tagOpen} serverUrl={store.settings.serverUrl} load={store.tagCard} onJoin={store.joinPublicGuild} onClose={() => setTagOpen(null)} />}
-      {dialog?.kind === 'createGuild' && <CreateServerDialog onCreate={(name, isPublic, kind) => void store.createGuild(name, isPublic, kind)} onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'createGuild' && <CreateServerDialog kinds={newServerKinds} onCreate={(name, isPublic, kind) => void store.createGuild(name, isPublic, kind)} onClose={() => setDialog(null)} />}
       {store.deleteStep && <DeleteAccountDialog store={store} />}
       {store.pendingFriendLink && (
         <ConfirmDialog title={`Ask ${store.pendingFriendLink.user.displayName ?? store.pendingFriendLink.user.username} to be friends?`}
@@ -862,7 +865,8 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
         const target = where?.members.find(m => m.userId === dialog.userId)
         if (!where || !target) return null
         return <NicknameDialog who={target.userId === me?.id ? 'you are' : (target.displayName || target.username) + ' is'} serverName={where.guild.name} current={target.nickname}
-          fallback={target.displayName || target.username} onSubmit={nick => store.setNickname(where.guild.id, target.userId, nick)} onClose={() => setDialog(null)} />
+          fallback={target.displayName || target.username} hideRoleColor={target.userId === me?.id ? !!target.hideRoleColor : undefined}
+          onSubmit={(nick, hide) => store.setNickname(where.guild.id, target.userId, nick, hide)} onClose={() => setDialog(null)} />
       })()}
       {card && (
         <ProfilePopout store={store} userId={card.userId} fallbackName={card.name} x={card.x} y={card.y} onClose={() => setCard(null)} onEdit={() => setDialog({ kind: 'profile' })}
@@ -895,6 +899,14 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
         // In a full P2P server every channel is P2P and stays so.
         ...(menu.voice && !g?.guild.fullP2P && can(Permission.ManageChannels) && can(Permission.ManageDirectChannels) && (menu.direct || !g?.guild.isPublic)
           ? [{ kind: 'item', label: menu.direct ? 'Make it a relayed channel' : 'Make it a P2P channel', icon: '⇄', onClick: () => setDialog({ kind: 'channelKind', channelId: menu.channelId, name: menu.name, direct: !menu.direct }) } as MenuEntry] : []),
+        // A calendar's background, for whoever may manage channels. Everyone in the server sees it.
+        ...(can(Permission.ManageChannels) && g?.channels.find(c => c.id === menu.channelId)?.type === ChannelType.Calendar ? [{
+          kind: 'submenu', label: 'Background',
+          entries: [{ id: '', name: 'None' }, ...CALENDAR_BACKGROUNDS].map(b => ({
+            kind: 'item' as const, label: b.name, checked: (g?.channels.find(c => c.id === menu.channelId)?.background ?? '') === b.id,
+            onClick: () => { void store.setCalendarBackground(menu.channelId, b.id) },
+          })),
+        } as MenuEntry] : []),
         ...(can(Permission.ManageChannels) ? [
           { kind: 'sep' } as MenuEntry,
           { kind: 'item', label: 'Permissions', icon: '🔒', onClick: () => setDialog({ kind: 'channelAccess', channelId: menu.channelId }) } as MenuEntry,
@@ -951,7 +963,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       {dialog?.kind === 'server' && g && (
         <ServerSettingsDialog api={store.api} channels={g.channels} guild={g.guild} roles={g.roles ?? []} members={g.members} myPermissions={myPerms} meId={me?.id ?? ''}
           findMembers={g.membersPartial ? q => store.findMembers(g.guild.id, q) : undefined} moreMembers={g.membersPartial && !store.membersEnded[g.guild.id] ? () => void store.loadMoreMembers(g.guild.id) : undefined}
-          onRename={store.renameGuild} onIcon={store.setGuildIcon} onListing={store.setGuildListing} tagSymbols={store.tagSymbols} onSetTag={store.setGuildTag} onRemoveTag={store.removeGuildTag} onCountRolls={store.setGuildCountRolls} onWelcome={store.setGuildWelcome} onCreateRole={store.createRole} onUpdateRole={store.updateRole} onDeleteRole={store.deleteRole} onSetMemberRoles={store.setMemberRoles}
+          onHideOwner={store.setGuildHideOwner} onRename={store.renameGuild} onIcon={store.setGuildIcon} onListing={store.setGuildListing} tagSymbols={store.tagSymbols} onSetTag={store.setGuildTag} onRemoveTag={store.removeGuildTag} onCountRolls={store.setGuildCountRolls} onWelcome={store.setGuildWelcome} onCreateRole={store.createRole} onUpdateRole={store.updateRole} onDeleteRole={store.deleteRole} onSetMemberRoles={store.setMemberRoles}
           onClose={() => setDialog(null)} />
       )}
       {store.directPrompt && (
@@ -2051,13 +2063,15 @@ function channelRows(channels: Store['guilds'][number]['channels']) {
 /** Color of the member's highest colored role, for names in chat and the member list. */
 function roleColor(userId: string, g: Store['guilds'][number]): string | undefined {
   const m = g.members.find(x => x.userId === userId)
-  if (!m) return undefined
+  // Someone who chose to keep their own colours here has no role colour to show (see the nickname dialog).
+  if (!m || m.hideRoleColor) return undefined
   const colored = (m.roleIds ?? []).map(id => g.roles?.find(r => r.id === id)).filter((r): r is NonNullable<typeof r> => !!r && !!r.color).sort((a, b) => b.position - a.position)
   return colored[0]?.color ?? undefined
 }
 
 function roleLabel(m: MemberDto, g: Store['guilds'][number]) {
-  if (m.userId === g.guild.ownerId) return 'Owner'
+  // An owner who chose not to be shown as one is listed under their highest role, like anyone.
+  if (m.userId === g.guild.ownerId && !g.guild.hideOwnerRole) return 'Owner'
   const named = (m.roleIds ?? []).map(id => g.roles?.find(r => r.id === id)).filter(Boolean).sort((a, b) => b!.position - a!.position)
   return named[0]?.name ?? ''
 }

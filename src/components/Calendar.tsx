@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { calendarBackground } from '../calendarLooks'
 import type { Store } from '../store'
 import { EventAnswer, type CalendarEventDto, type PostedEventDto } from '../types'
 import { ContextMenu, type MenuEntry } from './ContextMenu'
@@ -77,8 +78,10 @@ export function EventCard({ event, onOpen }: { event: PostedEventDto; onOpen?: (
   )
 }
 
-export function CalendarView({ store, channelId, name, mayPost, mayManage, mayShare, nameOf, postTo, members, roles, myRoleIds }: {
+export function CalendarView({ store, channelId, name, background, mayPost, mayManage, mayShare, nameOf, postTo, members, roles, myRoleIds }: {
   store: Store; channelId: string; name: string
+  /** The calendar's background, if it has one (see calendarLooks.ts). */
+  background?: string | null
   /** May put events on it, and change or remove their own. */
   mayPost: boolean
   /** May change or remove anyone's (whoever may manage messages). */
@@ -164,8 +167,9 @@ export function CalendarView({ store, channelId, name, mayPost, mayManage, maySh
   const openMenu = (e: React.MouseEvent, event: CalendarEventDto) => { e.preventDefault(); e.stopPropagation(); setMenu({ event, x: e.clientX, y: e.clientY }) }
   const invitingEvent = inviting ? events.find(e => e.id === inviting) ?? null : null
 
+  const look = calendarBackground(background)
   return (
-    <div className="chat calendar">
+    <div className={'chat calendar' + (look ? ' hasbg' : '')} style={look ?? undefined}>
       <div className="header">
         <span className="muted">📅</span> <b>{name}</b>
         <div className="actions">

@@ -79,7 +79,7 @@ export const PERMISSION_GROUPS = [...new Set(PERMISSION_LABELS.map(p => p.group)
 
 const ROLE_SWATCHES = ['#9000ff', '#00ddff', '#ff008c', '#2cfc00', '#f19511', '#ff3b3b', '#ffd700', '#1abc9c', '#e91e63', '#3498db', '#95a5a6', '#ffffff']
 
-export function ServerSettingsDialog({ api, channels, guild, roles, members, findMembers, moreMembers, myPermissions, meId, onRename, onIcon, onListing, tagSymbols, onSetTag, onRemoveTag, onCountRolls, onWelcome, onCreateRole, onUpdateRole, onDeleteRole, onSetMemberRoles, onClose }: {
+export function ServerSettingsDialog({ api, channels, guild, roles, members, findMembers, moreMembers, myPermissions, meId, onRename, onIcon, onListing, tagSymbols, onSetTag, onRemoveTag, onCountRolls, onHideOwner, onWelcome, onCreateRole, onUpdateRole, onDeleteRole, onSetMemberRoles, onClose }: {
   api: Api; channels: ChannelDto[]
   guild: GuildDto; roles: RoleDto[]; members: MemberDto[]; myPermissions: number; meId: string
   /**
@@ -98,6 +98,7 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, fin
   onRemoveTag: (guildId: string) => Promise<void>
   /** Whether rolls in this server's P2P channels add to people's roll totals. */
   onCountRolls: (guildId: string, countRolls: boolean) => Promise<void>
+  onHideOwner: (guildId: string, hide: boolean) => Promise<void>
   /** The channel a line is posted in when someone joins (null for none), and whether one is posted. */
   onWelcome: (guildId: string, channelId: string | null, messages: boolean) => Promise<void>
   onCreateRole: (name: string, color: string | null, permissions: number) => Promise<void>
@@ -200,6 +201,18 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, fin
               </div>
             )
           })()}
+          {/* The owner's own choice, so it is only offered to the owner. */}
+          {guild.ownerId === meId && (
+            <div className="tagsettings">
+              <div className="muted">Owner</div>
+              <label className="row" style={{ alignItems: 'flex-start' }}>
+                <input type="checkbox" checked={!!guild.hideOwnerRole} onChange={e => void onHideOwner(guild.id, e.target.checked)} />
+                <span>Do not show me as the owner in the member list
+                  <span className="muted" style={{ display: 'block' }}>Under your name the list shows your highest role instead of "Owner", as it does for everyone else. You still own the server and can do everything an owner can.</span>
+                </span>
+              </label>
+            </div>
+          )}
           {/* Only a server with P2P channels has this to decide: everywhere else rolls are counted, as their results are kept. */}
           {channels.some(c => c.directSince) && (
             <div className="tagsettings">

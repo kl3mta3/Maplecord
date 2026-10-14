@@ -1724,6 +1724,11 @@ export function useMaplecord() {
     selectGuild(g.guild.id, isNew ? g.guild.welcomeChannelId : null)
   }, [api, selectGuild])
 
+  /** Whether the owner is shown under their highest role in the member list, and not as "Owner". The owner's own choice. */
+  const setGuildHideOwner = useCallback(async (guildId: string, hide: boolean) => {
+    await run(async () => { const guild = await api.setGuildHideOwner(guildId, hide); patchGuild(guildId, x => ({ ...x, guild })) })
+  }, [api, patchGuild])
+
   /** Whether rolls in this server's P2P channels add to people's roll totals. */
   const setGuildCountRolls = useCallback(async (guildId: string, countRolls: boolean) => {
     const guild = await api.setGuildCountRolls(guildId, countRolls)
@@ -2425,8 +2430,8 @@ export function useMaplecord() {
   }, [api, applyOwnProfile])
 
   /** A name on one server only (null removes it). The server tells everyone, including us, through MemberUpdated. */
-  const setNickname = useCallback(async (guildId: string, userId: string, nickname: string | null) => run(async () => {
-    const member = await api.setNickname(guildId, userId, nickname)
+  const setNickname = useCallback(async (guildId: string, userId: string, nickname: string | null, hideRoleColor?: boolean) => run(async () => {
+    const member = await api.setNickname(guildId, userId, nickname, hideRoleColor)
     patchGuild(guildId, g => ({ ...g, members: g.members.map(m => (m.userId === userId ? member : m)) }))
   }), [api, patchGuild])
 
@@ -2537,6 +2542,8 @@ export function useMaplecord() {
   }, [api])
 
   const renameChannel = useCallback(async (channelId: string, name: string) => { await run(() => api.renameChannel(channelId, name)) }, [api])
+  /** Everyone in the server is told of the change (ChannelUpdated), this app included. */
+  const setCalendarBackground = useCallback(async (channelId: string, background: string) => { await run(() => api.setCalendarBackground(channelId, background)) }, [api])
   const deleteChannel = useCallback(async (channelId: string) => { await run(() => api.deleteChannel(channelId)) }, [api])
   /** A group of channels, with every channel in it. */
   const deleteGroup = useCallback(async (channelId: string) => { await run(() => api.deleteGroup(channelId)) }, [api])
@@ -3075,7 +3082,7 @@ export function useMaplecord() {
     renameGuild, setGuildIcon, createRole, updateRole, deleteRole, setMemberRoles,
     partyChannel, partyLabel,
     setUserPrefs, setGuildPrefs, markGuildRead, mentionsMe,
-    appearanceOf, decorations, loadProfile, saveProfile, setProfilePicture, setProfileAnimation, setNickname,
+    appearanceOf, decorations, loadProfile, saveProfile, setProfilePicture, setProfileAnimation, setNickname, setGuildHideOwner, setCalendarBackground,
     loadMoreMembers, findMembers, needMembers, membersEnded,
     plugins, pendingDrops, resolveItem, itemIcon, searchItems, acceptDrop, dismissDrop, simulateDrop,
     setPluginSettings, reloadPlugins, installPlugin, openPluginsFolder, pickPluginLog,

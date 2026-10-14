@@ -80,12 +80,14 @@ export interface ServerMetaDto { protocol: number; minClientProtocol: number; ve
 /** What an invite leads to, shown before joining. */
 export interface InvitePreviewDto { code: string; guild: GuildDto; memberCount: number }
 export interface TokenResponse { accessToken: string; expiresAt: string; user: UserDto }
-export interface GuildDto { id: string; name: string; iconUrl: string | null; ownerId: string; createdAt: string; /** A full P2P server: every channel in it is a P2P channel and stays one, and only P2P bots are added to it. Fixed when the server is made. */ fullP2P?: boolean; /** Listed for anyone to find and join. */ isPublic?: boolean; description?: string | null; topics?: string[] | null; /** The tag its members may wear, and whether tags are turned off for it. */ tagText?: string | null; tagSymbol?: string | null; noTag?: boolean; /** Rolls in this server's P2P channels are not added to people's roll totals. */ noRollStats?: boolean; /** The text channel a line is posted in when someone joins, and whether one is posted. */ welcomeChannelId?: string | null; welcomeMessages?: boolean }
+/** Which kinds of server can be made on this Maplecord right now. Servers that exist are not affected. */
+export interface NewServerKinds { public: boolean; private: boolean; hybrid: boolean; p2P: boolean }
+export interface GuildDto { id: string; name: string; iconUrl: string | null; ownerId: string; createdAt: string; /** The owner is shown under their highest role in the member list, not as "Owner". */ hideOwnerRole?: boolean; /** A full P2P server: every channel in it is a P2P channel and stays one, and only P2P bots are added to it. Fixed when the server is made. */ fullP2P?: boolean; /** Listed for anyone to find and join. */ isPublic?: boolean; description?: string | null; topics?: string[] | null; /** The tag its members may wear, and whether tags are turned off for it. */ tagText?: string | null; tagSymbol?: string | null; noTag?: boolean; /** Rolls in this server's P2P channels are not added to people's roll totals. */ noRollStats?: boolean; /** The text channel a line is posted in when someone joins, and whether one is posted. */ welcomeChannelId?: string | null; welcomeMessages?: boolean }
 /** A public server as the list of them shows it. */
 export interface DiscoverGuildDto { id: string; name: string; iconUrl: string | null; description: string | null; topics: string[]; memberCount: number; joined: boolean }
 export interface ChannelOverrideDto { id: string; channelId: string; roleId: string | null; userId: string | null; allow: number; deny: number }
 /** directSince is set on a P2P voice channel: people in it connect straight to each other and can see each other's IP address. */
-export interface ChannelDto { id: string; guildId: string | null; parentId: string | null; name: string; type: ChannelType; position: number; overrides?: ChannelOverrideDto[] | null; directSince?: string | null; /** The P2P bots (their accounts) let into this channel. Missing when what sent it was not about them. */ bots?: string[] | null }
+export interface ChannelDto { /** A calendar's background (see calendarLooks.ts); null for none. */ background?: string | null; id: string; guildId: string | null; parentId: string | null; name: string; type: ChannelType; position: number; overrides?: ChannelOverrideDto[] | null; directSince?: string | null; /** The P2P bots (their accounts) let into this channel. Missing when what sent it was not about them. */ bots?: string[] | null }
 /** An address other tools can post messages to. `token` and `url` only come back when it is made or renewed. */
 export interface WebhookDto { id: string; channelId: string; guildId: string; name: string; avatarUrl: string | null; createdById: string; createdAt: string; token?: string | null; url?: string | null }
 /** A bot. `token` and `interactionsSecret` only come back when it is made or its token is renewed. */
@@ -111,6 +113,8 @@ export type UserStatus = (typeof UserStatus)[keyof typeof UserStatus]
 export interface PreferencesDto { status: UserStatus; ignoreFriendRequests: boolean; friendRequestsSharedOnly: boolean }
 export interface RoleDto { id: string; guildId: string; name: string; color: string | null; position: number; permissions: number; isEveryone: boolean }
 export interface MemberDto {
+  /** Their own choice, in this server: their name is drawn in their own colours here, not in the colour of their role. */
+  hideRoleColor?: boolean
   userId: string; username: string; avatarUrl: string | null; nickname: string | null; role: number; online: boolean; roleIds?: string[] | null; isBot?: boolean; /** A P2P bot: only in the P2P channels it was let into. */ directBot?: boolean
   displayName?: string | null; nameFont?: string | null; nameColor?: string | null; nameColor2?: string | null; decoration?: string | null; tag?: TagDto | null
   /** How their name is drawn beyond its colours (see nameEffects.ts). */

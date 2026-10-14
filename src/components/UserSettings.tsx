@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { Store } from '../store'
 import { UserStatus } from '../types'
-import { DEFAULT_THEME, THEMES } from '../theme'
+import { DEFAULT_THEME, EDITABLE, THEMES, colorsOf, contrast, ownColors } from '../theme'
 import { isElectron } from '../platform'
 import { shownName } from '../profile'
 import { Dialog } from './Dialogs'
@@ -41,6 +41,10 @@ export function UserSettingsDialog({ store, initial, onOpen, onAllowDirect, onSi
   const me = store.settings.user
   const prefs = store.preferences
   const theme = store.settings.theme ?? DEFAULT_THEME
+  // One's own theme: the colours kept for it, or, before there are any, the ones of the theme in use (where it starts from).
+  const own = ownColors(theme.custom ?? colorsOf(theme.preset))
+  const setOwn = (name: string, value: string) => store.updateSettings({ theme: { ...theme, preset: 'custom', accent: null, custom: { ...own, [name]: value } } })
+  const hardToRead = contrast(own['--text']!, own['--bg1']!) < 4.5 || contrast(own['--text']!, own['--bg0']!) < 4.5
   const desktop = isElectron()
   const copyId = () => { if (me) void navigator.clipboard.writeText(me.id).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }) }
 
@@ -117,7 +121,7 @@ export function UserSettingsDialog({ store, initial, onOpen, onAllowDirect, onSi
               <h4>Theme</h4>
               <div className="themes">
                 {Object.entries(THEMES).map(([id, t]) => (
-                  <button key={id} className={'themetile' + (theme.preset === id ? ' on' : '')} onClick={() => store.updateSettings({ theme: { preset: id, accent: null } })}
+                  <button key={id} className={'themetile' + (theme.preset === id ? ' on' : '')} onClick={() => store.updateSettings({ theme: { ...theme, preset: id, accent: null } })}
                     style={{ background: t.vars['--bg1'] ?? '#14141c', borderColor: theme.preset === id ? (t.vars['--accent'] ?? '#9000ff') : (t.vars['--border'] ?? '#2e2e3e') }}>
                     <span className="swatches">
                       <i style={{ background: t.vars['--accent'] ?? '#9000ff' }} /><i style={{ background: t.vars['--accent2'] ?? '#00ddff' }} /><i style={{ background: t.vars['--bg3'] ?? '#262634' }} />
@@ -125,13 +129,43 @@ export function UserSettingsDialog({ store, initial, onOpen, onAllowDirect, onSi
                     <span>{t.name}</span>
                   </button>
                 ))}
+                {/* One's own: it starts from the theme in use, and every colour can then be changed. */}
+                <button className={'themetile' + (theme.preset === 'custom' ? ' on' : '')} onClick={() => store.updateSettings({ theme: { ...theme, preset: 'custom', accent: null, custom: own } })}
+                  style={{ background: own['--bg1'], color: own['--text'], borderColor: theme.preset === 'custom' ? own['--accent'] : own['--border'] }}>
+                  <span className="swatches">
+                    <i style={{ background: own['--accent'] }} /><i style={{ background: own['--accent2'] }} /><i style={{ background: own['--bg3'] }} />
+                  </span>
+                  <span>Custom</span>
+                </button>
               </div>
-              <h4>Accent colour</h4>
-              <div className="row">
-                <input type="color" value={theme.accent ?? THEMES[theme.preset]?.vars['--accent'] ?? '#9000ff'} onChange={e => store.updateSettings({ theme: { preset: theme.preset, accent: e.target.value } })} />
-                <span className="grow muted">Buttons, highlights and switches. Kept on this device.</span>
-                {theme.accent && <button className="subtle" onClick={() => store.updateSettings({ theme: { preset: theme.preset, accent: null } })}>Use the theme's</button>}
-              </div>
+              {theme.preset === 'custom' ? (
+                <>
+                  <h4>Your theme</h4>
+                  <div className="themeeditor">
+                    {EDITABLE.map(e => (
+                      <label key={e.name} className="fxcolor"><input type="color" value={own[e.name]} onChange={ev => setOwn(e.name, ev.target.value)} aria-label={e.label} /><span>{e.label}</span></label>
+                    ))}
+                  </div>
+                  {hardToRead && <div className="muted"><b>Text is hard to read on these colours.</b> Choose a lighter text colour, or darker panels and window.</div>}
+                  <div className="row">
+                    <span className="muted">Start again from</span>
+                    <select value="" onChange={e => { if (e.target.value) store.updateSettings({ theme: { ...theme, preset: 'custom', accent: null, custom: colorsOf(e.target.value) } }) }} aria-label="Start again from a theme">
+                      <option value="">a theme…</option>
+                      {Object.entries(THEMES).map(([id, t]) => <option key={id} value={id}>{t.name}</option>)}
+                    </select>
+                    <span className="grow muted">Kept on this device.</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <h4>Accent colour</h4>
+                  <div className="row">
+                    <input type="color" value={theme.accent ?? THEMES[theme.preset]?.vars['--accent'] ?? '#9000ff'} onChange={e => store.updateSettings({ theme: { ...theme, accent: e.target.value } })} />
+                    <span className="grow muted">Buttons, highlights and switches. Kept on this device.</span>
+                    {theme.accent && <button className="subtle" onClick={() => store.updateSettings({ theme: { ...theme, accent: null } })}>Use the theme's</button>}
+                  </div>
+                </>
+              )}
             </>
           )}
 

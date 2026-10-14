@@ -90,15 +90,17 @@ type QueuePlace = { ticket: number; head: number }
 function waitInLine(conn: HubConnection, place: QueuePlace, tell: (ahead: number) => void): Promise<void> {
   return new Promise((resolve, reject) => {
     let ticket = place.ticket
-    const say = (head: number) => tell(Math.max(0, ticket - head))
+    // Once let in, nothing more about the line is passed on: this connection is still told of it until it is closed.
+    let over = false
+    const say = (head: number) => { if (!over && head > 0) tell(Math.max(0, ticket - head)) }
     say(place.head)
     conn.on('QueueMoved', (head: number) => say(head))
-    conn.on('Admitted', () => resolve())
+    conn.on('Admitted', () => { over = true; resolve() })
     conn.onreconnected(() => {
       // Let in while the connection was away: there is no place to be told any more.
-      void conn.invoke<QueuePlace | null>('QueuePlace').then(now => { if (!now) resolve(); else { ticket = now.ticket; say(now.head) } }).catch(() => { /* asked again when the line moves */ })
+      void conn.invoke<QueuePlace | null>('QueuePlace').then(now => { if (!now) { over = true; resolve() } else { ticket = now.ticket; say(now.head) } }).catch(() => { /* asked again when the line moves */ })
     })
-    conn.onclose(() => reject(new Error('The connection was lost while waiting to get in.')))
+    conn.onclose(() => { over = true; reject(new Error('The connection was lost while waiting to get in.')) })
   })
 }
 

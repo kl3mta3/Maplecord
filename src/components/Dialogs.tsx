@@ -198,17 +198,30 @@ export function PromptDialog({ title, label, onSubmit, onClose, initial = '' }: 
 }
 
 /** A nickname is a name on one server only. Saving it empty removes it, so the display name shows again. */
-export function NicknameDialog({ who, serverName, current, fallback, onSubmit, onClose }: {
-  who: string; serverName: string; current: string | null; fallback: string; onSubmit: (nickname: string | null) => void; onClose: () => void
+export function NicknameDialog({ who, serverName, current, fallback, hideRoleColor, onSubmit, onClose }: {
+  who: string; serverName: string; current: string | null; fallback: string
+  /** Given only for one's own name: whether it keeps its own colours on this server. Left out for someone else's, whose choice it is not. */
+  hideRoleColor?: boolean
+  onSubmit: (nickname: string | null, hideRoleColor?: boolean) => void; onClose: () => void
 }) {
   const [value, setValue] = useState(current ?? '')
-  const submit = () => { onSubmit(value.trim() || null); onClose() }
+  const [plain, setPlain] = useState(hideRoleColor ?? false)
+  const own = hideRoleColor !== undefined
+  const submit = () => { onSubmit(value.trim() || null, own ? plain : undefined); onClose() }
   return (
     <Dialog title={`Nickname on ${serverName}`} onClose={onClose}>
       <div className="muted">What {who} is called on this server only. Leave it empty to use the display name ({fallback}).</div>
       <input autoFocus value={value} maxLength={32} placeholder={fallback} onChange={e => setValue(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()} />
+      {own && (
+        <label className="row" style={{ alignItems: 'flex-start' }}>
+          <input type="checkbox" checked={plain} onChange={e => setPlain(e.target.checked)} />
+          <span>Hide my role color on this server
+            <span className="muted" style={{ display: 'block' }}>Your name is shown here in your own color and effect, not in the color of your role. Everyone on this server sees it that way.</span>
+          </span>
+        </label>
+      )}
       <div className="buttons">
-        {current && <button className="subtle" style={{ marginRight: 'auto' }} onClick={() => { onSubmit(null); onClose() }}>Remove nickname</button>}
+        {current && <button className="subtle" style={{ marginRight: 'auto' }} onClick={() => { onSubmit(null, own ? plain : undefined); onClose() }}>Remove nickname</button>}
         <button onClick={onClose}>Cancel</button><button className="accent" onClick={submit}>Save</button>
       </div>
     </Dialog>
