@@ -505,7 +505,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   }
 
   return (
-    <div className={'shell pane-' + pane} style={{ '--sidebar-w': columns.sidebar + 'px', '--members-w': columns.members + 'px' } as React.CSSProperties}>
+    <div className={'shell pane-' + pane + (supportOn ? ' supporting' : '')} style={{ '--sidebar-w': columns.sidebar + 'px', '--members-w': columns.members + 'px' } as React.CSSProperties}>
       {/* Only shown on a phone: the way between the three panes. */}
       <div className="mobilebar">
         {/* Each button opens its panel, and pressed again puts the conversation back. */}

@@ -39,6 +39,14 @@ export function SupportDialog({ api, onClose }: { api: Api; onClose: () => void 
               ))}
             </div>
           )}
+          {r.users && (
+            <>
+              <h4>People</h4>
+              <div>{people(r.users.monthlyUsers)} used Maplecord in the last 30 days.</div>
+              {r.users.atOnce != null && <div>The relays have room for about {people(r.users.atOnce)} in voice at once{r.users.monthlyCap != null ? `, or about ${r.users.monthlyCap.toLocaleString()} monthly users` : ''}.</div>}
+              {r.users.atOnce != null && <div className="muted small">Estimated from what the relays' lines carry and what people have used on them lately.</div>}
+            </>
+          )}
           {r.showCosts && r.costs && r.raised && r.goal && (
             <>
               <h4>This month</h4>
@@ -55,23 +63,25 @@ export function SupportDialog({ api, onClose }: { api: Api; onClose: () => void 
                 <table className="supporttable">
                   <tbody>
                     <tr><td>Backend</td><td>{money(r.costs.backend, r.currency)}</td></tr>
-                    {r.costs.relays.map(c => <tr key={'relay' + c.name}><td>Relay {c.name}</td><td>{money(c.amount, r.currency)}</td></tr>)}
+                    {r.costs.relays.length > 0 && <tr><td>Relays ({r.costs.relays.length})</td><td>{money(r.costs.relays.reduce((sum, c) => sum + c.amount, 0), r.currency)}</td></tr>}
                     {r.costs.other.map(c => <tr key={'other' + c.name}><td>{c.name}</td><td>{money(c.amount, r.currency)}</td></tr>)}
                     <tr className="total"><td>Costs now</td><td>{money(r.costs.total, r.currency)}</td></tr>
                     {r.raised.kofi > 0 && <tr><td>Given on Ko-fi</td><td>{money(r.raised.kofi, r.currency)}</td></tr>}
+                    {(r.raised.kofiFees ?? 0) > 0 && <tr><td>Ko-fi and card fees</td><td>−{money(r.raised.kofiFees!, r.currency)}</td></tr>}
                     {r.raised.patreon > 0 && <tr><td>Patreon pledges</td><td>{money(r.raised.patreon, r.currency)}</td></tr>}
+                    {(r.raised.patreonFees ?? 0) > 0 && <tr><td>Patreon and card fees</td><td>−{money(r.raised.patreonFees!, r.currency)}</td></tr>}
                     {r.raised.byHand > 0 && <tr><td>Given elsewhere</td><td>{money(r.raised.byHand, r.currency)}</td></tr>}
                   </tbody>
                 </table>
                 {r.estimates && r.measured && (
                   <>
-                    <div className="muted small">What it would cost a month for the same people, at each quality of shared video:</div>
+                    <div className="muted small">What it would cost a month to give everyone the same service at each quality of shared video:</div>
                     <table className="supporttable">
                       <tbody>
                         {r.estimates.map(e => <tr key={e.id}><td>{e.name}{e.id === r.quality ? ' (now)' : ''}</td><td>{e.relays} relay{e.relays === 1 ? '' : 's'}</td><td>{money(e.cost, r.currency)}</td></tr>)}
                       </tbody>
                     </table>
-                    <div className="muted small">Estimates, from this month's busiest moments: {people(r.measured.peakVoice)} in voice and {people(r.measured.peakViewers)} watching shared video at once, {people(r.measured.monthlyUsers)} in the last 30 days.</div>
+                    <div className="muted small">Estimates: a higher quality needs more relays for the same number of people, and a little more for the backend and running it. This month's busiest: {people(r.measured.peakVoice)} in voice and {people(r.measured.peakViewers)} watching shared video at once, {people(r.measured.monthlyUsers)} in the last 30 days.</div>
                   </>
                 )}
               </details>
