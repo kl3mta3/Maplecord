@@ -47,7 +47,7 @@ import type { GuildFolder } from '../settings'
 import { Avatar, ProfileEditor, ProfilePopout, ProfileColumn, UserName } from './Profile'
 import { assetUrl, initials, shownName, type Appearance } from '../profile'
 import { STATUSES, UserSettingsDialog } from './UserSettings'
-import { ArrowLeftRight, AudioLines, ChartBarDecreasing, ChevronDown, ChevronRight, HeadphoneOff, Headphones, Heart, Images, LoaderCircle, Menu, Mic, MicOff, MonitorUp, Paperclip, Phone, PhoneOff, Pin, Plus, Search, Settings as SettingsIcon, Signal, Users, Video } from 'lucide-react'
+import { ArrowLeftRight, AudioLines, ChartBarDecreasing, ChevronDown, ChevronRight, HeadphoneOff, Headphones, Heart, Images, LoaderCircle, Menu, Mic, MicOff, MonitorUp, Paperclip, Phone, PhoneOff, Pin, Plus, Search, Settings as SettingsIcon, Signal, TriangleAlert, Users, Video } from 'lucide-react'
 import { AddServerDialog, CreateServerDialog, DiscoverDialog, JoinServerDialog } from './Servers'
 import { ChannelAccessDialog } from './ChannelAccess'
 import { InviteDialog } from './Invites'
@@ -76,6 +76,8 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   const [dialog, setDialog] = useState<DialogState>(null)
   // A server tag beside someone's name was clicked: whose it is.
   const [tagOpen, setTagOpen] = useState<string | null>(null)
+  /** The warning-triangle button in the voice panel was just pressed (it lights up a moment). */
+  const [gapMarked, setGapMarked] = useState(false)
   useEffect(() => onTagOpened(setTagOpen), [])
   /**
    * On a phone there is room for one thing at a time: the channel list, the conversation, or the people in it.
@@ -717,7 +719,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           <div className={'voicebox' + (voice.directSince ? ' p2p' : '')}>
             <span className="signal">{inCall ? <Phone size={16} /> : <Signal size={16} />}</span>
             <div className="grow vtext" title={(voiceGuild ? voiceGuild + ' / ' : '') + voiceChannelName + (voiceDetail ? ' · ' + voiceDetail : '')}>
-              <div className="vstate">{voice.directSince ? (voice.policy === 'relay' ? 'P2P · through the relay' : 'P2P · using your IP') : inCall ? (inCall.phase === 'calling' ? 'Calling…' : 'In a call') : 'Voice connected'}</div>
+              <div className="vstate">{/* Recording for a voice report: the moment a gap was heard goes into it. */}{store.settings.voiceRecord && <button className={'markgap' + (gapMarked ? ' on' : '')} title={gapMarked ? 'Marked' : 'Just heard sound drop out? Press this to mark it, then copy the voice report from Voice & audio settings.'} onClick={e => { e.stopPropagation(); store.markVoiceGap(); setGapMarked(true); window.setTimeout(() => setGapMarked(false), 1200) }}><TriangleAlert size={12} /></button>}{voice.directSince ? (voice.policy === 'relay' ? 'P2P · through the relay' : 'P2P · using your IP') : inCall ? (inCall.phase === 'calling' ? 'Calling…' : 'In a call') : 'Voice connected'}</div>
               <div className="muted vwhere">{voiceGuild ? voiceGuild + ' / ' : ''}{voiceChannelName}{voiceDetail ? ' · ' + voiceDetail : ''}</div>
             </div>
             <button className={'iconbtn' + (store.sharing === 'camera' ? ' on' : '')} onClick={() => void toggleCamera()} title={store.sharing === 'camera' ? 'Turn your camera off' : 'Turn your camera on'}><Video size={17} /></button>

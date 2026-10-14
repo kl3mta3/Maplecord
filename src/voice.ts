@@ -1,4 +1,5 @@
 import type { LocalAudioTrack, RemoteParticipant, RemoteTrackPublication, Room } from 'livekit-client'
+import type { VoiceProbe } from './voiceReport'
 import type { IceServerDto, SfuPassDto, VoiceParticipantDto, VoiceSignalDto } from './types'
 import { elementVolumeIgnored } from './volume'
 import { isRelayed, ownEndRelayed } from './transfer'
@@ -87,6 +88,32 @@ export class VoiceEngine {
   constructor(hub: VoiceHub, events: VoiceEngineEvents) { this.hub = hub; this.events = events }
 
   get active() { return this.local !== null }
+
+  /** Whether our voice is meant to be going out right now (see the gate). For the voice report. */
+  get sendingNow() { return this.sending && !this.muted }
+
+  /** Whether our microphone is muted, and whether we hear nobody: what the server is told again after a reconnect. */
+  get mutedNow() { return this.muted }
+  get deafenedNow() { return this.deafened }
+
+  /** How this call's voice travels, in words, for the voice report. */
+  get carriedHow() { return this.viaServer ? 'Voice goes through the stream server.' : 'Voice goes from app to app (or through the relay, where it has to).' }
+
+  /**
+   * What the voice report asks for numbers (see voiceReport.ts): our own voice going out first, then each person we
+   * hear. Through a stream server those are separate; app to app, one connection carries both ways.
+   */
+  reportProbes(nameOf: (connectionId: string) => string): VoiceProbe[] {
+    const probes: VoiceProbe[] = []
+    const out = this.roomTrack?.sender
+    if (this.viaServer && out) probes.push({ who: 'me', name: 'me', sends: true, receives: false, stats: () => out.getStats() })
+    for (const [id, peer] of this.peers) {
+      const pc = peer.pc
+      if (pc) probes.push({ who: id, name: nameOf(id), sends: true, receives: true, stats: () => pc.getStats() })
+      else if (peer.receiver) { const receiver = peer.receiver; probes.push({ who: id, name: nameOf(id), sends: false, receives: true, stats: () => receiver.getStats() }) }
+    }
+    return probes
+  }
 
   /** The servers and relay-or-direct choice this call is using; shared video uses exactly the same. */
   get rtcConfig(): RTCConfiguration { return this.config }
@@ -457,7 +484,9 @@ export class VoiceEngine {
       const id = voiceOf(who.identity)
       if (id && mine() && track.kind === Track.Kind.Audio) this.dropPeer(id)
     })
-    room.on(RoomEvent.Reconnected, () => { if (mine()) this.tuneRoom() })
+    room.on(RoomEvent.Reconnected, () => { if (mine()) { this.events.log('The connection to the stream server came back.'); this.tuneRoom() } })
+    room.on(RoomEvent.Reconnecting, () => { if (mine()) this.events.log('The connection to the stream server dropped; reconnecting.') })
+    room.on(RoomEvent.SignalReconnecting, () => { if (mine()) this.events.log('The stream server\'s sign-in connection dropped; reconnecting (sound may carry on).') })
     // The stream server stopped taking our microphone, or takes it again (see setSilenced).
     room.on(RoomEvent.ParticipantPermissionsChanged, (_before, who) => {
       if (!mine() || who !== room.localParticipant) return

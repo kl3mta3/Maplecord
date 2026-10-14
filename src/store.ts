@@ -5,6 +5,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Api, ApiError } from './api'
 import { ChatHub } from './hub'
 import { setFileLinkSource } from './fileLinks'
+import { voiceRecorder } from './voiceReport'
+import { measureRelaysOnce } from './relayPings'
 import { bridge, isHandheld, type OverlayAction } from './platform'
 import { IdleWatch } from './idle'
 import { DEFAULT_GATE_LEVEL, DEFAULT_NOTIFY, defaultPluginSettings, gateThreshold, loadSettings, saveSettings, type GuildPrefs, type PluginSettings, type Settings, type UserPrefs } from './settings'
@@ -329,13 +331,31 @@ export function useMaplecord() {
       setVoice(v => (v ? { ...v, participants: v.participants.map(p => (p.connectionId === target ? { ...p, speaking } : p)) } : v))
     },
     level: () => { /* used by the audio settings meter */ },
-    log: m => console.debug('[voice]', m),
+    log: m => { console.debug('[voice]', m); voiceRecorder.note(m) },
     lost: reason => voiceLostRef.current(reason),
     // A bot sending more sound than it may: it is no longer played here, and the server is told, which ends its turn.
     overCap: (id, kbps) => { void voiceHub.reportBotSound(id, kbps) },
     // Whether we reach anyone in the call through the relay: said to the server, which counts who is on each relay.
     onRelay: on => { void voiceHub.setOnRelay(on) },
   }))
+  // Closing the app (or the page) while in voice: the server is told we left, so it does not keep our place for a
+  // reconnect that is not coming (it keeps one for a few seconds when a connection ends without a word).
+  useEffect(() => {
+    const going = () => { if (voiceRef.current) { try { void voiceHub.leave().catch(() => { /* gone already */ }) } catch { /* not connected */ } } }
+    window.addEventListener('pagehide', going)
+    return () => window.removeEventListener('pagehide', going)
+  }, [voiceHub])
+  // The voice report (see voiceReport.ts): recorded while switched on and in a call, and not otherwise.
+  const inCall = !!voice
+  useEffect(() => {
+    if (!settings.voiceRecord || !inCall) { voiceRecorder.stop(); return }
+    const nameOf = (connectionId: string) => {
+      const p = voiceRef.current?.participants.find(x => x.connectionId === connectionId)
+      return p ? (p.username || connectionId.slice(0, 6)) : connectionId.slice(0, 6)
+    }
+    voiceRecorder.start(() => voiceEngine.reportProbes(nameOf), () => voiceEngine.sendingNow, () => voiceEngine.carriedHow)
+    return () => voiceRecorder.stop()
+  }, [settings.voiceRecord, inCall, voiceEngine])
 
   // ---- Shared video (see stream.ts). The engine holds the live MediaStreams; `streamTick` re-renders when it changes.
   const [, setStreamTick] = useState(0)
@@ -940,6 +960,16 @@ export function useMaplecord() {
       const now = findChannel(cur.channelId)?.channel.directSince ?? null
       if (now !== cur.directSince) { dropForKindChange(now); return }
       void (async () => {
+        // Where the channel's sound goes through a stream server, the server keeps our place for a few seconds and we
+        // take it back: the sound never stopped, so nothing else is done. Mute and deafen are said again, in case they
+        // were changed while the connection was down.
+        if (!cur.directSince && await voiceHub.resumeVoice(cur.channelId, cur.participants)) {
+          voiceRecorder.note('Back in the same place in the voice channel; the call carried on.')
+          void voiceHub.setMuted(voiceEngine.mutedNow).catch(() => { /* said again at the next change */ })
+          void voiceHub.setDeafened(voiceEngine.deafenedNow)
+          return
+        }
+        voiceRecorder.note('Joining the voice channel again (sound stops for a moment).')
         const before = voiceJoins.current
         rejoining.current = true
         try { await joinVoiceRef.current(cur.channelId, true) } finally { rejoining.current = false }
@@ -1089,6 +1119,9 @@ export function useMaplecord() {
       if (channel) setSelectedChannelId(channel.id)
     } else setHome(true)
     setReady(true)
+    // Once in each run of the app: how far each relay is, so a voice channel nobody is in yet gets the one nearest
+    // the first person into it (see relayPings.ts). After everything else has loaded, and in the background.
+    if (self) void measureRelaysOnce(api, self.id)
   }, [api, applyPreferences, hub, loadGuilds, markDnd, onRollEnded, onRollStarted, patchGuild, setCall, updateSettings, voiceEngine, voiceHub])
 
   // ---- Selection ----------------------------------------------------------
@@ -3101,6 +3134,7 @@ export function useMaplecord() {
     voice, isMuted, isSpeaking, joinVoice, leaveVoice, toggleMute,
     call, startCall, answerCall, declineCall, renameChannel, deleteChannel, deleteGroup, setChannelMuted,
     preferences, savePreferences, blocked, setBlocked, dndUsers, idleUsers, makeInvite, loadInvites, revokeInvite, inviteBase, inviteQr, deafened, toggleDeafen, ownLook, transferLimits,
+    markVoiceGap: () => voiceRecorder.mark(), voiceReport: () => voiceRecorder.report(__APP_VERSION__), clearVoiceReport: () => voiceRecorder.clear(),
     farewell, queueAhead, deleteStep, openDeleteAccount: (step: 'explain' | 'confirm' = 'explain') => setDeleteStep(step), closeDeleteAccount: () => setDeleteStep(null), reauthenticateForDelete, deleteAccount,
     p2pText, askDirectText, setP2pSubscribed, setP2pBroadcast, p2pFiles, loadP2pFile, saveP2pFile, p2pNewApps, acceptP2pApp, p2pBotsWaiting, acceptP2pBot, dismissP2pBot,
     allowDirect, setAllowDirect, reauthenticateForDirect, reauthProviders, directPrompt, confirmDirect, dismissDirectPrompt: () => setDirectPrompt(null), setChannelDirect,

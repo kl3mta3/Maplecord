@@ -21,6 +21,7 @@ export function VoiceAudioSettings({ store, onAllowDirect }: {
   const [devices, setDevices] = useState<{ inputs: MediaDeviceInfo[]; outputs: MediaDeviceInfo[] }>({ inputs: [], outputs: [] })
   const [note, setNote] = useState('')
   const [choosing, setChoosing] = useState(false)
+  const [reportCopied, setReportCopied] = useState(false)
   const push = s.voiceMode === 'push'
   const gate = s.voiceGate !== false
   const pushKey: PushKey = s.pushKey ?? DEFAULT_PUSH_KEY
@@ -114,6 +115,18 @@ export function VoiceAudioSettings({ store, onAllowDirect }: {
           </div>
         </>
       )}
+
+      <h4>Voice report</h4>
+      <label className="row" style={{ alignItems: "flex-start" }}>
+        <input type="checkbox" checked={!!s.voiceRecord} onChange={e => store.updateSettings({ voiceRecord: e.target.checked })} />
+        <span>Record how calls go, for a problem report
+          <span className="muted" style={{ display: "block" }}>While you are in a call this notes what your app sends and receives, five times a second, and keeps the last ten minutes on this device. No addresses and no sound are kept. When sound drops out, press <b>Mark gap</b> in the voice panel, then copy the report here and send it to whoever is looking into it.</span>
+        </span>
+      </label>
+      <div className="row">
+        <button onClick={() => { void navigator.clipboard.writeText(store.voiceReport()).then(() => setReportCopied(true)); window.setTimeout(() => setReportCopied(false), 1500) }}>{reportCopied ? "Copied" : "Copy voice report"}</button>
+        <button className="subtle" onClick={() => store.clearVoiceReport()}>Start it over</button>
+      </div>
 
       <h4>P2P</h4>
       <div className="row">

@@ -55,6 +55,8 @@ export interface Settings {
   installHintSeen?: boolean
   /** Send the microphone only while talking (on unless set to false), and how loud counts as talking, 1 (a whisper) to 10. */
   voiceGate?: boolean
+  /** Record how calls go, for a problem report (see voiceReport.ts). Off unless switched on. */
+  voiceRecord?: boolean
   voiceGateLevel?: number
   /** The app's colours on this device (see theme.ts). */
   theme?: { preset: string; accent: string | null; custom?: Record<string, string> | null }

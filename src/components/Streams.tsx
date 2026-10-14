@@ -101,7 +101,7 @@ export function SharePicker({ store, onClose }: { store: Store; onClose: () => v
         </label>
       ) : <div className="muted">Only the picture is sent from this browser. Your microphone carries on as normal.</div>}
       <div className="row">
-        <button className="subtle" title="How fast your connection is, and how many viewers it carries" onClick={() => setTesting(true)}>Test connection</button>
+        {rules?.connectionTest !== false && <button className="subtle" title="How fast your connection is to this server's relays, and how many viewers it carries" onClick={() => setTesting(true)}>Test connection</button>}
         <span className="grow" /><button onClick={onClose}>Cancel</button>
       </div>
       {testing && <ConnectionTestDialog api={store.api} rules={rules} onClose={() => setTesting(false)} />}

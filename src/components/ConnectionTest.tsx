@@ -109,11 +109,12 @@ export function ConnectionTestDialog({ api, rules, onClose }: { api: Api; rules:
 
       {step === 'done' && found && called && (
         <div className="nettest-found">
-          <div className="nettest-rating">Connection: {called.label} <span>({called.range})</span></div>
+          <div className="nettest-rating">Connection to {found.relay}: {called.label} <span>({called.range})</span></div>
           <div className="nettest-speeds">
-            <div>Download: {speedInWords(found.down, found.downCap)}</div>
-            <div>Upload: {speedInWords(found.up, found.upCap)}</div>
+            <div>Download from the {found.relay} relay: {speedInWords(found.down, found.downCap)}</div>
+            <div>Upload to the {found.relay} relay: {speedInWords(found.up, found.upCap)}</div>
           </div>
+          <div className="muted">This is your speed to this relay, which is what calls and shared video here go through. A speed test website can show more: it measures to a server much nearer to you.</div>
           <hr />
           <div className="nettest-supports">
             <div>This connection supports (estimates):</div>
@@ -121,7 +122,7 @@ export function ConnectionTestDialog({ api, rules, onClose }: { api: Api; rules:
             <div><b>{viewersAt(found.up, at60.large)}</b> of 1080p · 60 fps P2P streams.</div>
             <div><i>At 30 fps: <b>{viewersAt(found.up, at30.small)}</b> of 720p and <b>{viewersAt(found.up, at30.large)}</b> of 1080p.</i></div>
           </div>
-          <div className="muted">Measured against {found.relay}{ago > 15_000 ? `, ${Math.max(1, Math.round(ago / 60_000))} min ago` : ''}.</div>
+          {ago > 15_000 && <div className="muted">Measured {Math.max(1, Math.round(ago / 60_000))} min ago.</div>}
         </div>
       )}
       {step === 'done' && !found && !problem && wait > 0 && <div className="muted">A speed test was run a moment ago on this account.</div>}

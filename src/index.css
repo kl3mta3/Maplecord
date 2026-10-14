@@ -182,6 +182,10 @@ a.filechip:hover { border-color: var(--accent2); }
 .pollopt.rated { flex-wrap: wrap; row-gap: 6px; }
 .pollopt.rated > .grow { flex: 0 0 100%; overflow-wrap: anywhere; }
 .pollopt.rated > b { margin-left: auto; }
+.pollq .pollpic { display: block; max-width: 100%; max-height: 320px; border-radius: 8px; align-self: flex-start; }
+.pollopt .pollthumb { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; flex-shrink: 0; cursor: zoom-in; }
+.pollopt .pollthumb.big { flex: 0 0 100%; width: 100%; height: auto; max-height: 360px; object-fit: contain; cursor: zoom-out; }
+.pollopt:has(.pollthumb.big) { flex-wrap: wrap; }
 .pollrate { display: flex; gap: 2px; flex-wrap: wrap; }
 .pollrate button { min-width: 26px; padding: 2px 0; font-size: 12px; }
 .pollrate button.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -1105,3 +1109,9 @@ button.chip { cursor: pointer; }
 @media (hover: none) {
   .voice-users .u, .member, .uname, .av, .channel, .rail .guild, .sidebar .category, .message .name { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 }
+
+/* Recording for a voice report: a small button in the voice panel to mark the moment a gap was heard. */
+.voicebox .vstate { position: relative; }
+.voicebox .vstate:has(.markgap) { padding-right: 16px; }
+.voicebox .markgap { position: absolute; top: 1px; right: 0; padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; line-height: 0; }
+.voicebox .markgap:hover, .voicebox .markgap.on { color: var(--warn, #f0b232); }

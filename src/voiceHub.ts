@@ -1,4 +1,5 @@
 import { connectionIdOf, hubOptions } from './hubConnect'
+import { voiceRecorder } from './voiceReport'
 import { HubConnection, HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/signalr'
 import type { CallDto, VoiceParticipantDto, VoiceSignalDto } from './types'
 import type { SfuPassDto } from './types'
@@ -50,6 +51,11 @@ export class VoiceHub {
 
   get connectionId() { return this.ownId ?? this.conn?.connectionId ?? null }
   private ownId: string | null = null
+  /** The place in voice this app had before its connection dropped, to take back (see resumeVoice). */
+  private resumeFrom: string | null = null
+  private silencedBefore = false
+  /** What the rest of the app is told about the people in voice, as wired up at connect. */
+  private handlers: VoiceEvents | null = null
 
   // ---- Sealing (see SealedRoom) ---------------------------------------------------------------------------------------
 
@@ -185,10 +191,12 @@ export class VoiceHub {
       StreamSignalReceived: (from, kind, payload) => this.take('stream', from, kind, payload, opened => handlers.StreamSignalReceived(from, kind, opened)),
     }
     for (const [name, handler] of Object.entries(wired)) conn.on(name, handler as (...args: unknown[]) => void)
+    this.handlers = wired
     // After a drop the server has forgotten both the call we were in and the key we presented.
-    conn.onreconnecting(() => { this.ownId = null })
+    // Why it dropped goes in the voice report: a closed connection, or a server that stopped answering for 30 seconds.
+    conn.onreconnecting(error => { if (this.ownId) this.resumeFrom = this.ownId; this.silencedBefore = this.selfSilenced; this.ownId = null; voiceRecorder.note(`The voice connection to the Maplecord server dropped (${error?.message ?? 'no reason given'}); reconnecting.`) })
     // A connection that came back is a new one to the server, with a new id; it is known before the app rejoins anything with it.
-    conn.onreconnected(() => { this.shut(); this.presentedOn = null; void connectionIdOf(conn).then(id => { this.ownId = id; this.onReconnected?.() }) })
+    conn.onreconnected(() => { voiceRecorder.note('The voice connection to the Maplecord server came back.'); this.shut(); this.presentedOn = null; void connectionIdOf(conn).then(id => { this.ownId = id; this.onReconnected?.() }) })
     conn.onclose(() => { this.shut(); this.presentedOn = null; if (this.conn === conn) this.onClosed?.() })
     await conn.start()
     this.ownId = await connectionIdOf(conn)
@@ -257,6 +265,28 @@ export class VoiceHub {
   declineCall(callId: string) { return this.c.invoke('DeclineCall', callId) }
   signal(targetConnectionId: string, kind: 'offer' | 'answer' | 'ice', payload: string) { return this.send('Signal', 'voice', targetConnectionId, kind, payload) }
   setMuted(muted: boolean) { return this.c.invoke('SetMuted', muted) }
+
+  /**
+   * After the connection dropped and came back: takes back the place in voice this app had, if the server kept it
+   * for us (it does where the channel's sound goes through a stream server, for a few seconds). Nothing about the call
+   * stops: the sound never went through this connection. The people in the channel are brought up to date with
+   * whatever changed meanwhile. False if the place was not kept (or the server does not keep places): the app then
+   * joins again as it always did.
+   */
+  async resumeVoice(channelId: string, known: readonly { connectionId: string; userId: string }[]): Promise<boolean> {
+    const seat = this.resumeFrom
+    this.resumeFrom = null
+    const conn = this.conn, h = this.handlers
+    if (!seat || !conn || !h) return false
+    let others: VoiceParticipantDto[] | null = null
+    try { others = await conn.invoke<VoiceParticipantDto[] | null>('ResumeVoice', seat) } catch { return false }
+    if (!others) return false
+    this.ownId = seat
+    this.selfSilenced = this.silencedBefore
+    for (const k of known) if (k.connectionId !== seat && !others.some(p => p.connectionId === k.connectionId)) h.ParticipantLeft(channelId, k.userId, k.connectionId)
+    for (const p of others) (known.some(k => k.connectionId === p.connectionId) ? h.ParticipantUpdated : h.ParticipantJoined)(channelId, p)
+    return true
+  }
   /** Says whether we hear anyone, for the others to see. A server from before it kept that simply does not answer. */
   setDeafened(deafened: boolean) { return this.c.invoke('SetDeafened', deafened).catch(() => { /* an older server: nobody is told */ }) }
   /** Whether one of our connections in the voice channel goes through the relay. */

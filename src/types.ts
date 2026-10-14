@@ -159,9 +159,10 @@ export interface GuildSummaryDto {
   membersPartial?: boolean
 }
 /** An answer to pick in a community poll, or a thing to rate. With totals, when those are shown: how many chose it, and for a rating the average. */
-export interface CommunityPollOptionDto { id: string; text: string; votes?: number | null; average?: number | null }
+/** picture: the address of its picture, if it has one. */
+export interface CommunityPollOptionDto { id: string; text: string; votes?: number | null; average?: number | null; picture?: string | null }
 /** kind: 0 = pick one, 1 = pick several, 2 = a number from 1 to 10 for each thing listed. */
-export interface CommunityPollQuestionDto { id: string; text: string; kind: number; options: CommunityPollOptionDto[] }
+export interface CommunityPollQuestionDto { id: string; text: string; kind: number; options: CommunityPollOptionDto[]; picture?: string | null }
 /** One thing answered: an option picked (value 1), or the number from 1 to 10 given to the thing it names. */
 export interface CommunityPollAnswerDto { optionId: string; value: number }
 /**
@@ -306,6 +307,8 @@ export interface StreamSettingsDto {
   streamServer?: boolean
   /** With a stream server: the most people who may watch one stream there. 0 = everyone in the channel. */
   maxViewersStreamServer?: number
+  /** Whether this server offers the connection test (absent on an older server: it does). */
+  connectionTest?: boolean
   /** We were picked, on the server, to share above its usual limits: the limits above are the full range. */
   unrestricted?: boolean
   /** What each quality is sent at on this server. An app from before this was sent uses rates of its own, held to maxKbps. */

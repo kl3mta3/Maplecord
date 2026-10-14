@@ -81,14 +81,114 @@ export async function pingRelay(url: string, signal?: AbortSignal): Promise<numb
   return best
 }
 
-/** How many connections a test uses at once: one alone does not always fill a fast line. */
+/** How many connections a test uses at once over plain HTTP (a relay from before WebSockets). */
 const CONNECTIONS = 3
+/**
+ * How many WebSockets a test uses at once. Each is a connection of its own (requests over HTTPS share one when the
+ * relay's proxy speaks HTTP/2), and one alone does not fill a fast line to a relay far away. The relay holds the
+ * whole test to its limit however many there are.
+ */
+const SOCKETS = 4
 const READ_EVERY_MS = 200
 
 export interface HalfResult { mbps: number; capMbps: number | null; seconds: number | null }
 
+/** The relay does not take the test over WebSockets (one from before them): the plain HTTP way is used instead. */
+class NoSockets extends Error {}
+
+/** What the relay says on one of a test's WebSockets. */
+interface Said { error?: string; maxMbps?: number; seconds?: number; got?: number; bytes?: number }
+
+/**
+ * One WebSocket of a test: it opens, hands over the pass, and reports what the relay says and sends until it closes.
+ * `started` is told once the pass is taken, with the socket. Resolves with the relay's refusal, if it refused, or null;
+ * rejects with NoSockets if the relay never answered on it (it takes no WebSockets).
+ */
+function testSocket(address: string, pass: string, signal: AbortSignal, on: { started: (said: Said, ws: WebSocket) => void; bytes?: (n: number) => void; said?: (said: Said) => void }): Promise<string | null> {
+  return new Promise((resolve, reject) => {
+    let heard = false, refused: string | null = null
+    const ws = new WebSocket(address)
+    ws.binaryType = 'arraybuffer'
+    const stop = () => ws.close()
+    signal.addEventListener('abort', stop)
+    ws.onopen = () => ws.send(pass)
+    ws.onmessage = e => {
+      if (typeof e.data !== 'string') { on.bytes?.((e.data as ArrayBuffer).byteLength); return }
+      let said: Said
+      try { said = JSON.parse(e.data) as Said } catch { return }
+      if (!heard) { heard = true; if (said.error) refused = said.error; else on.started(said, ws); return }
+      on.said?.(said)
+    }
+    ws.onclose = () => {
+      signal.removeEventListener('abort', stop)
+      if (!heard && !signal.aborted) reject(new NoSockets()); else resolve(refused)
+    }
+  })
+}
+
+/** Where a half of the test is, as a WebSocket address. */
+const socketAddress = (url: string, half: 'down' | 'up') => url.replace(/^http/i, 'ws') + '/' + half
+
 /** The download half: bytes are sent to us for as long as the relay's test lasts. `live` is told the speed as it goes. */
 export async function measureDown(url: string, pass: string, live: (mbps: number) => void, signal: AbortSignal): Promise<HalfResult> {
+  let bytes = 0, capMbps: number | null = null, seconds: number | null = null
+  const began = performance.now()
+  const samples: Sample[] = [{ ms: 0, bytes: 0 }]
+  const note = window.setInterval(() => { samples.push({ ms: performance.now() - began, bytes }); live(steadyMbps(samples)) }, READ_EVERY_MS)
+  let results: PromiseSettledResult<string | null>[]
+  try {
+    results = await Promise.allSettled(Array.from({ length: SOCKETS }, () => testSocket(socketAddress(url, 'down'), pass, signal, {
+      started: said => { capMbps = said.maxMbps ?? capMbps; seconds = said.seconds ?? seconds },
+      bytes: n => { bytes += n },
+    })))
+  } finally { window.clearInterval(note) }
+  if (results.every(r => r.status === 'rejected')) return measureDownHttp(url, pass, live, signal)
+  const refused = results.map(r => (r.status === 'fulfilled' ? r.value : null)).find(r => r !== null)
+  if (refused && bytes === 0) throw new Error(refused)
+  samples.push({ ms: performance.now() - began, bytes })
+  return { mbps: steadyMbps(samples), capMbps, seconds }
+}
+
+/**
+ * The upload half: meaningless bytes are sent from here on each WebSocket for as long as the relay's test lasts. What
+ * counts is what the relay says arrived, not what left here (much can wait in this computer's buffers).
+ */
+export async function measureUp(url: string, pass: string, seconds: number, live: (mbps: number) => void, signal: AbortSignal): Promise<HalfResult> {
+  const piece = new Uint8Array(64 << 10)
+  crypto.getRandomValues(piece)
+  const began = performance.now()
+  const got = new Array<number>(SOCKETS).fill(0)
+  const moved = () => got.reduce((a, b) => a + b, 0)
+  let capMbps: number | null = null, lasts = seconds
+  const samples: Sample[] = [{ ms: 0, bytes: 0 }]
+  const note = window.setInterval(() => { samples.push({ ms: performance.now() - began, bytes: moved() }); live(steadyMbps(samples)) }, READ_EVERY_MS)
+  let results: PromiseSettledResult<string | null>[]
+  try {
+    results = await Promise.allSettled(Array.from({ length: SOCKETS }, (_, slot) => testSocket(socketAddress(url, 'up'), pass, signal, {
+      started: (said, ws) => {
+        capMbps = said.maxMbps ?? capMbps
+        lasts = said.seconds ?? lasts
+        // Kept a little ahead of what the connection takes, never far: the relay holds the pace.
+        const send = () => {
+          if (ws.readyState !== WebSocket.OPEN) return
+          while (ws.bufferedAmount < (1 << 20)) ws.send(piece)
+          window.setTimeout(send, 10)
+        }
+        send()
+      },
+      said: said => { got[slot] = said.bytes ?? said.got ?? got[slot]! },
+    })))
+  } finally { window.clearInterval(note) }
+  if (results.every(r => r.status === 'rejected')) return measureUpHttp(url, pass, seconds, live, signal)
+  const refused = results.map(r => (r.status === 'fulfilled' ? r.value : null)).find(r => r !== null)
+  if (refused && moved() === 0) throw new Error(refused)
+  samples.push({ ms: Math.min(performance.now() - began, lasts * 1000 + 500), bytes: moved() })
+  return { mbps: steadyMbps(samples), capMbps, seconds: lasts }
+}
+
+// ---- The same over plain HTTP, against a relay from before WebSockets ----------------------------------------------
+
+async function measureDownHttp(url: string, pass: string, live: (mbps: number) => void, signal: AbortSignal): Promise<HalfResult> {
   let bytes = 0, capMbps: number | null = null, seconds: number | null = null
   const began = performance.now()
   const samples: Sample[] = [{ ms: 0, bytes: 0 }]
@@ -117,7 +217,7 @@ export async function measureDown(url: string, pass: string, live: (mbps: number
  * The upload half: meaningless bytes are sent from here, one piece after another on each connection, for `seconds`.
  * The pieces grow while they go through quickly, so a slow line is not handed more than it can send in the time.
  */
-export async function measureUp(url: string, pass: string, seconds: number, live: (mbps: number) => void, signal: AbortSignal): Promise<HalfResult> {
+async function measureUpHttp(url: string, pass: string, seconds: number, live: (mbps: number) => void, signal: AbortSignal): Promise<HalfResult> {
   const filler = new Uint8Array(8 << 20)
   for (let at = 0; at < filler.length; at += 65536) crypto.getRandomValues(filler.subarray(at, at + 65536))
   const began = performance.now()

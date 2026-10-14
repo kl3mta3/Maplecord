@@ -16,6 +16,8 @@ export function CommunityPollDialog({ poll, onAnswer, onDecline, onClose }: {
   const [filled, setFilled] = useState<Filled>(() => fromAnswers(poll.myAnswers))
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
+  /** The answer whose picture is shown large (tapping it again makes it small). */
+  const [big, setBig] = useState<string | null>(null)
   const open = poll.mayAnswer && poll.mine !== 'answered'
   const mine = poll.mine === 'answered' ? fromAnswers(poll.myAnswers) : filled
   const send = async () => {
@@ -38,12 +40,15 @@ export function CommunityPollDialog({ poll, onAnswer, onDecline, onClose }: {
       {poll.questions.map(q => (
         <fieldset key={q.id} className="pollq" disabled={!open || busy}>
           <legend>{q.text} {open && !answered(q, filled) && <span className="muted">{q.kind === PICK_ONE ? '· pick one' : q.kind === RATE ? '· 1 is low, 10 is high' : '· pick any'}</span>}</legend>
+          {q.picture && <img className="pollpic" src={q.picture} alt="" />}
           {q.options.map(o => {
             const width = share(poll, q, o), words = totalWords(poll, q, o)
             const chosen = mine[o.id] !== undefined
             return (
               <div key={o.id} className={'pollopt' + (q.kind === RATE ? ' rated' : '') + (chosen ? ' chosen' : '')}>
                 {width !== null && <i style={{ width: width + '%' }} />}
+                {o.picture && <img className={'pollthumb' + (big === o.id ? ' big' : '')} src={o.picture} alt="" title={big === o.id ? 'Make it small' : 'See it larger'}
+                  onClick={() => setBig(b => b === o.id ? null : o.id)} />}
                 {q.kind === RATE ? (
                   <>
                     <span className="grow">{o.text}</span>
