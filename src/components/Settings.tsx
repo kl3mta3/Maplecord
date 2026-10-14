@@ -289,11 +289,15 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, fin
           {member ? (
             <div className="roleedit">
               <div className="muted">Roles for {member.username}{member.userId === meId ? ' (you)' : ''}</div>
+              {/* The owner's roles change nothing of what they may do; they are only how the owner looks to others, so only the owner sets them. */}
+              {member.userId === guild.ownerId && <div className="muted small">{meId === guild.ownerId
+                ? 'As the owner you can do everything whatever roles you have. Roles only change how you look to others.'
+                : 'Only the owner chooses the owner\'s roles.'}</div>}
               {sorted.filter(r => !r.isEveryone).map(r => {
                 const has = (member.roleIds ?? []).includes(r.id)
                 return (
                   <label key={r.id} className="row">
-                    <input type="checkbox" checked={has} onChange={e => onSetMemberRoles(member.userId, e.target.checked ? [...(member.roleIds ?? []), r.id] : (member.roleIds ?? []).filter(x => x !== r.id))} />
+                    <input type="checkbox" checked={has} disabled={member.userId === guild.ownerId && meId !== guild.ownerId} onChange={e => onSetMemberRoles(member.userId, e.target.checked ? [...(member.roleIds ?? []), r.id] : (member.roleIds ?? []).filter(x => x !== r.id))} />
                     <span className="swatch" style={{ background: r.color ?? 'var(--muted)' }} /><span style={{ color: r.color ?? undefined }}>{r.name}</span>
                   </label>
                 )

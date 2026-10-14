@@ -441,7 +441,8 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
         entries.push({
           kind: 'submenu', label: 'Roles',
           entries: all.map(r => ({
-            kind: 'item' as const, label: r.name, checked: held.includes(r.id), disabled: r.position >= top,
+            // The owner's roles are the owner's own to choose; anyone else may only change roles below their own.
+            kind: 'item' as const, label: r.name, checked: held.includes(r.id), disabled: (userId === g.guild.ownerId && me?.id !== g.guild.ownerId) || r.position >= top,
             onClick: () => { void store.setMemberRoles(userId, held.includes(r.id) ? held.filter(x => x !== r.id) : [...held, r.id]) },
           })),
         })
