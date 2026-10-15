@@ -13,6 +13,7 @@ one.
 - Servers with text and voice channels, roles and permissions, and invite links that open in the app or the browser.
   An invite can be made to run out, and taken back
 - Public servers anyone can find by name or topic and join; private ones are by invite
+- A banner for each server, over the top of its channel list
 - Private channels: only the roles and people you let in can see that they exist
 - Read-only channels: everyone can read, and only the roles and people you allow can write
 - The member list shows the people who can see the channel you are in
@@ -24,6 +25,8 @@ one.
 - Reply to a message, react to it, edit what you sent, and pin the ones worth keeping
 - Threads, to keep a side conversation out of the channel
 - Search a channel's messages, and polls
+- Custom emojis and stickers, kept in your own library and added to any of your servers (where the server offers them)
+- One **+** beside the message box for files, voice messages, polls, emojis and stickers
 - Forum channels: posts with a title, each with its own thread. A post can be written in Markdown, with a preview
 - Gallery channels: every post is pictures with a title. Open one to see what is said about it, like it, and react
   to each of its pictures by itself
@@ -44,6 +47,7 @@ one.
 ### Voice and video
 
 - Voice channels: mute, deafen, a volume for each person, and switching microphone or speakers without leaving
+- A soundboard: play one of the server's sounds to everyone in the voice channel, with your own volume for other people's
 - With the permission, drag someone from one voice channel onto another to move them there
 - Your microphone is only sent while you are talking, so the room behind you stays out of the call, with a
   sensitivity you set. Or use push to talk, with a key or mouse button you choose; in the desktop app it works while
@@ -61,7 +65,7 @@ one.
 - Your roll stats are kept on your account, so they follow you to every device. Only you see them.
 - In-game overlay with global hotkeys (desktop only)
 - Game plugins: item names and icons, optional drop detection from the game's log (desktop only)
-- Custom sound packs
+- Custom sound packs, or a soundboard sound for any moment the app plays one
 
 ### Everywhere
 
@@ -83,6 +87,8 @@ nothing to unlock.
 - Sharper streams: up to 1080p at 60 frames a second in P2P channels and calls, with sound
 - Animated profile pictures, and animated decorations around them: ours in your own colours, or one you made
 - Profile effects: an animation that plays over your profile card, ours or one you made
+- Nameplates behind your name in lists: ours, or a picture of your own
+- Custom emojis, stickers and soundboard sounds, where the server offers them
 - Server tags: a server can have a tag, a symbol and up to five letters, for its members to wear beside their names
 - Profile banners, a colour of your own, a bio and pronouns
 - Name fonts, colours and effects (gradient, neon, outline and more)
