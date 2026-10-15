@@ -27,7 +27,9 @@ export default defineConfig(({ mode }) => ({
               vite: { define: { __UPDATE_SERVER__: JSON.stringify(process.env.VITE_SERVER_URL ?? ''), __UPDATE_REPO__: JSON.stringify(repository) } },
             },
             preload: { input: 'electron/preload.ts' },
-            renderer: {},
+            // No renderer option: the windows have no Node (contextIsolation, no nodeIntegration). With it, imports named
+            // like Node's own modules ("buffer", which the picture check uses) were left for a require() that does not
+            // exist there, and the picture check never started in the desktop app.
           }),
         ]),
   ],

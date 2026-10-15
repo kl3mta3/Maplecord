@@ -57,7 +57,10 @@ async function guess(picture: Blob): Promise<PictureGuess[] | null> {
     bitmap.close()
     try { return await ready.model.classify(pixels) }
     finally { pixels.dispose() }
-  } catch { return null }
+  } catch (e) {
+    console.warn('A picture could not be checked; it is shown.', e)
+    return null
+  }
 }
 
 async function judge(src: string): Promise<Verdict> {
@@ -66,7 +69,10 @@ async function judge(src: string): Promise<Verdict> {
     if (!reply.ok) return 'unknown'
     const guesses = await guess(await reply.blob())
     return guesses === null ? 'unknown' : looksExplicit(guesses) ? 'explicit' : 'ok'
-  } catch { return 'unknown' }
+  } catch (e) {
+    console.warn('A picture could not be fetched to be checked; it is shown.', e)
+    return 'unknown'
+  }
 }
 
 /**
