@@ -1522,6 +1522,23 @@ export function useMaplecord() {
   const cancelTransfer = useCallback((key: string) => transferEngine.cancel(key), [transferEngine])
 
   const [uploading, setUploading] = useState<string | null>(null)
+
+  // ---- Files waiting to be sent: dropped, pasted or picked, shown above the message box from this device, and a
+  //      picture going somewhere public checked here at once. Nothing is uploaded until Send: then they are, and go
+  //      with the text as one message. One taken out before that never leaves this device.
+  const [tray, setTray] = useState<TrayItem[]>([])
+  const trayRef = useRef<TrayItem[]>([])
+  const trayWork = useRef(new Map<string, Promise<void>>())
+  /** A send of the tray under way: Send pressed again meanwhile does nothing. */
+  const traySending = useRef(false)
+  const putTray = useCallback((change: (items: TrayItem[]) => TrayItem[]) => { trayRef.current = change(trayRef.current); setTray(trayRef.current) }, [])
+  const patchTray = useCallback((key: string, part: Partial<TrayItem>) => putTray(items => items.map(i => (i.key === key ? { ...i, ...part } : i))), [putTray])
+  const removeFromTray = useCallback((key: string) => {
+    const gone = trayRef.current.find(i => i.key === key)
+    if (gone?.preview) URL.revokeObjectURL(gone.preview)
+    trayWork.current.delete(key)
+    putTray(items => items.filter(i => i.key !== key))
+  }, [putTray])
   const sendFile = useCallback(async (file: File, text = '') => {
     const channelId = selected.current.channel
     if (!channelId) return
@@ -1554,6 +1571,64 @@ export function useMaplecord() {
       finally { setUploading(null) }
     })
   }, [api, hub, holdOffer, sendP2pFiles])
+
+  /** Files for the channel on screen: into the tray, shown from this device, and checked here if they go somewhere public. */
+  const addToTray = useCallback(async (files: File[]) => {
+    const channelId = selected.current.channel
+    if (!channelId || files.length === 0) return
+    // A P2P channel sends between people's apps, as before: nothing goes to the server to wait there.
+    if (findChannel(channelId)?.guild && findChannel(channelId)?.channel.directSince) { await sendP2pFiles(channelId, files); return }
+    const rules = await api.uploadSettings().catch(() => null)
+    if (rules && !rules.enabled) { setError('Uploads are turned off on this server right now.'); return }
+    const room = TRAY_MOST - trayRef.current.filter(i => i.channelId === channelId).length
+    if (files.length > room) setError(`A message can carry ${TRAY_MOST} files at most${room > 0 ? `: the first ${room} were added` : ''}.`)
+    const publicPlace = inPublicServer(channelId)
+    for (const file of files.slice(0, Math.max(0, room))) {
+      // Too big to keep on the server: offered straight from this computer instead, or refused, as before.
+      if (rules && file.size > rules.maxBytes) { await sendFile(file); continue }
+      const key = crypto.randomUUID()
+      const shown = file.type.startsWith('image/') || file.type.startsWith('video/') ? URL.createObjectURL(file) : null
+      const checking = publicPlace && file.type.startsWith('image/')
+      putTray(items => [...items, { key, channelId, file, name: file.name || 'Pasted file', size: file.size, preview: shown, video: file.type.startsWith('video/'), state: checking ? 'checking' : 'ready' }])
+      if (!checking) continue
+      // In a public server the picture is checked here first (see checkBeforeSending); the server checks it again.
+      const work = checkBeforeSending(file, 'in a public server')
+        .then(() => patchTray(key, { state: 'ready' }))
+        .catch(e => patchTray(key, { state: 'failed', refused: true, problem: e instanceof Error ? e.message : 'It could not be checked.' }))
+      trayWork.current.set(key, work)
+    }
+  }, [api, putTray, patchTray, sendP2pFiles, sendFile])
+
+  /** Sends what is in the tray for the channel on screen: each file uploaded now (once checked), then one message with the text. */
+  const sendTray = useCallback(async (text: string, more: { replyToId?: string | null } = {}): Promise<boolean> => {
+    const channelId = selected.current.channel
+    if (!channelId || traySending.current) return false
+    traySending.current = true
+    try {
+      const keys = trayRef.current.filter(i => i.channelId === channelId).map(i => i.key)
+      await Promise.all(keys.map(k => trayWork.current.get(k)))
+      const items = trayRef.current.filter(i => keys.includes(i.key))
+      if (items.some(i => i.refused)) { setError('A picture here cannot be sent. Take it out (×) and send again.'); return false }
+      // Uploaded now, all at once. One that fails says why and stays with the rest; Send again tries it again.
+      await Promise.all(items.filter(i => !i.attachmentId).map(async i => {
+        patchTray(i.key, { state: 'uploading', problem: undefined })
+        try { patchTray(i.key, { state: 'ready', attachmentId: (await api.upload(channelId, i.file)).id }) }
+        catch (e) { patchTray(i.key, { state: 'failed', problem: e instanceof Error ? e.message : 'It could not be uploaded.' }) }
+      }))
+      const uploaded = trayRef.current.filter(i => keys.includes(i.key))
+      if (uploaded.some(i => !i.attachmentId)) { setError('Some files could not be uploaded. Send again to try them again, or take them out (×).'); return false }
+      const ids = uploaded.map(i => i.attachmentId!)
+      let sent = false
+      await run(async () => {
+        const threadId = threadRef.current
+        if (threadId || more.replyToId) await hub.post({ channelId, content: text.trim(), attachmentIds: ids, replyToId: more.replyToId ?? null, threadId, title: null, poll: null })
+        else await hub.sendMessage(channelId, text.trim(), ids)
+        sent = true
+      })
+      if (sent) for (const k of keys) removeFromTray(k)
+      return sent
+    } finally { traySending.current = false }
+  }, [api, hub, patchTray, removeFromTray])
 
   const notifyTyping = useCallback(() => {
     const channelId = selected.current.channel
@@ -2113,7 +2188,7 @@ export function useMaplecord() {
     const g = selected.current.guild
     if (!g) return
     await run(async () => {
-      if (file) { await checkBeforeSending(file, 'as a server icon'); const guild = await api.uploadGuildIcon(g, file); patchGuild(g, x => ({ ...x, guild })) }
+      if (file) { tooBig(file, 2 * 1024 * 1024, 'A server icon'); await checkBeforeSending(file, 'as a server icon'); const guild = await api.uploadGuildIcon(g, file); patchGuild(g, x => ({ ...x, guild })) }
       else { await api.deleteGuildIcon(g); patchGuild(g, x => ({ ...x, guild: { ...x.guild, iconUrl: null } })) }
     })
   }, [api, patchGuild])
@@ -2121,7 +2196,7 @@ export function useMaplecord() {
     const g = selected.current.guild
     if (!g) return
     await run(async () => {
-      if (file) { await checkBeforeSending(file, 'as a server banner'); const guild = await api.uploadGuildBanner(g, file); patchGuild(g, x => ({ ...x, guild })) }
+      if (file) { tooBig(file, 4 * 1024 * 1024, 'A server banner'); await checkBeforeSending(file, 'as a server banner'); const guild = await api.uploadGuildBanner(g, file); patchGuild(g, x => ({ ...x, guild })) }
       else { await api.deleteGuildBanner(g); patchGuild(g, x => ({ ...x, guild: { ...x.guild, bannerUrl: null } })) }
     })
   }, [api, patchGuild])
@@ -2531,7 +2606,7 @@ export function useMaplecord() {
 
   /** Stores a nameplate picture of our own and wears it, or with null takes ours away. */
   const setOwnNameplate = useCallback(async (file: File | null) => {
-    if (file) await checkBeforeSending(file, 'as a nameplate')
+    if (file) { tooBig(file, NAMEPLATE_BYTES, 'A nameplate picture'); await checkBeforeSending(file, 'as a nameplate') }
     const p = file ? await api.uploadNameplate(file) : await api.deleteNameplate()
     applyOwnProfile(p)
     return p
@@ -3213,7 +3288,7 @@ export function useMaplecord() {
     connectionsEpoch, loadConnections, startConnection, setConnectionShown, removeConnection,
     loadSignIn, startSignInMethod, removeSignInMethod, setContactEmail, clearContactEmail,
     loadMedia, p2pPost, openP2pPost, closeP2pPost, createP2pPost, reactP2p, editP2p, pinP2p, voteP2p, closeP2pPoll, loadP2pPins, searchP2p, jumpP2p,
-    connect, selectGuild, selectChannel, openHome, openDm, addFriend, removeFriend, searchUsers, sendMessage, sendFile, uploading, offerFile, withdrawFile, downloadFile, cancelTransfer, transfers, notifyTyping, loadOlder,
+    connect, selectGuild, selectChannel, openHome, openDm, addFriend, removeFriend, searchUsers, sendMessage, sendFile, uploading, tray, addToTray, removeFromTray, sendTray, offerFile, withdrawFile, downloadFile, cancelTransfer, transfers, notifyTyping, loadOlder,
     renameGuild, setGuildIcon, setGuildBanner, createRole, updateRole, deleteRole, setMemberRoles,
     partyChannel, partyLabel,
     setUserPrefs, setGuildPrefs, markGuildRead, mentionsMe,
@@ -3244,3 +3319,26 @@ export function useMaplecord() {
 }
 
 export type Store = ReturnType<typeof useMaplecord>
+
+/** The most a nameplate picture of one's own can be (as the server says, ProfileLimits.NameplateBytes). */
+export const NAMEPLATE_BYTES = 256 * 1024
+
+/** Refuses a picture over the size the server takes, at once: before it is checked or sent. Says it as the server would. */
+function tooBig(file: File, most: number, what: string) {
+  if (file.size <= most) return
+  const kb = most < 1048576
+  throw new Error(`${what} can be up to ${kb ? most / 1024 + ' KB' : most / 1048576 + ' MB'}. This one is ${kb ? Math.ceil(file.size / 1024) + ' KB' : (file.size / 1048576).toFixed(1) + ' MB'}.`)
+}
+
+/** The most files one message carries. */
+export const TRAY_MOST = 10
+/** A file waiting above the message box: its preview, and how far it is in being checked and uploaded. */
+export interface TrayItem {
+  key: string; channelId: string; file: File; name: string; size: number
+  /** A picture or video of it, made on this device; null for other files. */
+  preview: string | null; video: boolean
+  state: 'checking' | 'uploading' | 'ready' | 'failed'
+  problem?: string; attachmentId?: string
+  /** Refused by the check here: it cannot be sent, only taken out. */
+  refused?: boolean
+}

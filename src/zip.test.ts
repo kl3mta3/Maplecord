@@ -14,11 +14,11 @@ check(back.length === 2 && same(back[0].data, bytes('a winning sound')) && back[
 
 // A zip from another tool, with a deflated file in it, made here by hand the way zip tools write one: the stored zip
 // this module writes, with the file swapped for its deflated form (the reader does not check the CRC).
-async function deflatedZip(name: string, content: Uint8Array): Promise<Blob> {
+async function deflatedZip(name: string, content: Uint8Array, claimed = content.length): Promise<Blob> {
   const packed = new Uint8Array(await new Response(new Blob([content.slice().buffer as ArrayBuffer]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer())
   const n = bytes(name)
-  const local = new DataView(new ArrayBuffer(30)); local.setUint32(0, 0x04034b50, true); local.setUint16(4, 20, true); local.setUint16(8, 8, true); local.setUint32(18, packed.length, true); local.setUint32(22, content.length, true); local.setUint16(26, n.length, true)
-  const dir = new DataView(new ArrayBuffer(46)); dir.setUint32(0, 0x02014b50, true); dir.setUint16(4, 20, true); dir.setUint16(6, 20, true); dir.setUint16(10, 8, true); dir.setUint32(20, packed.length, true); dir.setUint32(24, content.length, true); dir.setUint16(28, n.length, true)
+  const local = new DataView(new ArrayBuffer(30)); local.setUint32(0, 0x04034b50, true); local.setUint16(4, 20, true); local.setUint16(8, 8, true); local.setUint32(18, packed.length, true); local.setUint32(22, claimed, true); local.setUint16(26, n.length, true)
+  const dir = new DataView(new ArrayBuffer(46)); dir.setUint32(0, 0x02014b50, true); dir.setUint16(4, 20, true); dir.setUint16(6, 20, true); dir.setUint16(10, 8, true); dir.setUint32(20, packed.length, true); dir.setUint32(24, claimed, true); dir.setUint16(28, n.length, true)
   const end = new DataView(new ArrayBuffer(22)); end.setUint32(0, 0x06054b50, true); end.setUint16(8, 1, true); end.setUint16(10, 1, true); end.setUint32(12, 46 + n.length, true); end.setUint32(16, 30 + n.length + packed.length, true)
   return new Blob([local.buffer, n.slice().buffer as ArrayBuffer, packed.slice().buffer as ArrayBuffer, dir.buffer, n.slice().buffer as ArrayBuffer, end.buffer])
 }
@@ -26,6 +26,16 @@ const sound = bytes('x'.repeat(5000))
 const unpacked = await readZip(await deflatedZip('emo.ogg', sound), () => true)
 check(unpacked.length === 1 && same(unpacked[0].data, sound), 'a deflated file, as zip tools write them, is unpacked')
 check((await readZip(await deflatedZip('emo.ogg', sound), () => true, 1000)).length === 0, 'a file bigger than allowed is not unpacked at all')
+
+// A zip that says a file is 1 byte when it unpacks to 8 MB: unpacking stops at the limit, not at the end.
+const lying = await readZip(await deflatedZip('big.wav', new Uint8Array(8 * 1024 * 1024), 1), () => true, 2 * 1024 * 1024)
+check(lying.length === 0, 'a file that says it is small but unpacks bigger than allowed is stopped, and not taken')
+let overall = ''
+try { await readZip(makeZip([{ name: 'a.wav', data: new Uint8Array(3000) }, { name: 'b.wav', data: new Uint8Array(3000) }]), () => true, 5000, 200, 5000) } catch (e) { overall = (e as Error).message }
+check(overall.includes('too big altogether'), 'files that each fit but together go past the limit are refused')
+let many = ''
+try { await readZip(makeZip([1, 2, 3].map(i => ({ name: i + '.wav', data: bytes('x') }))), () => true, 1000, 2) } catch (e) { many = (e as Error).message }
+check(many.includes('more than 2 files'), 'a zip with more files to take than allowed is refused')
 
 let refused = ''
 try { await readZip(new Blob([bytes('just some text, not a zip').slice().buffer as ArrayBuffer]), () => true) } catch (e) { refused = (e as Error).message }

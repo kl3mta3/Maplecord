@@ -2,7 +2,7 @@ import { CommunityPollDialog } from './CommunityPoll'
 import { TagCardDialog, onTagOpened } from './Tags'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { p2pMedia, type Store } from '../store'
+import { p2pMedia, type Store, type TrayItem } from '../store'
 import { openSink, type TransferView } from '../transfer'
 import { ChannelType, isPostsChannel, MessageKind, Permission, UserStatus, RollChoice, RollKind, RollRange, RpsChoice, hasPermission, type AttachmentDto, type ChannelBotDto, type FileOfferDto, type CommandDto, type MemberDto, type MediaItem, type MessageDto, type RoleDto } from '../types'
 
@@ -43,6 +43,7 @@ import { bridge, isElectron } from '../platform'
 import { linkRanOut, useFileLink } from '../fileLinks'
 import { SupportDialog } from './Support'
 import { ReportDialog, type ReportsOn, type ReportTarget } from './Report'
+import { TermsGate } from './Terms'
 import { CALENDAR_BACKGROUNDS } from '../calendarLooks'
 import { MAX_P2P_TEXT, P2P_PICTURE, type P2PFile } from '../p2pText'
 import { foldP2p, foldP2pChat, P2P_GALLERY_POLLS, P2P_META_ROOM, P2P_REACTIONS } from '../p2pPosts'
@@ -972,6 +973,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       {supportOn && <button className="supportbtn" title="Support Maplecord" onClick={() => setDialog({ kind: 'support' })}><Heart size={13} /> Support</button>}
       {dialog?.kind === 'support' && <SupportDialog api={store.api} onClose={() => setDialog(null)} />}
       {reporting && <ReportDialog api={store.api} target={reporting} on={reportsOn} onClose={() => setReporting(null)} />}
+      <TermsGate api={store.api} serverUrl={store.settings.serverUrl} onSignOut={async () => { await store.signOut(); onSignedOut() }} />
       {soundboard && (
         <SoundboardPanel x={soundboard.x} y={soundboard.y} server={voiceGuild ?? 'This server'} sounds={soundboard.sounds} favorites={store.settings.soundFavorites ?? []}
           onFavorite={(id, on) => store.updateSettings({ soundFavorites: on ? [...(store.settings.soundFavorites ?? []).filter(x => x !== id), id] : (store.settings.soundFavorites ?? []).filter(x => x !== id) })}
@@ -1262,7 +1264,18 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
 
   const submit = async () => {
     const value = text.trim()
-    if (!value || !channel) return
+    const waiting = channel ? store.tray.some(i => i.channelId === channel.id) : false
+    if ((!value && !waiting) || !channel) return
+    if (waiting && !value.startsWith('/')) {
+      setText('')
+      const answering = replyingTo
+      setReplyingTo(null)
+      const sent = withPicked(value)
+      pickedEmojis.current.clear()
+      if (!await store.sendTray(sent, { replyToId: answering?.id ?? null })) setText(value)
+      return
+    }
+    if (!value) return
     setText('')
     if (value.startsWith('/')) {
       const [name, ...rest] = value.slice(1).split(/\s+/)
@@ -1370,19 +1383,20 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
   }
 
   const holdsFiles = (e: React.DragEvent) => e.dataTransfer.types.includes('Files')
-  const mayTakeFiles = !!channel && !(p2pChat && p2p?.state !== 'on')
+  // Only where the message box is: not over a list of posts, a read-only channel or the pictures-only view.
+  const mayTakeFiles = !!channel && !(p2pChat && p2p?.state !== 'on') && !postsList && !readOnly && !mediaOnly
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault()
     setDropping(false)
     if (!mayTakeFiles) return
-    for (const f of Array.from(e.dataTransfer.files)) await store.sendFile(f)
+    await store.addToTray(Array.from(e.dataTransfer.files))
   }
 
   return (
     <div className={'chat' + (dropping && mayTakeFiles ? ' dropping' : '')} onDrop={onDrop}
       onDragOver={e => { e.preventDefault(); if (holdsFiles(e) && !dropping) setDropping(true) }}
       onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false) }}>
-      {dropping && mayTakeFiles && <div className="dropnote" aria-hidden="true">Drop to send to {channel?.type === ChannelType.DirectMessage ? '@' : '#'}{channel?.name}</div>}
+      {dropping && mayTakeFiles && <div className="dropnote" aria-hidden="true">Drop to add to your message to {channel?.type === ChannelType.DirectMessage ? '@' : '#'}{channel?.name}</div>}
       {pasted && channel && (
         <PastedDialog files={pasted} where={(channel.type === ChannelType.DirectMessage ? '@' : '#') + channel.name} onClose={() => setPasted(null)}
           onSend={async () => { const files = pasted; setPasted(null); for (const f of files) await store.sendFile(f) }} />
@@ -1660,8 +1674,10 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
         ) : voiceMessage && channel ? (
           <VoiceMessageBar deviceId={store.settings.audioInputDeviceId} maxBytes={voiceMessage.maxBytes} onSend={file => store.sendFile(file)} onClose={() => setVoiceMessage(null)} />
         ) : (
+        <>
+        {channel && <FileTray items={store.tray.filter(i => i.channelId === channel.id)} onRemove={store.removeFromTray} />}
         <div className="composer">
-          <input ref={fileRef} type="file" hidden onChange={async e => { const f = e.target.files?.[0]; if (f) await store.sendFile(f); e.target.value = '' }} />
+          <input ref={fileRef} type="file" hidden multiple onChange={async e => { const picked = Array.from(e.target.files ?? []); e.target.value = ''; await store.addToTray(picked) }} />
           <input ref={directRef} type="file" hidden onChange={async e => { const f = e.target.files?.[0]; if (f) await store.offerFile(f); e.target.value = '' }} />
           {/* One "+" for everything besides typing: it opens a short menu over the box. */}
           <span className="plus">
@@ -1702,13 +1718,36 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
               const files = Array.from(e.clipboardData.files)
               if (files.length === 0 || e.clipboardData.getData('text/plain')) return
               e.preventDefault()
-              setPasted(files)
+              if (p2pChat) setPasted(files)
+              else void store.addToTray(files)
             }}
           />
           <button className="accent" onClick={submit} disabled={!channel || (p2pChat && p2p?.state !== 'on')}>Send</button>
         </div>
+        </>
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * The files waiting to go with the next message, above the box: a picture or video shows itself, anything else its
+ * name. Each says while it is being checked or uploaded, and why if it could not be; × takes it out.
+ */
+function FileTray({ items, onRemove }: { items: TrayItem[]; onRemove: (key: string) => void }) {
+  if (items.length === 0) return null
+  return (
+    <div className="filetray" aria-label="Files to send with your message">
+      {items.map(i => (
+        <div key={i.key} className={'trayitem ' + i.state} title={i.problem ?? `${i.name} · ${fileSize(i.size)}`}>
+          {i.preview ? (i.video ? <video src={i.preview} muted /> : <img src={i.preview} alt={i.name} />) : <span className="trayfile">📄</span>}
+          <span className="trayname">{i.name}</span>
+          {(i.state === 'checking' || i.state === 'uploading') && <span className="traystate"><LoaderCircle size={16} className="spin" />{i.state === 'checking' ? 'Checking' : 'Uploading'}</span>}
+          {i.state === 'failed' && <span className="traystate bad">{i.problem}</span>}
+          <button className="trayremove" title="Take it out" aria-label={`Take ${i.name} out`} onClick={() => onRemove(i.key)}>×</button>
+        </div>
+      ))}
     </div>
   )
 }

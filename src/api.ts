@@ -45,6 +45,9 @@ export class Api {
   /** Null when the server is unreachable or too old to say. */
   /** What the support window shows. Only there while the support button is switched on. */
   support() { return this.request<SupportReportDto>('GET', '/api/support') }
+  /** The terms of service in force, and which version this account agreed to (0: none). */
+  terms() { return this.request<{ current: number; accepted: number; acceptedAt: string | null; updated: string }>('GET', '/api/me/terms') }
+  agreeToTerms(version: number) { return this.request<void>('POST', '/api/me/terms', { version }) }
   /** Reporting a picture the server keeps, or a person, to whoever runs this Maplecord. */
   reportPicture(kind: string, id: string, category: string, note: string) { return this.request<void>('POST', '/api/reports/picture', { kind, id, category, note }) }
   reportPerson(userId: string, category: string, note: string, messageId?: string) { return this.request<void>('POST', '/api/reports/person', { userId, category, note, messageId }) }

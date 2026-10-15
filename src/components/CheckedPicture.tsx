@@ -16,6 +16,13 @@ export function CheckedPicture({ src, checkKey, children }: { src: string; check
     void checkPicture(src, checkKey).then(v => { if (current) setVerdict(v) })
     return () => { current = false }
   }, [src, checkKey, on])
+  // Shown after being blurred: a small button at the bottom blurs it again.
+  if (on && shown && verdict === 'explicit') return (
+    <span className="checkedpic revealed">
+      {children}
+      <button className="hidepic" title="Blur it again" onClick={e => { e.stopPropagation(); e.preventDefault(); setShown(false) }}>Hide</button>
+    </span>
+  )
   if (!on || shown || verdict === 'ok' || verdict === 'unknown') return <>{children}</>
   return (
     // While it is blurred, a click shows it (when it may be explicit) and goes no further: not to the picture, which

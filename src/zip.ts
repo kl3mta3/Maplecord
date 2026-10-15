@@ -7,9 +7,11 @@ export interface ZipFile { name: string; data: Uint8Array }
 
 /**
  * The files in a zip whose names <paramref name="wanted"/> keeps, each at most <paramref name="mostEach"/> bytes once
- * unpacked. Anything else in it is not unpacked at all, so a zip cannot make this read more than it was asked for.
+ * unpacked, and at most <paramref name="mostFiles"/> of them and <paramref name="mostTotal"/> bytes in all. Anything
+ * else in it is not unpacked at all. What a zip says a file's size is cannot be trusted, so unpacking stops the
+ * moment a file goes past its limit: a zip cannot make this unpack more than it was asked for.
  */
-export async function readZip(blob: Blob, wanted: (name: string) => boolean, mostEach = 5 * 1024 * 1024): Promise<ZipFile[]> {
+export async function readZip(blob: Blob, wanted: (name: string) => boolean, mostEach = 5 * 1024 * 1024, mostFiles = 200, mostTotal = 64 * 1024 * 1024): Promise<ZipFile[]> {
   const buf = new Uint8Array(await blob.arrayBuffer())
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
   let end = -1
@@ -18,6 +20,7 @@ export async function readZip(blob: Blob, wanted: (name: string) => boolean, mos
   const count = view.getUint16(end + 10, true)
   let at = view.getUint32(end + 16, true)
   const out: ZipFile[] = []
+  let total = 0
   for (let n = 0; n < count; n++) {
     if (at + 46 > buf.length || view.getUint32(at, true) !== 0x02014b50) throw new Error('That zip file is damaged.')
     const method = view.getUint16(at + 10, true)
@@ -28,16 +31,43 @@ export async function readZip(blob: Blob, wanted: (name: string) => boolean, mos
     const name = new TextDecoder().decode(buf.subarray(at + 46, at + 46 + nameLength))
     at += 46 + nameLength + extra + comment
     if (name.endsWith('/') || !wanted(name) || size > mostEach) continue
+    if (out.length >= mostFiles) throw new Error(`That zip has more than ${mostFiles} files to take.`)
+    const room = Math.min(mostEach, mostTotal - total)
     if (local + 30 > buf.length || view.getUint32(local, true) !== 0x04034b50) throw new Error('That zip file is damaged.')
     const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true)
     const raw = buf.subarray(start, start + packed)
-    if (method === 0) out.push({ name, data: raw.slice(0, mostEach) })
-    else if (method === 8) {
-      const data = new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer())
-      if (data.length <= mostEach) out.push({ name, data })
+    let data: Uint8Array | null = null
+    if (method === 0) data = raw.length <= room ? raw.slice() : null
+    else if (method === 8) data = await inflateAtMost(raw, room)
+    else continue
+    if (!data) {
+      if (room < mostEach) throw new Error('What is in that zip is too big altogether.')
+      continue
     }
+    total += data.length
+    out.push({ name, data })
   }
   return out
+}
+
+/** A deflated file unpacked, a piece at a time; null as soon as it goes past <paramref name="most"/> bytes. */
+async function inflateAtMost(raw: Uint8Array, most: number): Promise<Uint8Array | null> {
+  const reader = new Blob([raw.slice().buffer as ArrayBuffer]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader()
+  const parts: Uint8Array[] = []
+  let length = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      length += value.length
+      if (length > most) { await reader.cancel().catch(() => {}); return null }
+      parts.push(value)
+    }
+  } catch { throw new Error('That zip file is damaged.') }
+  const data = new Uint8Array(length)
+  let at = 0
+  for (const p of parts) { data.set(p, at); at += p.length }
+  return data
 }
 
 let crcTable: Uint32Array | null = null
