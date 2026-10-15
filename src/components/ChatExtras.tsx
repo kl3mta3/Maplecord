@@ -6,6 +6,7 @@ import { Dialog } from './Dialogs'
 import { postedWhen } from './Calendar'
 import { MarkdownBox } from './Markdown'
 import { markdownFirstLine } from '../markdown'
+import { ReactionGlyph, plainEmojis, reactionLabel } from '../expressions'
 
 // The parts of the chat that belong to one message beyond its text: what it answers, its reactions, its poll, the
 // thread hanging off it. And the lists a channel can be looked at through: its pins, a search, a forum's posts, a
@@ -26,7 +27,7 @@ export function ReplyQuote({ reply, name, onJump, gone = 'The message this answe
   if (reply.gone) return <div className="replyquote gone">↱ {gone}</div>
   return (
     <button className="replyquote" title="Go to that message" onClick={onJump} disabled={!onJump}>
-      ↱ <b>{name}</b> <span>{reply.snippet || '…'}</span>
+      ↱ <b>{name}</b> <span>{plainEmojis(reply.snippet) || '…'}</span>
     </button>
   )
 }
@@ -37,7 +38,7 @@ export function Reactions({ reactions, onToggle, onMore }: { reactions: Reaction
     <div className="reactions">
       {reactions.map(r => (
         <button key={r.emoji} className={'reaction' + (r.mine ? ' mine' : '')} aria-pressed={!!r.mine} title={r.mine ? 'Take your reaction back' : 'React with this too'}
-          onClick={() => onToggle(r.emoji, !r.mine)}>{r.emoji} <span>{r.count}</span></button>
+          aria-label={reactionLabel(r.emoji)} onClick={() => onToggle(r.emoji, !r.mine)}><ReactionGlyph emoji={r.emoji} /> <span>{r.count}</span></button>
       ))}
       {onMore && <button className="reaction add" title="Add a reaction" aria-label="Add a reaction" onClick={onMore}>＋</button>}
     </div>
@@ -65,7 +66,7 @@ export function ReactionPicker({ x, y, choices, onPick, onClose }: { x: number; 
   return (
     <div className="pickerback" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
       <div ref={box} className="reactpicker" role="listbox" aria-label="React with" style={{ left: at.left, top: at.top }}>
-        {list.map(emoji => <button key={emoji} aria-label={emoji} onClick={() => { onPick(emoji); onClose() }}>{emoji}</button>)}
+        {list.map(emoji => <button key={emoji} aria-label={reactionLabel(emoji)} title={reactionLabel(emoji)} onClick={() => { onPick(emoji); onClose() }}><ReactionGlyph emoji={emoji} /></button>)}
       </div>
     </div>
   )
@@ -294,7 +295,7 @@ export function ForumList({ posts, nameOf, onOpen }: { posts: MessageDto[]; name
           <div className="postfoot muted">
             <span>{nameOf(m)}</span>
             <span>💬 {m.threadCount ?? 0}</span>
-            {(m.reactions ?? []).slice(0, 4).map(r => <span key={r.emoji}>{r.emoji} {r.count}</span>)}
+            {(m.reactions ?? []).slice(0, 4).map(r => <span key={r.emoji}><ReactionGlyph emoji={r.emoji} /> {r.count}</span>)}
             <span className="grow" />
             <span>{m.threadLastAt ? `last reply ${when(m.threadLastAt)}` : when(m.createdAt)}</span>
           </div>

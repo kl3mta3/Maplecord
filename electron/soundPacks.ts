@@ -41,3 +41,33 @@ export function resolveSound(root: string, pack: string, file: string): string |
     return real.startsWith(fs.realpathSync(base) + path.sep) && fs.statSync(real).isFile() ? real : null
   } catch { return null }
 }
+
+/** A pack imported from a zip (see src/soundPackZip.ts): one file for each moment it covers. */
+export interface PackFileIn { event: string; ext: string; data: Uint8Array }
+
+/**
+ * Saves an imported pack as a folder of its own, named after it and made different from the folders there already.
+ * Only files named for a moment, as WAV, MP3 or OGG of up to 2 MB, are written; the name cannot reach outside the
+ * sounds folder. Returns the folder's name, or null if there was nothing to save.
+ */
+export function savePack(root: string, wanted: string, files: PackFileIn[]): string | null {
+  const keep = files.filter(f => (SOUND_EVENTS as readonly string[]).includes(f.event) && EXTENSIONS.includes('.' + f.ext) && f.data?.length > 0 && f.data.length <= 2 * 1024 * 1024)
+  if (keep.length === 0) return null
+  const clean = String(wanted).replace(/[^\p{L}\p{N} _-]+/gu, ' ').trim().replace(/^[._]+/, '').slice(0, 40) || 'My pack'
+  fs.mkdirSync(root, { recursive: true })
+  let name = clean
+  for (let n = 2; fs.existsSync(path.join(root, name)); n++) name = `${clean} (${n})`
+  const folder = path.join(root, name)
+  if (path.dirname(path.resolve(folder)) !== path.resolve(root)) return null
+  fs.mkdirSync(folder)
+  for (const f of keep) fs.writeFileSync(path.join(folder, `${f.event}.${f.ext}`), Buffer.from(f.data))
+  return name
+}
+
+/** Deletes a pack's folder: only a folder directly in the sounds folder. */
+export function deletePack(root: string, name: string): boolean {
+  const folder = path.resolve(root, String(name))
+  if (path.dirname(folder) !== path.resolve(root) || !fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) return false
+  fs.rmSync(folder, { recursive: true, force: true })
+  return true
+}

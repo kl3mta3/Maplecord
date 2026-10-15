@@ -2,7 +2,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { listSoundPacks, resolveSound } from './soundPacks.ts'
+import { deletePack, listSoundPacks, resolveSound, savePack } from './soundPacks.ts'
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'maplecord-sounds-'))
 let failures = 0
@@ -27,6 +27,13 @@ check(resolveSound(root, 'Arcade', 'win.wav') !== null, 'a sound in a pack resol
 check(resolveSound(root, 'Arcade', 'notes.txt') === null, 'only audio files are served')
 check(resolveSound(root, '..', path.basename(os.tmpdir()) + '/maplecord-outside.wav') === null && resolveSound(root, 'Arcade', '../../maplecord-outside.wav') === null, 'nothing outside the sounds folder is served')
 check(resolveSound(root, 'Arcade', 'missing.wav') === null, 'a missing file is not served')
+
+const bytes = new Uint8Array([1, 2, 3])
+const saved = savePack(root, 'Arcade', [{ event: 'win', ext: 'wav', data: bytes }, { event: '../../evil', ext: 'wav', data: bytes }, { event: 'lose', ext: 'exe', data: bytes }])
+check(saved === 'Arcade (2)' && fs.readdirSync(path.join(root, 'Arcade (2)')).join(',') === 'win.wav', 'an imported pack gets a folder of its own, a new name if taken, and only the files named for a moment')
+check(savePack(root, '../../outside', [{ event: 'win', ext: 'wav', data: bytes }]) === 'outside' && !fs.existsSync(path.join(root, '..', 'outside')), 'a pack name cannot reach outside the sounds folder')
+check(savePack(root, 'Nothing', [{ event: 'notes', ext: 'txt', data: bytes }]) === null, 'a pack with nothing usable is not saved')
+check(deletePack(root, 'Arcade (2)') && !fs.existsSync(path.join(root, 'Arcade (2)')) && !deletePack(root, '..') && !deletePack(root, 'Missing'), 'a pack folder can be deleted, and nothing outside the sounds folder')
 
 fs.rmSync(root, { recursive: true, force: true })
 fs.rmSync(path.join(os.tmpdir(), 'maplecord-outside.wav'), { force: true })

@@ -1,3 +1,8 @@
+import { SoundCustomizer, type SoundChoice } from './SoundSettings'
+import { defaultPackZip } from '../soundPackZip'
+import type { SoundEvent } from '../soundTypes'
+import type { ExpressionGroupDto } from '../types'
+import { GuildExpressionsTab } from './Expressions'
 import { TagSettings } from './Tags'
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { isElectron } from '../platform'
@@ -9,15 +14,30 @@ import { ListingSettings } from './Servers'
 
 // ---- Overlay / roll settings ---------------------------------------------------
 
-export function OverlaySettingsDialog({ settings, onChange, packs, onOpenSounds, onReloadSounds, onClose }: {
-  settings: { soundEnabled: boolean; soundProfile: string; overlayEnabled: boolean }
-  onChange: (patch: Partial<{ soundEnabled: boolean; soundProfile: string; overlayEnabled: boolean }>) => void
+export function OverlaySettingsDialog({ settings, onChange, packs, onOpenSounds, onReloadSounds, onImport, onDelete, loadSounds, onClose }: {
+  settings: { soundEnabled: boolean; soundProfile: string; overlayEnabled: boolean; soundChoices?: Partial<Record<SoundEvent, SoundChoice>> }
+  onChange: (patch: Partial<{ soundEnabled: boolean; soundProfile: string; overlayEnabled: boolean; soundChoices: Partial<Record<SoundEvent, SoundChoice>> }>) => void
   /** "Default" plus the packs the user added. */
   packs: string[]; onOpenSounds: () => void; onReloadSounds: () => void
+  /** A pack from a zip (desktop app), and taking one away. */
+  onImport: (zip: File) => Promise<void>; onDelete: (name: string) => Promise<void>
+  /** The soundboard sounds one can choose for a moment. */
+  loadSounds: () => Promise<ExpressionGroupDto[]>
   onClose: () => void
 }) {
   const desktop = isElectron()
   const chosen = packs.includes(settings.soundProfile) ? settings.soundProfile : packs[0]
+  const [customizing, setCustomizing] = useState(false)
+  const zipRef = useRef<HTMLInputElement>(null)
+  const choices = settings.soundChoices ?? {}
+  const downloadDefault = async () => {
+    const zip = await defaultPackZip()
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(zip); link.download = 'Maplecord default sounds.zip'
+    link.click()
+    window.setTimeout(() => URL.revokeObjectURL(link.href), 10_000)
+  }
+  if (customizing) return <SoundCustomizer pack={chosen} chosen={choices} loadSounds={loadSounds} onChange={soundChoices => onChange({ soundChoices })} onClose={() => setCustomizing(false)} />
   return (
     <Dialog title="Overlay settings" onClose={onClose}>
       <label className="row">
@@ -36,7 +56,19 @@ export function OverlaySettingsDialog({ settings, onChange, packs, onOpenSounds,
         {desktop && <button className="subtle" onClick={onOpenSounds} title="Each folder in here is a pack: roll.wav, win.wav, lose.wav, you100.wav, one.wav, sixtyNine.wav, they100.wav, emo.wav, join.wav, leave.wav, message.wav, drop.wav, removed.wav, watch.wav, unwatch.wav">Open sounds folder</button>}
         {desktop && <button className="subtle" onClick={onReloadSounds}>Reload</button>}
       </div>
-      {desktop && <div className="muted">Add your own: put a folder of sounds in the sounds folder and press Reload. They stay on this computer.</div>}
+      <div className="row">
+        <button onClick={() => setCustomizing(true)}>Customize sounds{Object.keys(choices).length > 0 ? ` (${Object.keys(choices).length} chosen)` : ''}</button>
+        <span className="muted small grow">Choose a soundboard sound for any moment: a win, a 100, a message.</span>
+      </div>
+      {desktop && (
+        <div className="row">
+          <input ref={zipRef} type="file" accept=".zip,application/zip" hidden onChange={async e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) await onImport(f) }} />
+          <button onClick={() => zipRef.current?.click()}>Import a pack (.zip)</button>
+          <button className="subtle" onClick={() => void downloadDefault()}>Download the default pack</button>
+          {chosen !== 'Default' && <button className="subtle danger" onClick={() => void onDelete(chosen)}>Delete {chosen}</button>}
+        </div>
+      )}
+      {desktop && <div className="muted">A pack is a zip of sounds named after their moments (win.wav, lose.mp3, emo.ogg…). The default pack shows every name; change the sounds, zip them again and import. Packs stay on this computer.</div>}
       <div className="muted" style={{ marginTop: 6 }}>Hotkeys while a game has focus: <b>Ctrl+Alt+R</b> roll / need (or start a roll), <b>Ctrl+Alt+G</b> greed, <b>Ctrl+Alt+P</b> pass.</div>
       <div className="buttons"><button className="accent" onClick={onClose}>Done</button></div>
     </Dialog>
@@ -53,6 +85,8 @@ export const PERMISSION_LABELS: { group: string; bit: number; name: string; hint
   { group: 'General', bit: Permission.WearTag, name: 'Wear the server tag', hint: 'Pick this server\'s tag to show beside their name. Someone who loses this stops wearing it' },
   { group: 'Text', bit: Permission.SendMessages, name: 'Send messages', hint: '' },
   { group: 'Text', bit: Permission.AttachFiles, name: 'Attach files', hint: 'Images and uploads' },
+  { group: 'Server', bit: Permission.ManageExpressions, name: 'Manage emojis, stickers and sounds', hint: 'Add the server\'s own (new ones, or from their library) and take them off it' },
+  { group: 'Voice', bit: Permission.UseSoundboard, name: 'Use the soundboard', hint: 'Play the server\'s sounds in its voice channels' },
   { group: 'Text', bit: Permission.ManageMessages, name: 'Manage messages', hint: 'Delete other people\'s messages' },
   { group: 'Voice', bit: Permission.JoinVoice, name: 'Join voice', hint: '' },
   { group: 'Voice', bit: Permission.Speak, name: 'Speak', hint: '' },
@@ -79,7 +113,7 @@ export const PERMISSION_GROUPS = [...new Set(PERMISSION_LABELS.map(p => p.group)
 
 const ROLE_SWATCHES = ['#9000ff', '#00ddff', '#ff008c', '#2cfc00', '#f19511', '#ff3b3b', '#ffd700', '#1abc9c', '#e91e63', '#3498db', '#95a5a6', '#ffffff']
 
-export function ServerSettingsDialog({ api, channels, guild, roles, members, findMembers, moreMembers, myPermissions, meId, onRename, onIcon, onListing, tagSymbols, onSetTag, onRemoveTag, onCountRolls, onHideOwner, onWelcome, onCreateRole, onUpdateRole, onDeleteRole, onSetMemberRoles, onClose }: {
+export function ServerSettingsDialog({ api, channels, guild, roles, members, findMembers, moreMembers, myPermissions, meId, onRename, onIcon, onBanner, onOutside, onExpressionsChanged, onListing, tagSymbols, onSetTag, onRemoveTag, onCountRolls, onHideOwner, onWelcome, onCreateRole, onUpdateRole, onDeleteRole, onSetMemberRoles, onClose }: {
   api: Api; channels: ChannelDto[]
   guild: GuildDto; roles: RoleDto[]; members: MemberDto[]; myPermissions: number; meId: string
   /**
@@ -91,7 +125,12 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, fin
   moreMembers?: () => void
   onRename: (name: string) => Promise<void>
   onIcon: (file: File | null) => Promise<void>
-  onListing: (patch: { isPublic: boolean; description: string; topics: string[] }) => Promise<void>
+  onBanner: (file: File | null) => Promise<void>
+  /** Whether members may use emojis and stickers from outside this server. */
+  onOutside: (allowed: boolean) => Promise<void>
+  /** Something was added to the server or taken off it: pickers ask again. */
+  onExpressionsChanged: () => void
+  onListing: (patch: { isPublic: boolean; description: string; topics: string[]; featurable: boolean }) => Promise<void>
   /** The server's tag: the symbols one can carry, setting it, and taking it away. */
   tagSymbols: () => Promise<string[]>
   onSetTag: (guildId: string, text: string, symbol: string | null) => Promise<void>
@@ -110,9 +149,11 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, fin
   const canGuild = hasPermission(myPermissions, Permission.ManageGuild)
   const canRoles = hasPermission(myPermissions, Permission.ManageRoles)
   const canHooks = hasPermission(myPermissions, Permission.ManageWebhooks)
-  const [tab, setTab] = useState<'overview' | 'roles' | 'members' | 'webhooks' | 'bots'>(canGuild ? 'overview' : canRoles ? 'roles' : 'webhooks')
+  const canExpressions = hasPermission(myPermissions, Permission.ManageExpressions)
+  const [tab, setTab] = useState<'overview' | 'roles' | 'members' | 'webhooks' | 'bots' | 'expressions'>(canGuild ? 'overview' : canRoles ? 'roles' : canHooks ? 'webhooks' : 'expressions')
   const [name, setName] = useState(guild.name)
   const fileRef = useRef<HTMLInputElement>(null)
+  const bannerRef = useRef<HTMLInputElement>(null)
   const sorted = [...roles].sort((a, b) => b.position - a.position)
   const [roleId, setRoleId] = useState<string>(sorted[0]?.id ?? '')
   const role = roles.find(r => r.id === roleId) ?? null
@@ -143,7 +184,11 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, fin
         {canRoles && <button className={tab === 'members' ? 'active' : ''} onClick={() => setTab('members')}>Members</button>}
         {canHooks && <button className={tab === 'webhooks' ? 'active' : ''} onClick={() => setTab('webhooks')}>Webhooks</button>}
         {canGuild && <button className={tab === 'bots' ? 'active' : ''} onClick={() => setTab('bots')}>Bots</button>}
+        {(canExpressions || canGuild) && <button className={tab === 'expressions' ? 'active' : ''} onClick={() => setTab('expressions')}>Emojis & sounds</button>}
       </div>
+
+      {tab === 'expressions' && <GuildExpressionsTab api={api} guildId={guild.id} meId={meId} mayManage={canExpressions} mayGuild={canGuild} isPublic={!!guild.isPublic}
+        onOutside={async allowed => { await onOutside(allowed); onExpressionsChanged() }} />}
 
       {tab === 'webhooks' && <WebhooksTab api={api} guildId={guild.id} channels={channels} />}
       {tab === 'bots' && <ServerBotsTab api={api} guildId={guild.id} canManage={canGuild} onManage={canGuild ? setManaging : undefined}
@@ -165,12 +210,23 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, fin
               <input ref={fileRef} type="file" accept="image/*" hidden onChange={async e => { const f = e.target.files?.[0]; if (f) await onIcon(f); e.target.value = '' }} />
             </div>
           </div>
+          {/* The banner: the picture over the top of the channel list, with the server's name on it. */}
+          <div className="bannerpick" onClick={() => bannerRef.current?.click()} title="Change banner"
+            style={guild.bannerUrl ? { backgroundImage: `url("${guild.bannerUrl}")` } : undefined}>
+            {!guild.bannerUrl && <span className="muted">No banner</span>}
+          </div>
+          <div className="muted">Server banner, shown over the channel list (png / jpg / gif / webp, moving or not, up to 4 MB; about 960 × 540 looks best)</div>
+          <div className="row">
+            <button onClick={() => bannerRef.current?.click()}>Upload</button>
+            {guild.bannerUrl && <button className="subtle" onClick={() => onBanner(null)}>Remove</button>}
+            <input ref={bannerRef} type="file" accept="image/*" hidden onChange={async e => { const f = e.target.files?.[0]; if (f) await onBanner(f); e.target.value = '' }} />
+          </div>
           <div className="muted">Server name</div>
           <div className="row">
             <input className="grow" value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && name.trim() && onRename(name.trim())} />
             <button className="accent" disabled={!name.trim() || name.trim() === guild.name} onClick={() => onRename(name.trim())}>Save</button>
           </div>
-          <ListingSettings key={`${guild.isPublic}|${guild.description ?? ''}|${(guild.topics ?? []).join(',')}`} isPublic={!!guild.isPublic} description={guild.description ?? ''} topics={guild.topics ?? []} onSave={onListing} />
+          <ListingSettings key={`${guild.isPublic}|${guild.description ?? ''}|${(guild.topics ?? []).join(',')}|${!!guild.noFeature}`} isPublic={!!guild.isPublic} description={guild.description ?? ''} topics={guild.topics ?? []} featurable={!guild.noFeature} onSave={onListing} />
           <TagSettings guild={guild} people={members.filter(m => !m.isBot).length} symbols={tagSymbols}
             onSave={(text, symbol) => onSetTag(guild.id, text, symbol)} onRemove={() => onRemoveTag(guild.id)} />
           {/* Where newcomers are greeted. Only an ordinary text channel can be it: nothing can be posted for anyone in a P2P one. */}

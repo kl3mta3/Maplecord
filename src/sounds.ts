@@ -14,11 +14,25 @@ export function setSoundPacks(found: SoundPack[]) { packs = found }
 /** Names for the sound-pack picker: the built-in one first, then the user's own. */
 export const soundPackNames = (found: SoundPack[] = packs) => [DEFAULT_SOUND_PACK, ...found.map(p => p.name)]
 
-function urlFor(event: SoundEvent, packName: string): string {
+/** A soundboard sound chosen for a moment (Customize sounds), by its address: played in place of the pack's. */
+let chosen: Partial<Record<SoundEvent, string>> = {}
+export function setChosenSounds(choices: Partial<Record<SoundEvent, { url: string }>> | undefined) {
+  chosen = Object.fromEntries(Object.entries(choices ?? {}).map(([event, c]) => [event, c.url]))
+}
+
+/** The pack's own sound for a moment (or the built-in one), whatever was chosen in its place. */
+export function packSoundUrl(event: SoundEvent, packName: string): string {
   const file = packs.find(p => p.name === packName)?.events[event]
   // Packs are served by the desktop app from the user's own folder, through the same private scheme as plugin icons.
   if (file) return `maplecord-plugin://sounds/${encodeURIComponent(packName)}/${encodeURIComponent(file)}`
   return `${import.meta.env.BASE_URL}sounds/default/${event}.wav`
+}
+
+const urlFor = (event: SoundEvent, packName: string) => chosen[event] ?? packSoundUrl(event, packName)
+
+/** Plays a sound once, to hear what it is (Customize sounds). */
+export function previewSound(url: string) {
+  try { void new Audio(url).play().catch(() => { /* not now */ }) } catch { /* no audio device */ }
 }
 
 let quiet = false

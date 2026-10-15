@@ -26,6 +26,13 @@ export interface Settings {
   shareSound?: boolean
   /** How loud everyone in voice is played, 0 to 1. */
   outputVolume?: number
+  /** How loud other people's soundboard sounds are played, 0 to 1 (unset: 0.6), and whether they are heard at all. */
+  soundboardVolume?: number
+  soundboardMuted?: boolean
+  /** Soundboard sounds marked as favourites, by id: shown first in the soundboard, on this device. */
+  soundFavorites?: string[]
+  /** Soundboard sounds chosen for moments (a win, a message) in place of the pack's, on this device (Customize sounds). */
+  soundChoices?: Partial<Record<import('./soundTypes').SoundEvent, { id: string; name: string; url: string }>>
   /** When the microphone is sent: while talking (the default), or while a key is held. */
   voiceMode?: 'activity' | 'push'
   /**

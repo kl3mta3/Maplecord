@@ -36,7 +36,7 @@ one.
 - Unread counts, per-channel and per-server mute, and folders to group your servers. Drag servers and folders to
   put them in the order you like
 - On a wide screen, the channel list and the member list can be dragged wider or narrower
-- Profiles with display names, avatars, banners, name fonts, animated decorations and profile effects
+- Profiles with display names, avatars, banners, name fonts, animated decorations, profile effects and nameplates
 - Server tags, which a server can keep to the roles it chooses
 - Status (online, idle, do not disturb, invisible), blocking, and a say over who may send you friend requests
 - Slash commands, bots and webhooks
@@ -97,7 +97,12 @@ kept apart from the rest and is off until you turn it on.
 In a P2P connection your app connects straight to the others. That allows more, but it means **the people
 you connect to that way can, with the know how, find your IP address**.
 
-- **Privacy** a P2P connection is made for users by the server but the connection is direct and private. Nothing passes through the server or relay.
+- **What goes where.** The Maplecord server introduces the apps to each other, passing on the sealed messages that set
+  up the connection. What is then said, shown or sent goes straight between the apps, encrypted, and not through the
+  server.
+- **Through the relay instead.** Turn on "Join P2P channels through the relay" in Settings, under Voice & audio, and
+  your connections in P2P channels go through the relay, which carries them encrypted without being able to read
+  them. Nobody learns your address that way, and the relay's limits apply.
 - **Turning it on.** Untick "Do not allow P2P connections" in Settings, under Voice & audio. You are asked to sign in again, to be
   sure it is you. Tick it again whenever you like.
 - **P2P voice channels** are their own kind of channel, shown in italics with a P2P tag, and you are warned before

@@ -1,3 +1,4 @@
+import { ExpressionLibrary } from './Expressions'
 import { useState } from 'react'
 import type { Store } from '../store'
 import { UserStatus } from '../types'
@@ -19,8 +20,8 @@ export const STATUSES: { value: UserStatus; label: string; hint: string; dot: st
   { value: UserStatus.Invisible, label: 'Invisible', hint: 'You appear offline', dot: 'invisible' },
 ]
 
-export type Section = 'account' | 'voice' | 'privacy' | 'connections' | 'look' | 'app' | 'bots'
-const SECTIONS: [Section, string][] = [['account', 'My account'], ['voice', 'Voice & audio'], ['privacy', 'Status & privacy'], ['connections', 'Connections'], ['look', 'Appearance'], ['app', 'App'], ['bots', 'My bots']]
+export type Section = 'account' | 'voice' | 'privacy' | 'connections' | 'look' | 'expressions' | 'app' | 'bots'
+const SECTIONS: [Section, string][] = [['account', 'My account'], ['voice', 'Voice & audio'], ['privacy', 'Status & privacy'], ['connections', 'Connections'], ['look', 'Appearance'], ['expressions', 'Emojis & sounds'], ['app', 'App'], ['bots', 'My bots']]
 
 /**
  * Everything that is about the person rather than about a server, behind the cog at the bottom of the sidebar.
@@ -230,6 +231,7 @@ export function UserSettingsDialog({ store, initial, onOpen, onAllowDirect, onSi
           )}
 
           {section === 'bots' && <MyBots api={store.api} />}
+          {section === 'expressions' && <ExpressionLibrary api={store.api} />}
           {section === 'voice' && <VoiceAudioSettings store={store} onAllowDirect={onAllowDirect} />}
 
           {section === 'app' && (

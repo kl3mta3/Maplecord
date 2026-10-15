@@ -26,7 +26,7 @@ export const Permission = {
   StartRolls: 1 << 4, JoinVoice: 1 << 5, Speak: 1 << 6, Stream: 1 << 7,
   CreateInvites: 1 << 8, ManageChannels: 1 << 9, ManageRoles: 1 << 10, ManageWebhooks: 1 << 11,
   ManageGuild: 1 << 12, KickMembers: 1 << 13, BanMembers: 1 << 14, MuteMembers: 1 << 15,
-  ManageDirectChannels: 1 << 16, StreamDirect: 1 << 17, JoinDirectVoice: 1 << 18, DisconnectMembers: 1 << 19, UseRelayInDirect: 1 << 20, WearTag: 1 << 21, MoveMembers: 1 << 22, PostEvents: 1 << 23, ShareEvents: 1 << 24,
+  ManageDirectChannels: 1 << 16, StreamDirect: 1 << 17, JoinDirectVoice: 1 << 18, DisconnectMembers: 1 << 19, UseRelayInDirect: 1 << 20, WearTag: 1 << 21, MoveMembers: 1 << 22, PostEvents: 1 << 23, ShareEvents: 1 << 24, ManageExpressions: 1 << 25, UseSoundboard: 1 << 26,
   Administrator: 1 << 30,
 } as const
 export const hasPermission = (held: number, required: number) =>
@@ -48,6 +48,8 @@ export interface UserDto {
   tag?: TagDto | null
   /** How their name is drawn beyond its colours (see nameEffects.ts). */
   nameEffect?: string | null
+  /** What is drawn behind their name in lists: one of NAMEPLATES (profile.ts) by id, or the path of their own picture. */
+  nameplate?: string | null
 }
 export interface UserProfileDto {
   id: string; username: string; displayName: string | null; avatarUrl: string | null; bannerUrl: string | null; accentColor: string | null
@@ -57,6 +59,8 @@ export interface UserProfileDto {
   nameEffect?: string | null
   /** Only on your own profile: the ids of the animations you uploaded, and whether uploading has been closed to this account. */
   ownDecoration?: string | null; ownEffect?: string | null; ownAnimationsOff?: boolean; tag?: TagDto | null
+  /** What is drawn behind their name in lists (as on UserDto); and only on your own profile, the path of the picture you uploaded for it. */
+  nameplate?: string | null; ownNameplate?: string | null
   /** The accounts on other services they have linked and chosen to show. */
   connections?: ProfileConnectionDto[] | null
 }
@@ -73,7 +77,7 @@ export interface ContactEmailDto { email: string | null; changed: boolean; pendi
 /** A linked account as a profile shows it. */
 export interface ProfileConnectionDto { service: string; serviceName: string; name: string; url: string | null }
 /** Each field: undefined leaves it alone, '' clears it. */
-export type UpdateProfileRequest = Partial<Record<'displayName' | 'bio' | 'pronouns' | 'accentColor' | 'nameFont' | 'nameColor' | 'nameColor2' | 'decoration' | 'effect' | 'nameEffect', string>>
+export type UpdateProfileRequest = Partial<Record<'displayName' | 'bio' | 'pronouns' | 'accentColor' | 'nameFont' | 'nameColor' | 'nameColor2' | 'decoration' | 'effect' | 'nameEffect' | 'nameplate', string>>
 export interface DecorationDto { id: string; name: string; kind: 'avatar' | 'effect'; url: string; /** The colors it is drawn in ("9000ff"), each of which can be swapped for your own. */ colors?: string[] | null }
 /** What a server says about itself before sign-in: the protocol it speaks and the oldest client protocol it accepts. */
 export interface SupportLinkDto { name: string; url: string; note?: string | null }
@@ -92,13 +96,13 @@ export interface SupportReportDto {
   /** People here and room for more, when shown. atOnce: people in voice the relays could carry together; monthlyCap only when that is shown too. */
   users?: { monthlyUsers: number; atOnce?: number | null; monthlyCap?: number | null } | null
 }
-export interface ServerMetaDto { /** Whether to show the support button (the admin panel's Support page). */ support?: boolean; protocol: number; minClientProtocol: number; version: string; /** The server runs as several copies: see hubConnect.ts. */ webSocketsOnly?: boolean; /** What an invite link starts with on this server; the code follows. */ inviteBase?: string | null; /** What a link to an event starts with; the event's id follows. */ eventBase?: string | null }
+export interface ServerMetaDto { /** Which of custom emojis, stickers and sounds are switched on. */ emojis?: boolean; stickers?: boolean; sounds?: boolean; /** Whether to show the support button (the admin panel's Support page). */ support?: boolean; protocol: number; minClientProtocol: number; version: string; /** The server runs as several copies: see hubConnect.ts. */ webSocketsOnly?: boolean; /** What an invite link starts with on this server; the code follows. */ inviteBase?: string | null; /** What a link to an event starts with; the event's id follows. */ eventBase?: string | null }
 /** What an invite leads to, shown before joining. */
 export interface InvitePreviewDto { code: string; guild: GuildDto; memberCount: number }
 export interface TokenResponse { accessToken: string; expiresAt: string; user: UserDto }
 /** Which kinds of server can be made on this Maplecord right now. Servers that exist are not affected. */
 export interface NewServerKinds { public: boolean; private: boolean; hybrid: boolean; p2P: boolean }
-export interface GuildDto { id: string; name: string; iconUrl: string | null; ownerId: string; createdAt: string; /** The owner is shown under their highest role in the member list, not as "Owner". */ hideOwnerRole?: boolean; /** A full P2P server: every channel in it is a P2P channel and stays one, and only P2P bots are added to it. Fixed when the server is made. */ fullP2P?: boolean; /** Listed for anyone to find and join. */ isPublic?: boolean; description?: string | null; topics?: string[] | null; /** The tag its members may wear, and whether tags are turned off for it. */ tagText?: string | null; tagSymbol?: string | null; noTag?: boolean; /** Rolls in this server's P2P channels are not added to people's roll totals. */ noRollStats?: boolean; /** The text channel a line is posted in when someone joins, and whether one is posted. */ welcomeChannelId?: string | null; welcomeMessages?: boolean }
+export interface GuildDto { id: string; name: string; iconUrl: string | null; ownerId: string; createdAt: string; /** The owner is shown under their highest role in the member list, not as "Owner". */ hideOwnerRole?: boolean; /** A full P2P server: every channel in it is a P2P channel and stays one, and only P2P bots are added to it. Fixed when the server is made. */ fullP2P?: boolean; /** Listed for anyone to find and join. */ isPublic?: boolean; description?: string | null; topics?: string[] | null; /** The tag its members may wear, and whether tags are turned off for it. */ tagText?: string | null; tagSymbol?: string | null; noTag?: boolean; /** Rolls in this server's P2P channels are not added to people's roll totals. */ noRollStats?: boolean; /** The text channel a line is posted in when someone joins, and whether one is posted. */ welcomeChannelId?: string | null; welcomeMessages?: boolean; /** A public server whose owner chose that it is never featured on the website. */ noFeature?: boolean; /** The picture over the top of its channel list. */ bannerUrl?: string | null; /** Members may use emojis and stickers from outside it; null: the usual (on for private servers, off for public ones). */ outsideExpressions?: boolean | null }
 /** A public server as the list of them shows it. */
 export interface DiscoverGuildDto { id: string; name: string; iconUrl: string | null; description: string | null; topics: string[]; memberCount: number; joined: boolean }
 export interface ChannelOverrideDto { id: string; channelId: string; roleId: string | null; userId: string | null; allow: number; deny: number }
@@ -135,6 +139,8 @@ export interface MemberDto {
   displayName?: string | null; nameFont?: string | null; nameColor?: string | null; nameColor2?: string | null; decoration?: string | null; tag?: TagDto | null
   /** How their name is drawn beyond its colours (see nameEffects.ts). */
   nameEffect?: string | null
+  /** What is drawn behind their name in lists (as on UserDto). */
+  nameplate?: string | null
   /** Only on whole-server listings; changes arrive as PresenceStatus. */
   dnd?: boolean
   /** Online and idle. Only on whole-server listings; changes arrive as PresenceIdle. */
@@ -233,7 +239,7 @@ export interface CallDto { id: string; channelId: string; callerId: string; call
 export interface CallLogDto { outcome: 'ended' | 'missed' | 'declined'; seconds: number; direct: boolean }
 /** A button under a bot's message: the bot's own name for it, what it says, and 0 plain, 1 accent or 2 red. */
 export interface ButtonDto { id: string; label: string; style?: number }
-export interface MessageDto {
+export interface MessageDto { /** A message that is a sticker. */ sticker?: StickerDto | null;
   id: string; channelId: string; authorId: string; authorName: string; kind: MessageKind; content: string
   createdAt: string; editedAt: string | null; attachments: AttachmentDto[]; roll: RollResultDto | null
   embeds?: EmbedDto[] | null; authorAvatarUrl?: string | null; webhookId?: string | null; ephemeral?: boolean; rps?: RpsResultDto | null
@@ -279,7 +285,7 @@ export interface PollOptionDto { text: string; votes: number; mine?: boolean }
 export interface PollDto { options: PollOptionDto[]; multi: boolean; closesAt: string | null; voters: number; closed?: boolean }
 /** A poll being started: two to ten choices, whether several may be picked, and for how many hours it stays open (null: until closed). */
 export interface NewPollDto { options: string[]; multi: boolean; hours: number | null }
-export interface PostRequest { channelId: string; content: string | null; attachmentIds?: string[] | null; replyToId?: string | null; threadId?: string | null; title?: string | null; poll?: NewPollDto | null; /** On a post in a forum: its text is Markdown. */ markdown?: boolean }
+export interface PostRequest { /** A message that is a sticker, and nothing else. */ stickerId?: string | null; channelId: string; content: string | null; attachmentIds?: string[] | null; replyToId?: string | null; threadId?: string | null; title?: string | null; poll?: NewPollDto | null; /** On a post in a forum: its text is Markdown. */ markdown?: boolean }
 export interface SearchResultDto { messages: MessageDto[]; before: string | null; more: boolean }
 /** One picture or video of a channel, and the message it is on (and the thread that message is in, if it is in one). */
 export interface MediaItemDto { file: AttachmentDto; messageId: string; threadId: string | null; authorId: string; authorName: string; at: string }
@@ -343,3 +349,13 @@ export interface FriendLinkDto { code: string; url: string; qr: QrDto }
 export interface FriendLinkOwnerDto { user: UserDto; state: 'self' | 'friends' | 'asked' | 'open' }
 /** `lastAt`: when the newest message in it was written; missing when nothing has been said in it yet. */
 export interface DmChannelDto { channelId: string; other: UserDto; online: boolean; createdAt: string; dnd?: boolean; idle?: boolean; lastAt?: string | null }
+
+// ---- Custom emojis, stickers and sounds (see expressions.tsx) ----
+/** 0 emoji, 1 sticker, 2 sound. */
+export type ExpressionKind = 0 | 1 | 2
+export interface ExpressionDto { id: string; kind: ExpressionKind; name: string; url: string; animated: boolean; ownerId: string; durationMs?: number | null; servers?: number }
+export interface ExpressionGroupDto { guildId: string; name: string; iconUrl: string | null; items: ExpressionDto[] }
+export interface UsableExpressionsDto { here: ExpressionDto[]; mine: ExpressionDto[]; others: ExpressionGroupDto[]; outside: boolean; emojis: boolean; stickers: boolean; sounds: boolean }
+export interface GuildExpressionsDto { items: ExpressionDto[]; outside: boolean; emojis: boolean; stickers: boolean; sounds: boolean; mostEmojis: number; mostStickers: number; mostSounds: number; emojiKb: number; stickerKb: number }
+export interface ExpressionLibraryDto { items: ExpressionDto[]; mostEmojis: number; mostStickers: number; mostSounds: number; emojis: boolean; stickers: boolean; sounds: boolean }
+export interface StickerDto { id: string; name: string; url: string }

@@ -48,16 +48,18 @@ export interface Appearance {
   decoration: string | null
   /** The server tag they wear beside their name, if any. */
   tag?: TagDto | null
+  /** What is drawn behind their name in lists (see nameplateLook). */
+  nameplate?: string | null
 }
 
 export const appearanceOfUser = (u: UserDto): Appearance => ({
   userId: u.id, username: u.username, displayName: u.displayName ?? null, avatarUrl: u.avatarUrl ?? null,
-  nameFont: u.nameFont ?? null, nameColor: u.nameColor ?? null, nameColor2: u.nameColor2 ?? null, nameEffect: u.nameEffect ?? null, decoration: u.decoration ?? null, tag: u.tag ?? null,
+  nameFont: u.nameFont ?? null, nameColor: u.nameColor ?? null, nameColor2: u.nameColor2 ?? null, nameEffect: u.nameEffect ?? null, decoration: u.decoration ?? null, tag: u.tag ?? null, nameplate: u.nameplate ?? null,
 })
 
 export const appearanceOfMember = (m: MemberDto): Appearance => ({
   userId: m.userId, username: m.username, displayName: m.displayName ?? null, avatarUrl: m.avatarUrl ?? null,
-  nameFont: m.nameFont ?? null, nameColor: m.nameColor ?? null, nameColor2: m.nameColor2 ?? null, nameEffect: m.nameEffect ?? null, decoration: m.decoration ?? null, tag: m.tag ?? null,
+  nameFont: m.nameFont ?? null, nameColor: m.nameColor ?? null, nameColor2: m.nameColor2 ?? null, nameEffect: m.nameEffect ?? null, decoration: m.decoration ?? null, tag: m.tag ?? null, nameplate: m.nameplate ?? null,
 })
 
 /** The name to show for someone: what they chose, or else what they registered with. */
@@ -109,6 +111,38 @@ const SERVER_PATH = /^\/api\/[A-Za-z0-9/_.-]+(\?v=\d+)?$/
  */
 export const assetUrl = (serverUrl: string, path: string | null | undefined) =>
   path && SERVER_PATH.test(path) ? serverUrl.replace(/\/$/, '') + path : null
+
+/**
+ * The nameplates every app draws itself, so there is nothing to fetch (the server's ProfileLimits.Nameplates): what
+ * is drawn behind a name in the member list, the friends list and the list of conversations. It fades in from the
+ * left, so the name stays easy to read.
+ */
+export const NAMEPLATES: { id: string; label: string; background: string }[] = [
+  { id: 'aurora', label: 'Aurora', background: 'linear-gradient(120deg, #00e5a0, #00b3ff 45%, #a855f7)' },
+  { id: 'ember', label: 'Ember', background: 'radial-gradient(circle at 88% 130%, #ffd27a 0, #ff6a1f 32%, #a3170a 62%, #3b0a05 100%)' },
+  { id: 'ocean', label: 'Ocean', background: 'radial-gradient(ellipse at 80% 0%, #7dd3fc 0, transparent 55%), linear-gradient(160deg, #0ea5e9, #1e3a8a)' },
+  { id: 'forest', label: 'Forest', background: 'linear-gradient(135deg, #14532d, #22c55e 60%, #a3e635)' },
+  { id: 'sunset', label: 'Sunset', background: 'linear-gradient(90deg, #f43f5e, #fb923c 55%, #fde047)' },
+  { id: 'galaxy', label: 'Galaxy', background: 'radial-gradient(1px 1px at 70% 30%, #fff 99%, transparent), radial-gradient(1.5px 1.5px at 84% 72%, #fff 99%, transparent), radial-gradient(1px 1px at 93% 22%, #fff 99%, transparent), radial-gradient(1px 1px at 61% 78%, #fff 99%, transparent), radial-gradient(1.5px 1.5px at 77% 52%, #fde68a 99%, transparent), linear-gradient(135deg, #1e1b4b, #6d28d9 60%, #db2777)' },
+  { id: 'sakura', label: 'Sakura', background: 'radial-gradient(circle at 78% 30%, #fff1f2 0 5%, transparent 6%), radial-gradient(circle at 90% 70%, #ffe4e6 0 4%, transparent 5%), radial-gradient(circle at 66% 75%, #fff1f2 0 3%, transparent 4%), linear-gradient(135deg, #fbcfe8, #ec4899)' },
+  { id: 'neon', label: 'Neon', background: 'linear-gradient(90deg, #ff00e1, #00f0ff)' },
+  { id: 'gold', label: 'Gold', background: 'linear-gradient(115deg, #7c5a10, #f5c542 40%, #fff3b0 50%, #f5c542 60%, #7c5a10)' },
+  { id: 'frost', label: 'Frost', background: 'linear-gradient(135deg, #e0f2fe, #7dd3fc 50%, #0284c7)' },
+  { id: 'storm', label: 'Storm', background: 'linear-gradient(100deg, transparent 72%, #fef08a 72.5%, transparent 73.5%), linear-gradient(160deg, #475569, #1e293b)' },
+  { id: 'candy', label: 'Candy', background: 'repeating-linear-gradient(135deg, #f472b6 0 12px, #fbcfe8 12px 24px)' },
+]
+
+/**
+ * How to draw someone's nameplate behind their row: the class that draws it, and what it is drawn from (one of
+ * NAMEPLATES, or their own picture, a path on the Maplecord server). Nothing for none, or one this app does not know.
+ */
+export function nameplateLook(serverUrl: string, plate: string | null | undefined): { className: string; style?: CSSProperties } {
+  if (!plate) return { className: '' }
+  const set = NAMEPLATES.find(p => p.id === plate)
+  const own = set ? null : assetUrl(serverUrl, plate)
+  if (!set && !own) return { className: '' }
+  return { className: ' plated', style: { '--plate': set ? set.background : `url("${own}") center / cover no-repeat` } as CSSProperties }
+}
 
 const DECORATION_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/
 

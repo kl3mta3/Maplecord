@@ -24,6 +24,8 @@ const CARRIES_ADDRESSES = new Set(['offer', 'answer', 'ice'])
 const unknownMethod = (e: unknown) => /does not exist|unknown hub method/i.test(e instanceof Error ? e.message : String(e))
 
 export interface VoiceEvents {
+  /** Someone in our voice channel played one of the server's sounds. */
+  SoundPlayed: (channelId: string, userId: string, expressionId: string, url: string) => void
   VoiceMoved: () => void
   VoiceRemoved: () => void
   /** Someone who may move members is moving us into another voice channel. */
@@ -265,6 +267,8 @@ export class VoiceHub {
   declineCall(callId: string) { return this.c.invoke('DeclineCall', callId) }
   signal(targetConnectionId: string, kind: 'offer' | 'answer' | 'ice', payload: string) { return this.send('Signal', 'voice', targetConnectionId, kind, payload) }
   setMuted(muted: boolean) { return this.c.invoke('SetMuted', muted) }
+  /** Plays one of the server's sounds to everyone in our voice channel. */
+  playSound(expressionId: string) { return this.c.invoke('PlaySound', expressionId) }
 
   /**
    * After the connection dropped and came back: takes back the place in voice this app had, if the server kept it

@@ -1,6 +1,6 @@
 import { CommunityPollDialog } from './CommunityPoll'
 import { TagCardDialog, onTagOpened } from './Tags'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { p2pMedia, type Store } from '../store'
 import { openSink, type TransferView } from '../transfer'
@@ -32,6 +32,9 @@ function parseRange(text: string): [number, number] | null {
 }
 import { PastedDialog, AllowDirectDialog, BanDialog, ConfirmDialog, CreateChannelDialog, DeleteGroupDialog, DirectChannelDialog, IncomingCallDialog, P2PCallDialog, NicknameDialog, PromptDialog, StartRollDialog } from './Dialogs'
 import { OverlaySettingsDialog, ServerSettingsDialog } from './Settings'
+import { ExpressionPicker, SoundboardPanel, StickerView } from './Expressions'
+import { onlyEmojis, setExpressionServer, toTokens, withEmojis } from '../expressions'
+import type { ExpressionDto, UsableExpressionsDto } from '../types'
 import Friends from './Home'
 import { serverMediaUrl } from '../itemIcons'
 import { bridge, isElectron } from '../platform'
@@ -45,9 +48,9 @@ import { DEFAULT_GATE_LEVEL, DEFAULT_NOTIFY, type NotifyLevel } from '../setting
 import { ContextMenu, type MenuEntry } from './ContextMenu'
 import type { GuildFolder } from '../settings'
 import { Avatar, ProfileEditor, ProfilePopout, ProfileColumn, UserName } from './Profile'
-import { assetUrl, initials, shownName, type Appearance } from '../profile'
+import { assetUrl, initials, nameplateLook, shownName, type Appearance } from '../profile'
 import { STATUSES, UserSettingsDialog } from './UserSettings'
-import { ArrowLeftRight, AudioLines, ChartBarDecreasing, ChevronDown, ChevronRight, HeadphoneOff, Headphones, Heart, Images, LoaderCircle, Menu, Mic, MicOff, MonitorUp, Paperclip, Phone, PhoneOff, Pin, Plus, Search, Settings as SettingsIcon, Signal, TriangleAlert, Users, Video } from 'lucide-react'
+import { ArrowLeftRight, AudioLines, ChartBarDecreasing, Smile, Sticker, Music2, ChevronDown, ChevronRight, HeadphoneOff, Headphones, Heart, Images, LoaderCircle, Menu, Mic, MicOff, MonitorUp, Paperclip, Phone, PhoneOff, Pin, Plus, Search, Settings as SettingsIcon, Signal, TriangleAlert, Users, Video } from 'lucide-react'
 import { AddServerDialog, CreateServerDialog, DiscoverDialog, JoinServerDialog } from './Servers'
 import { ChannelAccessDialog } from './ChannelAccess'
 import { InviteDialog } from './Invites'
@@ -78,6 +81,8 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   const [tagOpen, setTagOpen] = useState<string | null>(null)
   /** The warning-triangle button in the voice panel was just pressed (it lights up a moment). */
   const [gapMarked, setGapMarked] = useState(false)
+  /** The soundboard, open over the voice panel: where, and the server's sounds once known. */
+  const [soundboard, setSoundboard] = useState<{ x: number; y: number; sounds: ExpressionDto[] | null } | null>(null)
   useEffect(() => onTagOpened(setTagOpen), [])
   /**
    * On a phone there is room for one thing at a time: the channel list, the conversation, or the people in it.
@@ -316,9 +321,12 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   const [inviteBase, setInviteBase] = useState<string | null>(null)
   // Whether whoever runs this Maplecord switched the support button on: asked with the rest as the app starts.
   const [supportOn, setSupportOn] = useState(false)
+  /** Which of custom emojis, stickers and sounds this Maplecord has switched on (asked with the support button's). */
+  const [looks, setLooks] = useState({ emojis: false, stickers: false, sounds: false })
+  const soundsOn = looks.sounds
   // Asked as the new-server dialog opens, so that it offers only the kinds that can be made right now.
   const newServerKinds = useCallback(() => store.api.newServerKinds(), [store.api])
-  useEffect(() => { void store.api.meta(store.settings.serverUrl).then(meta => { setInviteBase(meta?.inviteBase ?? null); setSupportOn(!!meta?.support) }) }, [store.api, store.settings.serverUrl])
+  useEffect(() => { void store.api.meta(store.settings.serverUrl).then(meta => { setInviteBase(meta?.inviteBase ?? null); setSupportOn(!!meta?.support); setLooks({ emojis: !!meta?.emojis, stickers: !!meta?.stickers, sounds: !!meta?.sounds }) }) }, [store.api, store.settings.serverUrl])
 
   // ---- Right-click menus ------------------------------------------------------
   // What they change about other people and servers is yours alone and kept on this device; nobody is told.
@@ -337,6 +345,9 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   const [card, setCard] = useState<{ userId: string; name: string; x: number; y: number } | null>(null)
   const openCard = (e: React.MouseEvent, userId: string, name: string) => { e.stopPropagation(); if (g) store.needMembers(g.guild.id, [userId]); setCard({ userId, name, x: e.clientX + 12, y: e.clientY - 40 }) }
   const serverUrl = store.settings.serverUrl
+  setExpressionServer(serverUrl)
+  /** Someone's nameplate, drawn behind their row in the member, friends and conversation lists. */
+  const plateOf = (userId: string) => nameplateLook(serverUrl, store.appearanceOf(userId)?.nameplate)
   const mine = me ? store.appearanceOf(me.id) : null
   /** What to call a member here: their nickname on this server, else the name they chose, else their username. */
   const memberName = (m: MemberDto) => m.nickname || m.displayName || m.username
@@ -374,7 +385,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       notify('mentions', 'Only @mentions'),
       notify('none', 'Nothing'),
       { kind: 'sep' },
-      ...(allowed(Permission.ManageGuild) || allowed(Permission.ManageRoles) || allowed(Permission.ManageWebhooks) ? [{ kind: 'item', label: 'Server settings', icon: '⚙', onClick: open('server') } as MenuEntry] : []),
+      ...(allowed(Permission.ManageGuild) || allowed(Permission.ManageRoles) || allowed(Permission.ManageWebhooks) || allowed(Permission.ManageExpressions) ? [{ kind: 'item', label: 'Server settings', icon: '⚙', onClick: open('server') } as MenuEntry] : []),
       { kind: 'item', label: x.guild.ownerId === me?.id ? 'Delete server' : 'Leave server', icon: '⎋', danger: true, onClick: open('leaveGuild') },
     ]
   }
@@ -591,8 +602,8 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
               </div>
               <div className="category">Messages</div>
               {store.dms.map(d => (
-                <div key={d.channelId} className={'dm' + (d.channelId === store.selectedChannel?.id ? ' active' : '')} onClick={() => store.selectChannel(d.channelId)} onContextMenu={e => openUserMenu(e, d.other.id, shownName(d.other))}>
-                  <Avatar who={d.other} name={shownName(d.other)} serverUrl={serverUrl} size={24} />
+                <div key={d.channelId} className={'dm' + (d.channelId === store.selectedChannel?.id ? ' active' : '') + plateOf(d.other.id).className} style={plateOf(d.other.id).style} onClick={() => store.selectChannel(d.channelId)} onContextMenu={e => openUserMenu(e, d.other.id, shownName(d.other))}>
+                  <Avatar who={d.other} name={shownName(d.other)} serverUrl={serverUrl} size={32} />
                   <span className={'presence' + (!d.online ? '' : store.dndUsers.has(d.other.id) ? ' online dnd' : store.idleUsers.has(d.other.id) ? ' online idle' : ' online')} />
                   <span className="grow nameline" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: (store.dmUnread[d.channelId] ?? 0) > 0 ? 600 : undefined }}><UserName who={store.appearanceOf(d.other.id)} label={shownName(d.other)} /></span>
                   {(store.dmUnread[d.channelId] ?? 0) > 0 && <span className="badge">{store.dmUnread[d.channelId]}</span>}
@@ -604,7 +615,8 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
         ) : (
           <>
             {/* Left- or right-click the server name for everything you can do with this server. */}
-            <div className={'header serverheader' + (serverMenu ? ' open' : '')} title={g ? 'Server menu' : undefined}
+            <div className={'header serverheader' + (serverMenu ? ' open' : '') + (g?.guild.bannerUrl ? ' withbanner' : '')} title={g ? 'Server menu' : undefined}
+              style={g?.guild.bannerUrl ? { backgroundImage: `url("${g.guild.bannerUrl}")` } : undefined}
               onClick={() => g && setServerMenu(open => !open)} onContextMenu={e => { e.preventDefault(); if (g) setServerMenu(true) }}>
               <span className="grow" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g?.guild.name ?? 'No server'}</span>
               {g && <span className="chevron">{serverMenu ? '✕' : '▾'}</span>}
@@ -612,7 +624,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
             {serverMenu && g && (() => {
               const pick = (action: () => void) => () => { setServerMenu(false); action() }
               const owner = g.guild.ownerId === me?.id
-              const settings = can(Permission.ManageGuild) || can(Permission.ManageRoles) || can(Permission.ManageWebhooks)
+              const settings = can(Permission.ManageGuild) || can(Permission.ManageRoles) || can(Permission.ManageWebhooks) || can(Permission.ManageExpressions)
               return (
                 <>
                   <div className="menubackdrop" onClick={() => setServerMenu(false)} onContextMenu={e => { e.preventDefault(); setServerMenu(false) }} />
@@ -722,6 +734,13 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
               <div className="vstate">{/* Recording for a voice report: the moment a gap was heard goes into it. */}{store.settings.voiceRecord && <button className={'markgap' + (gapMarked ? ' on' : '')} title={gapMarked ? 'Marked' : 'Just heard sound drop out? Press this to mark it, then copy the voice report from Voice & audio settings.'} onClick={e => { e.stopPropagation(); store.markVoiceGap(); setGapMarked(true); window.setTimeout(() => setGapMarked(false), 1200) }}><TriangleAlert size={12} /></button>}{voice.directSince ? (voice.policy === 'relay' ? 'P2P · through the relay' : 'P2P · using your IP') : inCall ? (inCall.phase === 'calling' ? 'Calling…' : 'In a call') : 'Voice connected'}</div>
               <div className="muted vwhere">{voiceGuild ? voiceGuild + ' / ' : ''}{voiceChannelName}{voiceDetail ? ' · ' + voiceDetail : ''}</div>
             </div>
+            {soundsOn && voice.guildId && !inCall && (
+              <button className={'iconbtn' + (soundboard ? ' on' : '')} title="Soundboard" aria-label="Soundboard" onClick={e => {
+                const r = e.currentTarget.getBoundingClientRect()
+                setSoundboard({ x: r.left + r.width / 2, y: r.top, sounds: null })
+                void store.usableExpressions(voice.channelId).then(u => setSoundboard(open => open && { ...open, sounds: u.here.filter(x => x.kind === 2) }))
+              }}><Music2 size={17} /></button>
+            )}
             <button className={'iconbtn' + (store.sharing === 'camera' ? ' on' : '')} onClick={() => void toggleCamera()} title={store.sharing === 'camera' ? 'Turn your camera off' : 'Turn your camera on'}><Video size={17} /></button>
             <button className={'iconbtn' + (screenSharing ? ' on' : '')} disabled={!canShareScreen && !screenSharing}
               title={screenSharing ? 'Stop sharing' : canShareScreen ? 'Share an app or a screen' : 'This browser cannot share its screen. Your camera can still be shared.'}
@@ -792,7 +811,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
             <div className="header">Friends <span className="muted">{store.friends.friends.filter(f => f.online).length} online</span></div>
             <div className="list">
               {[...store.friends.friends].sort((a, b) => Number(b.online) - Number(a.online) || a.user.username.localeCompare(b.user.username)).map(f => (
-                <div key={f.user.id} className={'member' + (f.online ? ' online' : ' offline') + (f.online && store.dndUsers.has(f.user.id) ? ' dnd' : f.online && store.idleUsers.has(f.user.id) ? ' idle' : '')} title="Click to message · right-click for options" onClick={() => store.openDm(f.user.id)} onContextMenu={e => openUserMenu(e, f.user.id, shownName(f.user))}>
+                <div key={f.user.id} className={'member' + (f.online ? ' online' : ' offline') + (f.online && store.dndUsers.has(f.user.id) ? ' dnd' : f.online && store.idleUsers.has(f.user.id) ? ' idle' : '') + plateOf(f.user.id).className} style={plateOf(f.user.id).style} title="Click to message · right-click for options" onClick={() => store.openDm(f.user.id)} onContextMenu={e => openUserMenu(e, f.user.id, shownName(f.user))}>
                   <div className="row" style={{ gap: 0 }}><Avatar who={f.user} name={shownName(f.user)} serverUrl={serverUrl} size={28} /><div className="presence" /></div>
                   <div className="grow nameline" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><UserName who={store.appearanceOf(f.user.id)} label={shownName(f.user)} /></div>
                 </div>
@@ -810,7 +829,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
                 {/* In a large server the offline group is the offline people read so far, and says so. */}
                 <div className="membergroup">{group.name} {!(group.key === 'found' && group.members.length === 0) && <span>— {group.members.length}{g.membersPartial && group.key === 'offline' ? ' shown' : ''}</span>}</div>
                 {group.members.map(m => (
-                <div key={m.userId} className={'member' + (m.online ? ' online' : ' offline') + (m.online && store.dndUsers.has(m.userId) ? ' dnd' : m.online && store.idleUsers.has(m.userId) ? ' idle' : '') + (ignored(m.userId) ? ' ignoredmember' : '')} title={'@' + m.username + ' — click for profile, right-click for options'}
+                <div key={m.userId} className={'member' + (m.online ? ' online' : ' offline') + (m.online && store.dndUsers.has(m.userId) ? ' dnd' : m.online && store.idleUsers.has(m.userId) ? ' idle' : '') + (ignored(m.userId) ? ' ignoredmember' : '') + plateOf(m.userId).className} style={plateOf(m.userId).style} title={'@' + m.username + ' — click for profile, right-click for options'}
                   onClick={e => openCard(e, m.userId, memberName(m))} onContextMenu={e => openUserMenu(e, m.userId, memberName(m))}>
                   <div className="row" style={{ gap: 0 }}><Avatar who={m} name={memberName(m)} serverUrl={serverUrl} size={28} /><div className="presence" /></div>
                   <div className="grow" style={{ overflow: 'hidden' }}>
@@ -842,7 +861,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       )}
       {store.pendingInvite && (
         <ConfirmDialog title={`Join ${store.pendingInvite.name}?`}
-          message={`You followed an invite to ${store.pendingInvite.name} (${store.pendingInvite.members} ${store.pendingInvite.members === 1 ? 'member' : 'members'}).`}
+          message={`You followed ${store.pendingInvite.publicId ? 'a link' : 'an invite'} to ${store.pendingInvite.name}${store.pendingInvite.publicId ? ', a public server' : ''} (${store.pendingInvite.members} ${store.pendingInvite.members === 1 ? 'member' : 'members'}).`}
           onConfirm={() => void store.acceptInvite()} onClose={store.dismissInvite} />
       )}
       {dialog?.kind === 'channelAccess' && g && g.channels.find(c => c.id === dialog.channelId) && (
@@ -924,6 +943,14 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       {dialog?.kind === 'ban' && <BanDialog name={dialog.member.username} onBan={deleteDays => store.banMember(dialog.member, deleteDays)} onClose={() => setDialog(null)} />}
       {supportOn && <button className="supportbtn" title="Support Maplecord" onClick={() => setDialog({ kind: 'support' })}><Heart size={13} /> Support</button>}
       {dialog?.kind === 'support' && <SupportDialog api={store.api} onClose={() => setDialog(null)} />}
+      {soundboard && (
+        <SoundboardPanel x={soundboard.x} y={soundboard.y} server={voiceGuild ?? 'This server'} sounds={soundboard.sounds} favorites={store.settings.soundFavorites ?? []}
+          onFavorite={(id, on) => store.updateSettings({ soundFavorites: on ? [...(store.settings.soundFavorites ?? []).filter(x => x !== id), id] : (store.settings.soundFavorites ?? []).filter(x => x !== id) })}
+          volume={store.settings.soundboardVolume ?? 0.6} muted={!!store.settings.soundboardMuted}
+          onPlay={sound => void store.playSoundboard(sound.id)}
+          onVolume={v => store.updateSettings({ soundboardVolume: v })} onMute={m => store.updateSettings({ soundboardMuted: m })}
+          onClose={() => setSoundboard(null)} />
+      )}
       {dialog?.kind === 'share' && <SharePicker store={store} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'allowDirect' && <AllowDirectStep store={store} onClose={() => setDialog({ kind: 'audio' })} />}
       {dialog?.kind === 'channelKind' && (
@@ -966,12 +993,13 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       )}
       {dialog?.kind === 'overlay' && (
         <OverlaySettingsDialog settings={store.settings} onChange={store.updateSettings} packs={soundPackNames(store.soundPacks)}
-          onOpenSounds={store.openSoundsFolder} onReloadSounds={store.reloadSoundPacks} onClose={() => setDialog(null)} />
+          onOpenSounds={store.openSoundsFolder} onReloadSounds={store.reloadSoundPacks} onImport={store.importSoundPack} onDelete={store.deleteSoundPack}
+          loadSounds={store.reachableSounds} onClose={() => setDialog(null)} />
       )}
       {dialog?.kind === 'server' && g && (
         <ServerSettingsDialog api={store.api} channels={g.channels} guild={g.guild} roles={g.roles ?? []} members={g.members} myPermissions={myPerms} meId={me?.id ?? ''}
           findMembers={g.membersPartial ? q => store.findMembers(g.guild.id, q) : undefined} moreMembers={g.membersPartial && !store.membersEnded[g.guild.id] ? () => void store.loadMoreMembers(g.guild.id) : undefined}
-          onHideOwner={store.setGuildHideOwner} onRename={store.renameGuild} onIcon={store.setGuildIcon} onListing={store.setGuildListing} tagSymbols={store.tagSymbols} onSetTag={store.setGuildTag} onRemoveTag={store.removeGuildTag} onCountRolls={store.setGuildCountRolls} onWelcome={store.setGuildWelcome} onCreateRole={store.createRole} onUpdateRole={store.updateRole} onDeleteRole={store.deleteRole} onSetMemberRoles={store.setMemberRoles}
+          onHideOwner={store.setGuildHideOwner} onRename={store.renameGuild} onIcon={store.setGuildIcon} onBanner={store.setGuildBanner} onOutside={store.setGuildOutside} onExpressionsChanged={store.forgetUsable} onListing={store.setGuildListing} tagSymbols={store.tagSymbols} onSetTag={store.setGuildTag} onRemoveTag={store.removeGuildTag} onCountRolls={store.setGuildCountRolls} onWelcome={store.setGuildWelcome} onCreateRole={store.createRole} onUpdateRole={store.updateRole} onDeleteRole={store.deleteRole} onSetMemberRoles={store.setMemberRoles}
           onClose={() => setDialog(null)} />
       )}
       {store.directPrompt && (
@@ -1022,6 +1050,33 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
   const p2pPlace = !!channel && channel.type === ChannelType.DirectMessage && store.dms.some(d => d.channelId === channel.id && store.friends.friends.some(f => f.user.id === d.other.id))
   // A P2P channel on a server: what is typed goes straight between apps, and only text travels that way so far.
   const p2pChat = !!channel && channel.type !== ChannelType.DirectMessage && channel.directSince != null
+  /** The emoji and sticker picker over the message box: where, which tab, and what may be used here. */
+  const [exprPicker, setExprPicker] = useState<{ x: number; y: number; tab: 'emoji' | 'sticker'; usable: UsableExpressionsDto | null } | null>(null)
+  /** Emojis picked into the message box by name: the one picked wins over any other of that name. */
+  const pickedEmojis = useRef(new Map<string, ExpressionDto>())
+  const [usableHere, setUsableHere] = useState<UsableExpressionsDto | null>(null)
+  useEffect(() => {
+    setUsableHere(null)
+    if (!channel?.id || p2pChat) return
+    let alive = true
+    void store.usableExpressions(channel.id).then(u => { if (alive) setUsableHere(u) })
+    return () => { alive = false }
+  }, [channel?.id, p2pChat, store.usableExpressions]) // eslint-disable-line react-hooks/exhaustive-deps
+  /** The "+" beside the message box: what it opens (see the composer). */
+  const [plusOpen, setPlusOpen] = useState(false)
+  const plusRef = useRef<HTMLButtonElement>(null)
+  const openExprPicker = (e: React.MouseEvent, tab: 'emoji' | 'sticker') => {
+    // Opened from the "+" menu: placed over the box, starting from the "+", as the menu is gone by then.
+    const r = (plusRef.current ?? e.currentTarget).getBoundingClientRect()
+    setExprPicker({ x: r.left, y: r.top, tab, usable: p2pChat ? null : usableHere })
+    if (!p2pChat && channel) void store.usableExpressions(channel.id).then(u => setExprPicker(open => open && { ...open, usable: u }))
+  }
+  /** What is sent: the box's text with each :name: of an emoji one may use here made into it. */
+  const withPicked = (value: string): string => {
+    if (p2pChat || !usableHere) return value
+    const picked = [...pickedEmojis.current.values()]
+    return toTokens(value, { ...usableHere, here: [...picked, ...usableHere.here] })
+  }
   const p2p = p2pChat && store.p2pText?.channelId === channel?.id ? store.p2pText : null
   const kept = !!channel && !p2pChat
   const thread = kept ? store.thread : null
@@ -1188,9 +1243,19 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
     }
     const answering = replyingTo
     setReplyingTo(null)
-    await store.sendMessage(value, null, { replyToId: answering?.id ?? null })
+    const sent = withPicked(value)
+    pickedEmojis.current.clear()
+    await store.sendMessage(sent, null, { replyToId: answering?.id ?? null })
   }
 
+  /** The usual reactions, then the custom emojis one may use here. */
+  const withCustomReactions = useCallback(async () => {
+    const usual = await store.reactionChoices()
+    const u = channel?.id ? await store.usableExpressions(channel.id) : null
+    if (!u?.emojis) return usual
+    const custom = [...u.here, ...(u.outside ? [...u.mine, ...u.others.flatMap(g => g.items)] : [])].filter(e => e.kind === 0)
+    return [...usual, ...custom.map(e => `<:${e.name}:${e.id}>`)]
+  }, [store.reactionChoices, store.usableExpressions, channel?.id]) // eslint-disable-line react-hooks/exhaustive-deps
   const nameOfMessage = (m: MessageDto) => (m.webhookId ? m.authorName : nameIn(m.authorId, m.authorName))
   const goTo = (m: MessageDto) => { if (!postsList && shown.some(x => x.id === m.id)) store.setHighlight(m.id); else void (p2pChat ? store.jumpP2p(m) : store.jumpTo(m)) }
   const reactTo = (id: string, emoji: string, on: boolean) => void (p2pChat ? store.reactP2p(id, emoji, on) : store.react(id, emoji, on))
@@ -1406,7 +1471,21 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
         <ConfirmDialog title={p2pChat ? 'Remove this message from this device?' : 'Delete this message?'} message={p2pChat ? 'Only your own copy is removed. Everyone else who received it keeps theirs.' : deleting.authorId === me?.id ? 'It is removed for everyone and cannot be brought back.' : `This removes ${nameIn(deleting.authorId, deleting.authorName)}'s message for everyone. It cannot be brought back.`}
           onConfirm={() => void store.deleteMessage(deleting.id)} onClose={() => setDeleting(null)} />
       )}
-      {picker && <ReactionPicker x={picker.x} y={picker.y} choices={p2pChat ? p2pReactionChoices : store.reactionChoices} onClose={() => setPicker(null)}
+      {exprPicker && (
+        <ExpressionPicker x={exprPicker.x} y={exprPicker.y} fromLeft usable={exprPicker.usable} startOn={exprPicker.tab} unicode={QUICK_EMOJI}
+          onEmoji={picked => {
+            const insert = typeof picked === 'string' ? picked : `:${picked.name}:`
+            if (typeof picked !== 'string') pickedEmojis.current.set(picked.name.toLowerCase(), picked)
+            const box = boxRef.current
+            const at = box?.selectionStart ?? text.length
+            const next = text.slice(0, at) + insert + text.slice(box?.selectionEnd ?? at)
+            setText(next)
+            window.setTimeout(() => { box?.focus(); box?.setSelectionRange(at + insert.length, at + insert.length) })
+          }}
+          onSticker={kept ? sticker => void store.sendSticker(sticker.id) : undefined}
+          onClose={() => setExprPicker(null)} />
+      )}
+      {picker && <ReactionPicker x={picker.x} y={picker.y} choices={p2pChat ? p2pReactionChoices : withCustomReactions} onClose={() => setPicker(null)}
         onPick={emoji => {
           const m = shown.find(x => x.id === picker.id)
           if (!m) return
@@ -1541,15 +1620,36 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
         ) : (
         <div className="composer">
           <input ref={fileRef} type="file" hidden onChange={async e => { const f = e.target.files?.[0]; if (f) await store.sendFile(f); e.target.value = '' }} />
-          <button title={store.uploading ? `Sending ${store.uploading}…` : p2pChat ? 'Send a picture or a file to the people in this channel' : 'Send a file'} onClick={() => fileRef.current?.click()}
-            disabled={!channel || !!store.uploading || (p2pChat && p2p?.state !== 'on')}>{store.uploading ? <LoaderCircle size={17} className="spin" /> : <Paperclip size={17} />}</button>
           <input ref={directRef} type="file" hidden onChange={async e => { const f = e.target.files?.[0]; if (f) await store.offerFile(f); e.target.value = '' }} />
-          {canRecordVoiceMessage() && !p2pChat && (
-            <button title={voiceBusy ? 'Leave voice to record a voice message on this device' : 'Record a voice message'} aria-label="Record a voice message"
-              onClick={() => void startVoiceMessage()} disabled={!channel || !!store.uploading || voiceBusy}><AudioLines size={17} /></button>
-          )}
-          {canSendDirect && <button title={directSendTitle} aria-label="Send a file straight from your computer" onClick={() => directRef.current?.click()} disabled={!channel}><ArrowLeftRight size={17} /></button>}
-          {((kept && !thread && channel?.type !== ChannelType.Gallery) || (p2p?.state === 'on' && (p2pTalk ? !p2pRoot : P2P_GALLERY_POLLS && !!p2pRoot))) && <button title={p2pGallery ? 'Ask a poll about this post' : 'Start a poll'} aria-label="Start a poll" onClick={() => setPanel('poll')} disabled={!channel}><ChartBarDecreasing size={17} /></button>}
+          {/* One "+" for everything besides typing: it opens a short menu over the box. */}
+          <span className="plus">
+            <button ref={plusRef} className={plusOpen ? 'on' : ''} title={store.uploading ? `Sending ${store.uploading}…` : 'Files, voice messages, polls, emojis and more'} aria-label="Files, voice messages, polls, emojis and more"
+              aria-haspopup="menu" aria-expanded={plusOpen} onClick={() => setPlusOpen(open => !open)} disabled={!channel}>
+              {store.uploading ? <LoaderCircle size={18} className="spin" /> : <Plus size={18} />}
+            </button>
+            {plusOpen && (() => {
+              const pick = (act: (e: React.MouseEvent) => void) => (e: React.MouseEvent) => { setPlusOpen(false); act(e) }
+              return (
+                <>
+                  <div className="menubackdrop" onClick={() => setPlusOpen(false)} />
+                  <div className="menu plusmenu" role="menu">
+                    <button role="menuitem" className="item" onClick={pick(() => fileRef.current?.click())} disabled={!!store.uploading || (p2pChat && p2p?.state !== 'on')}>
+                      <Paperclip size={16} /><span>{p2pChat ? 'Send a picture or a file' : 'Send a file'}</span></button>
+                    {canRecordVoiceMessage() && !p2pChat && (
+                      <button role="menuitem" className="item" onClick={pick(() => void startVoiceMessage())} disabled={!!store.uploading || voiceBusy} title={voiceBusy ? 'Leave voice to record a voice message on this device' : undefined}>
+                        <AudioLines size={16} /><span>Voice message</span></button>
+                    )}
+                    {canSendDirect && <button role="menuitem" className="item" title={directSendTitle} onClick={pick(() => directRef.current?.click())}><ArrowLeftRight size={16} /><span>Send straight from your computer</span></button>}
+                    {((kept && !thread && channel?.type !== ChannelType.Gallery) || (p2p?.state === 'on' && (p2pTalk ? !p2pRoot : P2P_GALLERY_POLLS && !!p2pRoot))) && (
+                      <button role="menuitem" className="item" onClick={pick(() => setPanel('poll'))}><ChartBarDecreasing size={16} /><span>{p2pGallery ? 'Ask a poll about this post' : 'Poll'}</span></button>
+                    )}
+                    <button role="menuitem" className="item" onClick={pick(e => openExprPicker(e, 'emoji'))}><Smile size={16} /><span>Emojis</span></button>
+                    {!p2pChat && kept && usableHere?.stickers && <button role="menuitem" className="item" onClick={pick(e => openExprPicker(e, 'sticker'))}><Sticker size={16} /><span>Stickers</span></button>}
+                  </div>
+                </>
+              )
+            })()}
+          </span>
           <textarea ref={boxRef}
             placeholder={!channel ? '' : p2pRoot ? (p2pGallery ? 'Say something about this post  ·  P2P' : 'Reply in this thread  ·  P2P') : thread ? (isPostsChannel(channel) ? 'Say something about this post' : 'Reply in this thread') : p2pChat ? `Message #${channel.name}  ·  P2P` : `Message ${channel.type === ChannelType.DirectMessage ? '@' : '#'}${channel.name}`}
             value={text} disabled={!channel || (p2pChat && p2p?.state !== 'on')} rows={1}
@@ -1571,6 +1671,9 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
   )
 }
 
+/** Ordinary emojis offered in the message box's picker. */
+const QUICK_EMOJI = ['😀', '😂', '🥲', '😊', '😍', '😎', '🤔', '😮', '😢', '😡', '👍', '👎', '👏', '🙏', '💪', '🔥', '✨', '🎉', '❤️', '💔', '💯', '✅', '❌', '⚔️', '🛡️', '🏹', '🎲', '🪙', '💰', '🍕', '☕', '🌙']
+
 /** An invite link somewhere in a message: this server's invite page, or the app's own kind of link. */
 const INVITE_LINK = /(https?:\/\/[^\s<>"']+\/(?:invite|add)\/[A-Za-z0-9]{4,32}(?:\?[^\s<>"']*)?|https?:\/\/[^\s<>"']+\/event\/[0-9a-fA-F-]{36}(?:\?[^\s<>"']*)?|maplecord:\/\/(?:invite|add|event)\/[^\s<>"']+)/g
 
@@ -1585,7 +1688,7 @@ const TRAILING = /[.,;:!?)\]}'"]+$/
  * itself, so it leads where it says. Nothing is fetched by showing it: there are no previews.
  */
 function withInviteLinks(text: string, open?: (link: string) => void): React.ReactNode {
-  if (!text.includes('://')) return text
+  if (!text.includes('://')) return withEmojis(text, onlyEmojis(text))
   const out: React.ReactNode[] = []
   // split() with one capturing group puts the invite links at the odd places.
   ;(open ? text.split(INVITE_LINK) : [text]).forEach((part, i) => {
@@ -1594,7 +1697,7 @@ function withInviteLinks(text: string, open?: (link: string) => void): React.Rea
       return
     }
     part.split(WEB_LINK).forEach((piece, j) => {
-      if (j % 2 === 0) { if (piece) out.push(piece); return }
+      if (j % 2 === 0) { if (piece) out.push(<Fragment key={'t' + i + '-' + j}>{withEmojis(piece)}</Fragment>); return }
       const tail = TRAILING.exec(piece)?.[0] ?? ''
       const address = tail ? piece.slice(0, -tail.length) : piece
       let ok = false
@@ -1705,6 +1808,8 @@ function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu,
           ) : m.markdown && !extras?.editor ? (
             // A forum post written in Markdown: drawn, where any other text is shown exactly as typed.
             <div className="body"><Markdown text={m.content} />{m.editedAt && <span className="edited muted" title={`Edited ${new Date(m.editedAt).toLocaleString()}`}> (edited)</span>}</div>
+          ) : m.sticker && !extras?.editor ? (
+            <StickerView name={m.sticker.name} url={m.sticker.url} />
           ) : extras?.editor ?? <div className="body">{withInviteLinks(m.content, onInvite)}{m.editedAt && <span className="edited muted" title={`Edited ${new Date(m.editedAt).toLocaleString()}`}> (edited)</span>}</div>}
         {m.attachments.map(a => <AttachmentView key={a.id} file={a} pictures={extras?.pictures} />)}
         {p2pFiles}

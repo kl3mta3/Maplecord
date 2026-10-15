@@ -123,6 +123,9 @@ export interface MaplecordBridge {
   // the user's own sound packs
   soundPacks(): Promise<SoundPack[]>
   soundsOpenFolder(): Promise<unknown>
+  /** Saves a pack read from a zip as a folder of its own; its name, or null if nothing in it could be used. */
+  soundsImport?(name: string, files: { event: string; ext: string; data: Uint8Array }[]): Promise<string | null>
+  soundsDelete?(name: string): Promise<boolean>
 }
 
 declare global {

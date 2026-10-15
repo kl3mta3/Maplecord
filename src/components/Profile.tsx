@@ -3,7 +3,7 @@ import { ProfileConnections } from './Connections'
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
 // The "light" player draws to SVG only and has no expression support, so an animation file cannot run script.
 import lottie, { type AnimationItem } from 'lottie-web/build/player/lottie_light'
-import { NAME_FONTS, animationColors, assetUrl, decorationUrl, initials, nameLook, nameStyle, shownName, withAnimationColors, type Appearance } from '../profile'
+import { NAME_FONTS, NAMEPLATES, animationColors, assetUrl, decorationUrl, initials, nameLook, nameStyle, nameplateLook, shownName, withAnimationColors, type Appearance } from '../profile'
 import { NameEffectEditor } from './NameEffects'
 import { nameContent } from './NameLetters'
 import type { Store } from '../store'
@@ -264,6 +264,7 @@ export function ProfileEditor({ store, onClose }: { store: Store; onClose: () =>
   const bannerInput = useRef<HTMLInputElement>(null)
   const decorationInput = useRef<HTMLInputElement>(null)
   const effectInput = useRef<HTMLInputElement>(null)
+  const plateInput = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!me) return
@@ -277,7 +278,7 @@ export function ProfileEditor({ store, onClose }: { store: Store; onClose: () =>
 
   // Always build on the latest draft, so two changes close together (or an upload finishing mid-edit) cannot drop one.
   const set = (patch: Partial<UserProfileDto>) => setDraft(d => (d ? { ...d, ...patch } : d))
-  const dirty = (['displayName', 'bio', 'pronouns', 'accentColor', 'nameFont', 'nameColor', 'nameColor2', 'nameEffect', 'decoration', 'effect'] as const).some(k => (draft[k] ?? '') !== (saved[k] ?? ''))
+  const dirty = (['displayName', 'bio', 'pronouns', 'accentColor', 'nameFont', 'nameColor', 'nameColor2', 'nameEffect', 'decoration', 'effect', 'nameplate'] as const).some(k => (draft[k] ?? '') !== (saved[k] ?? ''))
   const shown = draft.displayName?.trim() || draft.username
 
   const save = async () => {
@@ -287,6 +288,8 @@ export function ProfileEditor({ store, onClose }: { store: Store; onClose: () =>
       const p = await store.saveProfile({
         displayName: draft.displayName ?? '', bio: draft.bio ?? '', pronouns: draft.pronouns ?? '', accentColor: draft.accentColor ?? '',
         nameFont: draft.nameFont ?? '', nameColor: draft.nameColor ?? '', nameColor2: draft.nameColor2 ?? '', nameEffect: draft.nameEffect ?? '', decoration: draft.decoration ?? '', effect: draft.effect ?? '',
+        // One's own picture is worn as "own"; the server answers with where it is.
+        nameplate: draft.nameplate && draft.nameplate === draft.ownNameplate ? 'own' : draft.nameplate ?? '',
       })
       setSaved(p); setDraft(p); setNote('Saved.')
     } catch (e) { setNote(e instanceof Error ? e.message : String(e)) }
@@ -318,6 +321,28 @@ export function ProfileEditor({ store, onClose }: { store: Store; onClose: () =>
       else setDraft(d => (d ? { ...d, ...own, effect: file ? p.effect : d.effect === was ? null : d.effect } : d))
     } catch (e) { setNote(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
+  }
+
+  // A nameplate picture of your own is stored, and worn, the moment it is chosen, like a picture. Taking it away
+  // leaves you with none if you were wearing it.
+  const ownPlate = async (file: File | null) => {
+    setBusy(true); setNote('')
+    try {
+      const was = draft.ownNameplate
+      const p = await store.setOwnNameplate(file)
+      setSaved(v => (v ? { ...v, ownNameplate: p.ownNameplate ?? null, nameplate: p.nameplate ?? null } : v))
+      setDraft(d => (d ? { ...d, ownNameplate: p.ownNameplate ?? null, nameplate: file ? p.nameplate ?? null : d.nameplate === was ? null : d.nameplate } : d))
+    } catch (e) { setNote(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+  const plateChoice = (id: string | null, label: string) => {
+    const look = nameplateLook(serverUrl, id)
+    const on = (draft.nameplate ?? null) === id
+    return (
+      <button key={id ?? 'none'} className={'platechoice' + look.className + (on ? ' sel' : '')} style={look.style} title={label} aria-pressed={on} onClick={() => set({ nameplate: id })}>
+        <UserName who={{ ...draft, userId: draft.id }} label={shown} /><small>{label}</small>
+      </button>
+    )
   }
 
   // A tag is worn, like a picture, the moment it is chosen.
@@ -433,6 +458,19 @@ export function ProfileEditor({ store, onClose }: { store: Store; onClose: () =>
           {colorsOf('avatar')}
           {ownRow('avatar')}
 
+          <div className="muted">Nameplate <span>— drawn behind your name in member lists, friends lists and conversation lists</span></div>
+          <div className="plategrid">
+            {plateChoice(null, 'None')}
+            {NAMEPLATES.map(p => plateChoice(p.id, p.label))}
+            {draft.ownNameplate && plateChoice(draft.ownNameplate, 'Yours')}
+          </div>
+          <div className="row" style={{ flexWrap: 'wrap' }}>
+            <button disabled={busy} onClick={() => plateInput.current?.click()}>{draft.ownNameplate ? 'Replace your own' : 'Upload your own'}</button>
+            {draft.ownNameplate && <button className="subtle" disabled={busy} onClick={() => void ownPlate(null)}>Remove yours</button>}
+            <span className="muted">PNG, JPEG, WebP or an animated GIF, up to 256 KB. Wide works best, like 600 × 100; the left side fades out behind your name.</span>
+            <input ref={plateInput} type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden onChange={e => { const f = e.target.files?.[0]; if (f) void ownPlate(f); e.target.value = '' }} />
+          </div>
+
           <div className="muted">Server tag <span>— shown beside your name everywhere, and tells people you are in that server</span></div>
           <select aria-label="Server tag" value={draft.tag?.guildId ?? ''} disabled={busy} onChange={e => void wear(e.target.value || null)}>
             <option value="">None</option>
@@ -456,6 +494,16 @@ export function ProfileEditor({ store, onClose }: { store: Store; onClose: () =>
             <Avatar who={draft} name={shown} serverUrl={serverUrl} size={32} animate="always" />
             <div><UserName who={{ ...draft, userId: draft.id }} label={shown} className="name" /> <span className="muted">in chat</span><div>gg, nice roll!</div></div>
           </div>
+          {(() => {
+            const look = nameplateLook(serverUrl, draft.nameplate)
+            return (
+              <div className={'member online platepreview' + look.className} style={look.style}>
+                <div className="row" style={{ gap: 0 }}><Avatar who={draft} name={shown} serverUrl={serverUrl} size={28} /><div className="presence" /></div>
+                <div className="grow nameline"><UserName who={{ ...draft, userId: draft.id }} label={shown} /></div>
+                <span className="muted small">in a list</span>
+              </div>
+            )
+          })()}
         </div>
       </div>
       <div className="buttons" style={{ alignItems: 'center' }}>

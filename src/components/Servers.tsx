@@ -184,17 +184,18 @@ export function DiscoverDialog({ api, onJoin, onOpen, onBack, onClose }: {
 }
 
 /** Server settings: whether the server is public, and what the list of public servers says about it. */
-export function ListingSettings({ isPublic, description, topics, onSave }: {
-  isPublic: boolean; description: string; topics: string[]
-  onSave: (patch: { isPublic: boolean; description: string; topics: string[] }) => Promise<void>
+export function ListingSettings({ isPublic, description, topics, featurable, onSave }: {
+  isPublic: boolean; description: string; topics: string[]; featurable: boolean
+  onSave: (patch: { isPublic: boolean; description: string; topics: string[]; featurable: boolean }) => Promise<void>
 }) {
   const [open, setOpen] = useState(isPublic)
+  const [feature, setFeature] = useState(featurable)
   const [about, setAbout] = useState(description)
   const [tags, setTags] = useState(topics.join(', '))
   const [saved, setSaved] = useState(false)
   const list = tags.split(',').map(t => t.trim()).filter(Boolean)
-  const changed = open !== isPublic || about.trim() !== description || list.join(',').toLowerCase() !== topics.join(',')
-  const save = async () => { await onSave({ isPublic: open, description: about.trim(), topics: list }); setSaved(true); window.setTimeout(() => setSaved(false), 1500) }
+  const changed = open !== isPublic || about.trim() !== description || list.join(',').toLowerCase() !== topics.join(',') || feature !== featurable
+  const save = async () => { await onSave({ isPublic: open, description: about.trim(), topics: list, featurable: feature }); setSaved(true); window.setTimeout(() => setSaved(false), 1500) }
   return (
     <div className="listing">
       <div className="muted">Who can join</div>
@@ -204,6 +205,10 @@ export function ListingSettings({ isPublic, description, topics, onSave }: {
       <textarea rows={2} maxLength={300} value={about} onChange={e => setAbout(e.target.value)} aria-label="Server description" />
       <div className="muted">Topics, separated by commas (up to 5), for example: maplestory, raids, casual</div>
       <input value={tags} onChange={e => setTags(e.target.value)} aria-label="Server topics" />
+      {open && (
+        <label className="choice"><input type="checkbox" checked={feature} onChange={e => setFeature(e.target.checked)} />
+          <span><b>Can be featured</b> <span className="muted">This server can be picked as the server of the week or the daily pick on the Maplecord website, which shows its name, icon, banner, description, topics and member count, with a link to join.</span></span></label>
+      )}
       <div className="row"><button className="accent" disabled={!changed} onClick={() => void save()}>{saved ? 'Saved' : 'Save'}</button></div>
     </div>
   )

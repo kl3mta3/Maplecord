@@ -4,7 +4,7 @@ import http from 'node:http'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { PluginHost } from './plugins'
-import { listSoundPacks, resolveSound } from './soundPacks'
+import { deletePack, listSoundPacks, resolveSound, savePack, type PackFileIn } from './soundPacks'
 import { FileCache, respondWithFile } from './fileCache'
 import { SaveStreams } from './saveStreams'
 import { OfferedFiles } from './offeredFiles'
@@ -354,6 +354,9 @@ function registerPluginProtocol() {
 const soundsDirectory = () => path.join(app.getPath('userData'), 'sounds')
 handle('sound-packs', () => listSoundPacks(soundsDirectory()))
 handle('sounds-open-folder', () => { fs.mkdirSync(soundsDirectory(), { recursive: true }); return shell.openPath(soundsDirectory()) })
+// A pack imported from a zip (read in the window): its files, saved as a folder of their own.
+handle('sounds-import', (_event, name: string, files: PackFileIn[]) => savePack(soundsDirectory(), name, Array.isArray(files) ? files : []))
+handle('sounds-delete', (_event, name: string) => deletePack(soundsDirectory(), name))
 
 handle('plugins-list', () => plugins.list())
 handle('plugins-reload', () => plugins.reload())

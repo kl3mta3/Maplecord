@@ -1,5 +1,5 @@
 import type {
-  AccountDeletionDto, MemberPageDto, ConnectionTestDto, ConnectionTestPassDto, TestRelayDto, CommunityPollDto, CommunityPollAnswerDto, CalendarEventDto, ApplicationDto, CommandRuleDto, CommandRulesDto, QrDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, NewServerKinds, SupportReportDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto, RollStatsDto, SearchResultDto, MediaItemDto, SignInMethodsDto, ContactEmailDto, ConnectionDto, ConnectionServiceDto, FriendLinkDto, FriendLinkOwnerDto } from './types'
+  AccountDeletionDto, MemberPageDto, ConnectionTestDto, ConnectionTestPassDto, TestRelayDto, CommunityPollDto, CommunityPollAnswerDto, CalendarEventDto, ApplicationDto, CommandRuleDto, CommandRulesDto, QrDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, NewServerKinds, SupportReportDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto, RollStatsDto, SearchResultDto, MediaItemDto, SignInMethodsDto, ContactEmailDto, ConnectionDto, ConnectionServiceDto, FriendLinkDto, FriendLinkOwnerDto, UsableExpressionsDto, GuildExpressionsDto, ExpressionLibraryDto, ExpressionDto, ExpressionGroupDto } from './types'
 
 export class ApiError extends Error {
   status: number
@@ -94,7 +94,7 @@ export class Api {
   createInvite(guildId: string, expiresInMinutes: number | null = null, maxUses: number | null = null) { return this.request<InviteDto>('POST', `/api/guilds/${guildId}/invites`, { expiresInMinutes, maxUses }) }
   invites(guildId: string) { return this.request<InviteDto[]>('GET', `/api/guilds/${guildId}/invites`) }
   revokeInvite(code: string) { return this.request<void>('DELETE', `/api/invites/${encodeURIComponent(code)}`) }
-  updateGuildListing(id: string, patch: { isPublic: boolean; description: string; topics: string[] }) { return this.request<GuildDto>('PATCH', `/api/guilds/${id}`, patch) }
+  updateGuildListing(id: string, patch: { isPublic: boolean; description: string; topics: string[]; featurable: boolean }) { return this.request<GuildDto>('PATCH', `/api/guilds/${id}`, patch) }
   /** Whether rolls in a server's P2P channels add to people's roll totals. */
   /** A server's welcome channel (null for none), and whether a line is posted there when someone joins. */
   setGuildWelcome(id: string, channelId: string | null, messages: boolean) { return this.request<GuildDto>('PUT', `/api/guilds/${id}/welcome`, { channelId, messages }) }
@@ -107,6 +107,8 @@ export class Api {
   /** Public servers, by name and/or exact topic. */
   discover(q: string, topic: string) { return this.request<DiscoverGuildDto[]>('GET', `/api/discover?q=${encodeURIComponent(q)}&topic=${encodeURIComponent(topic)}`) }
   discoverTopics() { return this.request<string[]>('GET', '/api/discover/topics') }
+  /** One public server, as the list shows it (404 if it is not public). */
+  discoverOne(id: string) { return this.request<DiscoverGuildDto>('GET', `/api/discover/${id}`) }
   /** The symbols a server tag can carry. */
   tagSymbols() { return this.request<string[]>('GET', '/api/tags/symbols') }
   setGuildTag(guildId: string, text: string, symbol: string | null) { return this.request<GuildDto>('PUT', `/api/guilds/${guildId}/tag`, { text, symbol }) }
@@ -236,6 +238,31 @@ export class Api {
     return this.request<GuildDto>('POST', `/api/guilds/${guildId}/icon`, undefined, form)
   }
   deleteGuildIcon(guildId: string) { return this.request<void>('DELETE', `/api/guilds/${guildId}/icon`) }
+  async uploadGuildBanner(guildId: string, file: File) {
+    const form = new FormData()
+    form.append('file', file, file.name)
+    return this.request<GuildDto>('POST', `/api/guilds/${guildId}/banner`, undefined, form)
+  }
+  deleteGuildBanner(guildId: string) { return this.request<void>('DELETE', `/api/guilds/${guildId}/banner`) }
+  // ---- custom emojis, stickers and sounds
+  /** Every soundboard sound one can reach (own library, and the servers one is in), for choosing the app's own sounds. */
+  reachableSounds() { return this.request<ExpressionGroupDto[]>('GET', '/api/expressions/sounds') }
+  /** What one may pick from in a channel. */
+  usableExpressions(channelId: string) { return this.request<UsableExpressionsDto>('GET', `/api/expressions/usable?channelId=${channelId}`) }
+  guildExpressions(guildId: string) { return this.request<GuildExpressionsDto>('GET', `/api/guilds/${guildId}/expressions`) }
+  myExpressions() { return this.request<ExpressionLibraryDto>('GET', '/api/expressions/mine') }
+  uploadExpression(guildId: string, kind: 'emoji' | 'sticker' | 'sound', name: string, file: Blob, fileName: string) {
+    const form = new FormData()
+    form.append('file', file, fileName)
+    form.append('kind', kind)
+    form.append('name', name)
+    return this.request<ExpressionDto>('POST', `/api/guilds/${guildId}/expressions`, undefined, form)
+  }
+  addGuildExpression(guildId: string, id: string) { return this.request<void>('PUT', `/api/guilds/${guildId}/expressions/${id}`) }
+  removeGuildExpression(guildId: string, id: string) { return this.request<void>('DELETE', `/api/guilds/${guildId}/expressions/${id}`) }
+  deleteExpression(id: string) { return this.request<void>('DELETE', `/api/expressions/${id}`) }
+  renameExpression(id: string, name: string) { return this.request<void>('PATCH', `/api/expressions/${id}`, { name }) }
+  setGuildOutside(guildId: string, outsideExpressions: boolean) { return this.request<GuildDto>('PATCH', `/api/guilds/${guildId}`, { outsideExpressions }) }
 
   setNickname(guildId: string, userId: string, nickname: string | null, hideRoleColor?: boolean) {
     return this.request<MemberDto>('PUT', `/api/guilds/${guildId}/members/${userId}/nickname`, { nickname, hideRoleColor })
@@ -253,6 +280,9 @@ export class Api {
   uploadBanner(file: File) { return this.picture('banner', file) }
   deleteAvatar() { return this.request<UserProfileDto>('DELETE', '/api/me/avatar') }
   deleteBanner() { return this.request<UserProfileDto>('DELETE', '/api/me/banner') }
+  /** A nameplate picture of one's own: stored and worn at once. */
+  uploadNameplate(file: File) { const form = new FormData(); form.append('file', file, file.name); return this.request<UserProfileDto>('POST', '/api/me/nameplate', undefined, form) }
+  deleteNameplate() { return this.request<UserProfileDto>('DELETE', '/api/me/nameplate') }
   decorations() { return this.request<DecorationDto[]>('GET', '/api/decorations') }
   /** An animation of your own: 'avatar' goes around your picture, 'effect' plays over your profile card. It is worn as soon as it is stored. */
   /** crop: a profile effect that is not the shape of a profile card is taken anyway, to fill the card with the overhang cut off. */

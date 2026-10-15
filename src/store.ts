@@ -1,4 +1,5 @@
-import type { CommunityPollAnswerDto, CommunityPollDto } from './types'
+import { plainEmojis, playSound as playExpressionSound } from './expressions'
+import type { CommunityPollAnswerDto, CommunityPollDto, UsableExpressionsDto } from './types'
 import { shouldAsk } from './communityPoll'
 import { inBatches, membersToAsk, mergeMembers } from './memberPaging'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -13,7 +14,8 @@ import { DEFAULT_GATE_LEVEL, DEFAULT_NOTIFY, defaultPluginSettings, gateThreshol
 import { pluginIconUrl, type PluginDrop, type PluginInfo, type PluginItem } from './pluginTypes'
 import { serverIconUrl, shareIcon, withTimeout } from './itemIcons'
 import { appearanceOfMember, appearanceOfUser, shrinkPicture, type Appearance } from './profile'
-import { playSound, setQuiet, setSoundPacks, startRing, stopRing, type SoundPack } from './sounds'
+import { playSound, setChosenSounds, setQuiet, setSoundPacks, startRing, stopRing, type SoundPack } from './sounds'
+import { readPackZip } from './soundPackZip'
 import { applyTheme } from './theme'
 import { VoiceConnectError, VoiceEngine, type IcePolicy } from './voice'
 import { type DirectTextPeer, P2PTextEngine, P2PFileUnavailable, describeFile, MAX_P2P_FILE, MAX_P2P_FILES, P2P_PICTURE, type P2PFile, type P2PMessage } from './p2pText'
@@ -539,7 +541,8 @@ export function useMaplecord() {
     if (preferencesRef.current.status === UserStatus.DoNotDisturb) return
     if (document.hasFocus() || !('Notification' in window) || Notification.permission !== 'granted') return
     try {
-      const n = new Notification(title, { body: body.length > 140 ? body.slice(0, 140) + '…' : body, silent: !settingsRef.current.soundEnabled })
+      const said = plainEmojis(body)
+      const n = new Notification(title, { body: said.length > 140 ? said.slice(0, 140) + '…' : said, silent: !settingsRef.current.soundEnabled })
       n.onclick = () => { bridge()?.showWindow?.(); window.focus(); selectChannelRef.current(channelId); n.close() }
     } catch { /* notifications unavailable */ }
   }
@@ -796,7 +799,7 @@ export function useMaplecord() {
       DmOpened: dm => setDms(ds => (ds.some(d => d.channelId === dm.channelId) ? ds : [{ ...dm, lastAt: dm.lastAt ?? new Date().toISOString() }, ...ds])),
       // Someone changed how they appear: update every place we hold a copy of them.
       UserUpdated: (u: UserDto) => {
-        const look = { avatarUrl: u.avatarUrl, displayName: u.displayName ?? null, nameFont: u.nameFont ?? null, nameColor: u.nameColor ?? null, nameColor2: u.nameColor2 ?? null, nameEffect: u.nameEffect ?? null, decoration: u.decoration ?? null, tag: u.tag ?? null }
+        const look = { avatarUrl: u.avatarUrl, displayName: u.displayName ?? null, nameFont: u.nameFont ?? null, nameColor: u.nameColor ?? null, nameColor2: u.nameColor2 ?? null, nameEffect: u.nameEffect ?? null, decoration: u.decoration ?? null, tag: u.tag ?? null, nameplate: u.nameplate ?? null }
         setGuilds(gs => gs.map(g => (g.members.some(m => m.userId === u.id) ? { ...g, members: g.members.map(m => (m.userId === u.id ? { ...m, ...look } : m)) } : g)))
         const swap = <T extends { user: UserDto }>(f: T): T => (f.user.id === u.id ? { ...f, user: u } : f)
         setFriends(fr => ({ friends: fr.friends.map(swap), incoming: fr.incoming.map(swap), outgoing: fr.outgoing.map(swap) }))
@@ -991,6 +994,12 @@ export function useMaplecord() {
     }
     voiceHub.onClosed = () => { dropVoice() }
     await voiceHub.connect({
+      // A sound someone played in our voice channel: from this device's own copy, unless soundboards are muted here or we hear nobody.
+      SoundPlayed: (_channelId, _userId, _id, url) => {
+        const s = settingsRef.current
+        if (s.soundboardMuted || voiceEngine.deafenedNow) return
+        playExpressionSound(url, (s.soundboardVolume ?? 0.6) * (s.outputVolume ?? 1), s.audioOutputDeviceId)
+      },
       // An account is in voice from one place at a time: it has just joined from another app or device.
       VoiceMoved: () => { if (dropVoice()) setError('Voice moved to another app or device you joined from.') },
       // Someone who may disconnect members took us out of the channel. Nothing stops us joining again.
@@ -1775,7 +1784,35 @@ export function useMaplecord() {
     await run(async () => { const guild = await api.setGuildWelcome(guildId, channelId, messages); patchGuild(guildId, x => ({ ...x, guild })) })
   }, [api, patchGuild])
 
-  const setGuildListing = useCallback(async (patch: { isPublic: boolean; description: string; topics: string[] }) => {
+  // ---- Custom emojis, stickers and sounds -------------------------------------------------------------------------
+  /** What may be picked in each channel, asked again after half a minute (or after something was added or taken away). */
+  const usableKept = useRef(new Map<string, { at: number; data: Promise<UsableExpressionsDto> }>())
+  const usableExpressions = useCallback((channelId: string): Promise<UsableExpressionsDto> => {
+    const kept = usableKept.current.get(channelId)
+    if (kept && Date.now() - kept.at < 30_000) return kept.data
+    const data = api.usableExpressions(channelId).catch(() => { usableKept.current.delete(channelId); return { here: [], mine: [], others: [], outside: false, emojis: false, stickers: false, sounds: false } as UsableExpressionsDto })
+    usableKept.current.set(channelId, { at: Date.now(), data })
+    return data
+  }, [api])
+  const forgetUsable = useCallback(() => usableKept.current.clear(), [])
+  /** Sends a sticker as a message in the open channel (or thread). */
+  const sendSticker = useCallback(async (stickerId: string) => {
+    const channelId = selected.current.channel
+    if (!channelId) return
+    await run(() => hub.post({ channelId, content: '', stickerId, threadId: threadRef.current }))
+  }, [hub])
+  /** Plays one of the server's sounds to everyone in our voice channel. */
+  const playSoundboard = useCallback((id: string) => run(() => voiceHub.playSound(id)), [])
+  /** Whether members of the open server may use emojis and stickers from outside it. */
+  const setGuildOutside = useCallback(async (allowed: boolean) => {
+    const g = selected.current.guild
+    if (!g) return
+    const guild = await api.setGuildOutside(g, allowed)
+    patchGuild(g, x => ({ ...x, guild }))
+    usableKept.current.clear()
+  }, [api, patchGuild])
+
+  const setGuildListing = useCallback(async (patch: { isPublic: boolean; description: string; topics: string[]; featurable: boolean }) => {
     const g = selected.current.guild
     if (g) await run(async () => { const guild = await api.updateGuildListing(g, patch); patchGuild(g, x => ({ ...x, guild })) })
   }, [api, patchGuild])
@@ -1892,7 +1929,7 @@ export function useMaplecord() {
 
   // ---- Invite links (see invites.ts) -------------------------------------------
   /** A server someone has followed an invite link to, waiting for their yes. */
-  const [pendingInvite, setPendingInvite] = useState<{ code: string; name: string; members: number } | null>(null)
+  const [pendingInvite, setPendingInvite] = useState<{ code: string; name: string; members: number; publicId?: string } | null>(null)
 
   // ---- Linked accounts on other services (Settings, Connections) ----
   /** Goes up each time the server says a link made in the browser is done, so the list on screen is asked for again. */
@@ -1992,19 +2029,28 @@ export function useMaplecord() {
   const acceptInvite = useCallback(async () => {
     const invite = pendingInvite
     setPendingInvite(null)
-    if (invite) await joinGuild(invite.code)
-  }, [joinGuild, pendingInvite])
+    if (invite?.publicId) await run(() => joinPublicGuild(invite.publicId!))
+    else if (invite) await joinGuild(invite.code)
+  }, [joinGuild, joinPublicGuild, pendingInvite])
 
   // The browser version was opened at one server (?server=…): go to it as soon as it is among the person's servers.
-  // If it is not there shortly after connecting, they are not in it, and the address is forgotten.
+  // A public server they are not in (a link from the website's featured servers) is offered to join. Otherwise, if it
+  // is not there shortly after connecting, they are not in it, and the address is forgotten.
   useEffect(() => {
     if (!ready) return
     const wanted = rememberedServer()
     if (!wanted) return
     if (guilds.some(g => g.guild.id === wanted)) { forgetRememberedServer(); selectGuild(wanted); return }
+    const ask = window.setTimeout(() => {
+      void api.discoverOne(wanted).then(g => {
+        if (rememberedServer() !== wanted || g.joined) return
+        forgetRememberedServer()
+        setPendingInvite({ code: '', name: g.name, members: g.memberCount, publicId: g.id })
+      }).catch(() => { /* not public: it is waited for as a server they are in */ })
+    }, 2000)
     const giveUp = window.setTimeout(forgetRememberedServer, 15_000)
-    return () => window.clearTimeout(giveUp)
-  }, [ready, guilds, selectGuild])
+    return () => { window.clearTimeout(ask); window.clearTimeout(giveUp) }
+  }, [ready, guilds, selectGuild, api])
 
   // Once connected: the invite the browser version was opened with, the one the desktop app was started by, and any
   // link clicked while the desktop app is running (it is told there is one, and takes it).
@@ -2053,6 +2099,14 @@ export function useMaplecord() {
     await run(async () => {
       if (file) { const guild = await api.uploadGuildIcon(g, file); patchGuild(g, x => ({ ...x, guild })) }
       else { await api.deleteGuildIcon(g); patchGuild(g, x => ({ ...x, guild: { ...x.guild, iconUrl: null } })) }
+    })
+  }, [api, patchGuild])
+  const setGuildBanner = useCallback(async (file: File | null) => {
+    const g = selected.current.guild
+    if (!g) return
+    await run(async () => {
+      if (file) { const guild = await api.uploadGuildBanner(g, file); patchGuild(g, x => ({ ...x, guild })) }
+      else { await api.deleteGuildBanner(g); patchGuild(g, x => ({ ...x, guild: { ...x.guild, bannerUrl: null } })) }
     })
   }, [api, patchGuild])
   const createRole = useCallback(async (name: string, color: string | null, permissions: number) => {
@@ -2447,13 +2501,20 @@ export function useMaplecord() {
   const applyOwnProfile = useCallback((p: UserProfileDto) => {
     const cur = settingsRef.current.user
     if (cur && cur.id === p.id) setOwnLook({ accentColor: p.accentColor, bannerUrl: p.bannerUrl })
-    if (cur && cur.id === p.id) updateSettings({ user: { ...cur, displayName: p.displayName, avatarUrl: p.avatarUrl, nameFont: p.nameFont, nameColor: p.nameColor, nameColor2: p.nameColor2, nameEffect: p.nameEffect ?? null, decoration: p.decoration } })
+    if (cur && cur.id === p.id) updateSettings({ user: { ...cur, displayName: p.displayName, avatarUrl: p.avatarUrl, nameFont: p.nameFont, nameColor: p.nameColor, nameColor2: p.nameColor2, nameEffect: p.nameEffect ?? null, decoration: p.decoration, nameplate: p.nameplate ?? null } })
   }, [updateSettings])
   /** Throws with the server's reason if a field is refused, so the editor can show it next to the form. */
   const saveProfile = useCallback(async (patch: UpdateProfileRequest) => { const p = await api.updateProfile(patch); applyOwnProfile(p); return p }, [api, applyOwnProfile])
   const setProfilePicture = useCallback(async (kind: 'avatar' | 'banner', file: File | null) => {
     const small = file ? await shrinkPicture(file, kind) : null
     const p = small ? await (kind === 'avatar' ? api.uploadAvatar(small) : api.uploadBanner(small)) : await (kind === 'avatar' ? api.deleteAvatar() : api.deleteBanner())
+    applyOwnProfile(p)
+    return p
+  }, [api, applyOwnProfile])
+
+  /** Stores a nameplate picture of our own and wears it, or with null takes ours away. */
+  const setOwnNameplate = useCallback(async (file: File | null) => {
+    const p = file ? await api.uploadNameplate(file) : await api.deleteNameplate()
     applyOwnProfile(p)
     return p
   }, [api, applyOwnProfile])
@@ -2969,6 +3030,26 @@ export function useMaplecord() {
     setSoundPackList(found)
   }, [])
   useEffect(() => { void reloadSoundPacks() }, [reloadSoundPacks])
+  // The soundboard sounds chosen for moments, for playSound.
+  useEffect(() => { setChosenSounds(settings.soundChoices) }, [settings.soundChoices])
+  /** A pack from a zip (desktop app): unpacked into a folder of its own, then chosen. */
+  const importSoundPack = useCallback(async (zip: File) => {
+    await run(async () => {
+      const pack = await readPackZip(zip)
+      const name = await bridge()?.soundsImport?.(pack.name, pack.files)
+      if (!name) throw new Error('That pack could not be saved.')
+      await reloadSoundPacks()
+      updateSettings({ soundProfile: name })
+    })
+  }, [reloadSoundPacks, updateSettings])
+  const deleteSoundPack = useCallback(async (name: string) => {
+    await run(async () => {
+      await bridge()?.soundsDelete?.(name)
+      await reloadSoundPacks()
+      if (settingsRef.current.soundProfile === name) updateSettings({ soundProfile: 'Default' })
+    })
+  }, [reloadSoundPacks, updateSettings])
+  const reachableSounds = useCallback(() => api.reachableSounds(), [api])
   const openSoundsFolder = useCallback(() => { void bridge()?.soundsOpenFolder() }, [])
   const pickPluginLog = useCallback(async (pluginId: string) => {
     const file = await bridge()?.pluginsPickLog()
@@ -3115,14 +3196,14 @@ export function useMaplecord() {
     loadSignIn, startSignInMethod, removeSignInMethod, setContactEmail, clearContactEmail,
     loadMedia, p2pPost, openP2pPost, closeP2pPost, createP2pPost, reactP2p, editP2p, pinP2p, voteP2p, closeP2pPoll, loadP2pPins, searchP2p, jumpP2p,
     connect, selectGuild, selectChannel, openHome, openDm, addFriend, removeFriend, searchUsers, sendMessage, sendFile, uploading, offerFile, withdrawFile, downloadFile, cancelTransfer, transfers, notifyTyping, loadOlder,
-    renameGuild, setGuildIcon, createRole, updateRole, deleteRole, setMemberRoles,
+    renameGuild, setGuildIcon, setGuildBanner, createRole, updateRole, deleteRole, setMemberRoles,
     partyChannel, partyLabel,
     setUserPrefs, setGuildPrefs, markGuildRead, mentionsMe,
-    appearanceOf, decorations, loadProfile, saveProfile, setProfilePicture, setProfileAnimation, setNickname, setGuildHideOwner, setCalendarBackground,
+    appearanceOf, decorations, loadProfile, saveProfile, setProfilePicture, setProfileAnimation, setOwnNameplate, setNickname, setGuildHideOwner, setCalendarBackground,
     loadMoreMembers, findMembers, needMembers, membersEnded,
     plugins, pendingDrops, resolveItem, itemIcon, searchItems, acceptDrop, dismissDrop, simulateDrop,
     setPluginSettings, reloadPlugins, installPlugin, openPluginsFolder, pickPluginLog,
-    soundPacks, reloadSoundPacks, openSoundsFolder,
+    soundPacks, reloadSoundPacks, openSoundsFolder, importSoundPack, deleteSoundPack, reachableSounds,
     startRoll, quickRoll, roll, voteEnd, dismissRoll, coinFlip, invokeCommand, pressButton,
     activeRps, startRps, rpsPick, rpsThrow, dismissRps,
     createGuild, joinGuild, joinPublicGuild, tagSymbols, setGuildTag, removeGuildTag, wearTag, tagCard, setGuildListing, deleteMessage, disconnectMember, moveMember, setVoiceMuted, moveChannel, inviteToServer, openInvite, pendingInvite, acceptInvite, dismissInvite: () => setPendingInvite(null), createChannel, leaveGuild, kickMember, banMember, signOut,
@@ -3134,6 +3215,7 @@ export function useMaplecord() {
     voice, isMuted, isSpeaking, joinVoice, leaveVoice, toggleMute,
     call, startCall, answerCall, declineCall, renameChannel, deleteChannel, deleteGroup, setChannelMuted,
     preferences, savePreferences, blocked, setBlocked, dndUsers, idleUsers, makeInvite, loadInvites, revokeInvite, inviteBase, inviteQr, deafened, toggleDeafen, ownLook, transferLimits,
+    usableExpressions, forgetUsable, sendSticker, playSoundboard, setGuildOutside,
     markVoiceGap: () => voiceRecorder.mark(), voiceReport: () => voiceRecorder.report(__APP_VERSION__), clearVoiceReport: () => voiceRecorder.clear(),
     farewell, queueAhead, deleteStep, openDeleteAccount: (step: 'explain' | 'confirm' = 'explain') => setDeleteStep(step), closeDeleteAccount: () => setDeleteStep(null), reauthenticateForDelete, deleteAccount,
     p2pText, askDirectText, setP2pSubscribed, setP2pBroadcast, p2pFiles, loadP2pFile, saveP2pFile, p2pNewApps, acceptP2pApp, p2pBotsWaiting, acceptP2pBot, dismissP2pBot,

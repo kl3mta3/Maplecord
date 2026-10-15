@@ -77,4 +77,6 @@ contextBridge.exposeInMainWorld('maplecord', {
   // the user's own sound packs (see electron/soundPacks.ts)
   soundPacks: (): Promise<unknown> => ipcRenderer.invoke('sound-packs'),
   soundsOpenFolder: (): Promise<unknown> => ipcRenderer.invoke('sounds-open-folder'),
+  soundsImport: (name: string, files: unknown): Promise<unknown> => ipcRenderer.invoke('sounds-import', name, files),
+  soundsDelete: (name: string): Promise<unknown> => ipcRenderer.invoke('sounds-delete', name),
 })
