@@ -120,6 +120,8 @@ export interface MaplecordBridge {
   offerList(scope: string): Promise<{ offerId: string; name: string; size: number }[]>
   offerRead(offerId: string, offset: number, length: number): Promise<Uint8Array>
   offerForget(offerId: string): Promise<void>
+  /** A file a moderator took down: lets go of this computer's copy of it. */
+  fileForget?(id: string): Promise<void>
   // the user's own sound packs
   soundPacks(): Promise<SoundPack[]>
   soundsOpenFolder(): Promise<unknown>

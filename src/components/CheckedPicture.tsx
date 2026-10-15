@@ -22,10 +22,10 @@ export function CheckedPicture({ src, checkKey, children }: { src: string; check
     // would open it full size, nor to whatever it sits in.
     <span className={'checkedpic' + (verdict === 'explicit' ? ' explicit' : ' checking')}
       onClickCapture={e => { e.stopPropagation(); e.preventDefault(); if (verdict === 'explicit') setShown(true) }}
-      role={verdict === 'explicit' ? 'button' : undefined} tabIndex={verdict === 'explicit' ? 0 : undefined} aria-label={verdict === 'explicit' ? 'A picture that may be explicit. Show it' : undefined}
+      role={verdict === 'explicit' ? 'button' : undefined} tabIndex={verdict === 'explicit' ? 0 : undefined} aria-label={verdict === 'explicit' ? 'A picture that may be explicit or revealing. Show it' : undefined}
       onKeyDown={e => { if (verdict === 'explicit' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); e.stopPropagation(); setShown(true) } }}>
       {children}
-      {verdict === 'explicit' && <span className="revealpic" title="Checked on this device: it may be explicit">May be explicit · Show</span>}
+      {verdict === 'explicit' && <span className="revealpic" title="Checked on this device: it may be explicit or revealing">May be sensitive · Show</span>}
     </span>
   )
 }

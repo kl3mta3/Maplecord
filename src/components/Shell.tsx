@@ -2070,6 +2070,10 @@ function AttachmentView({ file, pictures }: { file: AttachmentDto; pictures?: Me
     })
   }
   const expired = <div className="filechip expired" title="The server keeps files for a limited time."><span className="ico">⌛</span><span className="grow"><b>{file.fileName}</b><span className="muted"> · no longer available</span></span></div>
+  // Taken down by a moderator: never shown from a copy of this computer's own, which goes too.
+  const removed = !!file.removed
+  useEffect(() => { if (removed) void bridge()?.fileForget?.(file.id) }, [removed, file.id])
+  if (removed) return <div className="filechip expired" title="Whoever looks after this Maplecord took it down."><span className="ico">🚫</span><span className="grow"><b>{file.fileName}</b><span className="muted"> · removed by the moderators</span></span></div>
 
   // Without a copy of our own (the web version, or any plain download) an expired file is simply gone.
   if (gone || (file.expired && (!desktop || kind === 'file'))) return expired

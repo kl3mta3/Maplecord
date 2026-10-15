@@ -198,6 +198,8 @@ export interface ItemIconDto { path: string }
 /** contentType is what the server found the file to be: image/* and video/* can be shown in place, anything else is a download. */
 export interface AttachmentDto {
   id: string; fileName: string; contentType: string; size: number; url: string; expired?: boolean
+  /** Taken down by whoever looks after this Maplecord: not shown from this computer's own copy either. */
+  removed?: boolean
   /** On a picture of a gallery post: the reactions to that picture itself, apart from those to the post. */
   reactions?: ReactionDto[] | null
 }

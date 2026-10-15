@@ -116,9 +116,9 @@ export function UserSettingsDialog({ store, initial, onOpen, onAllowDirect, onSi
               <h4>Pictures</h4>
               <label className="switch">
                 <input type="checkbox" checked={store.settings.blurExplicit !== false} onChange={e => store.updateSettings({ blurExplicit: e.target.checked })} />
-                <span className="track" /><span>Blur pictures that may be explicit</span>
+                <span className="track" /><span>Blur pictures that may be explicit or revealing</span>
               </label>
-              <div className="muted">Pictures in messages are looked at on this device before they are shown, and nothing is sent anywhere for it. One that may be explicit stays blurred until you click it. It can be wrong both ways. This is set for this device only.</div>
+              <div className="muted">Pictures in messages are looked at on this device before they are shown, and nothing is sent anywhere for it. One that may be explicit or revealing (swimwear and underwear too) stays blurred until you click it. It can be wrong both ways. This is set for this device only.</div>
 
               <h4>Friend requests</h4>
               <label className="switch">

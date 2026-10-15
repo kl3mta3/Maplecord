@@ -44,6 +44,14 @@ const respond = (bytes: number, type: string) => async (url: string) => {
   check(await cache.get('../../etc/passwd', source(id)) === null, 'an id that is not an id is refused')
   check(await cache.get('aaaaaaaa-1111-2222-3333-444455556666', 'https://elsewhere.example/steal') === null, 'only the attachment’s own file address is ever fetched')
   check(await cache.get('aaaaaaaa-1111-2222-3333-444455556666', `file:///files/aaaaaaaa-1111-2222-3333-444455556666/x`) === null, 'and only over http(s)')
+
+  // A file a moderator took down: the copy goes, and with the server not having it either, it is not shown again.
+  const kept = (await cache.get(id, source(id)))!.path
+  await cache.forget(id)
+  serverHasIt = false
+  check(!fs.existsSync(kept) && !fs.existsSync(kept + '.json') && await cache.get(id, source(id)) === null, 'a file taken down is let go of here too, and does not come back')
+  serverHasIt = true
+  await cache.forget('../../etc/passwd')
 }
 
 {

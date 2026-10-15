@@ -353,6 +353,8 @@ function registerPluginProtocol() {
 // Sound packs the user added: <userData>/sounds/<Pack>/<event>.wav. Maplecord itself ships only generated sounds.
 const soundsDirectory = () => path.join(app.getPath('userData'), 'sounds')
 handle('sound-packs', () => listSoundPacks(soundsDirectory()))
+// A file a moderator took down: this computer's copy goes too.
+handle('file-forget', (_event, id: string) => fileCache.forget(String(id)))
 handle('sounds-open-folder', () => { fs.mkdirSync(soundsDirectory(), { recursive: true }); return shell.openPath(soundsDirectory()) })
 // A pack imported from a zip (read in the window): its files, saved as a folder of their own.
 handle('sounds-import', (_event, name: string, files: PackFileIn[]) => savePack(soundsDirectory(), name, Array.isArray(files) ? files : []))

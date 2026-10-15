@@ -829,6 +829,11 @@ export function useMaplecord() {
           : had.some(r => r.emoji === emoji) ? had.map(r => (r.emoji === emoji ? { ...r, count, mine } : r)) : [...had, { emoji, count, mine }]
         return { ...m, reactions: next.length > 0 ? next : null }
       }),
+      // Taken down by a moderator: it goes from the message at once, and from this computer's own copies.
+      AttachmentRemoved: (_channelId, messageId, attachmentId, removed) => {
+        if (removed) void bridge()?.fileForget?.(attachmentId)
+        patchMessage(messageId, m => ({ ...m, attachments: m.attachments.map(a => (a.id === attachmentId ? { ...a, removed, expired: removed } : a)) }))
+      },
       PictureReactionChanged: (_channelId, messageId, attachmentId, emoji, userId, on, count) => patchMessage(messageId, m => ({
         ...m, attachments: m.attachments.map(a => {
           if (a.id !== attachmentId) return a

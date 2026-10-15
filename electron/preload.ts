@@ -74,6 +74,9 @@ contextBridge.exposeInMainWorld('maplecord', {
   offerRead: (offerId: string, offset: number, length: number): Promise<Uint8Array> => ipcRenderer.invoke('offer-read', offerId, offset, length),
   offerForget: (offerId: string): Promise<void> => ipcRenderer.invoke('offer-forget', offerId),
 
+  // a file a moderator took down: this computer's copy goes too (see electron/fileCache.ts)
+  fileForget: (id: string): Promise<void> => ipcRenderer.invoke('file-forget', id),
+
   // the user's own sound packs (see electron/soundPacks.ts)
   soundPacks: (): Promise<unknown> => ipcRenderer.invoke('sound-packs'),
   soundsOpenFolder: (): Promise<unknown> => ipcRenderer.invoke('sounds-open-folder'),

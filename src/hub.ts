@@ -24,6 +24,8 @@ export interface ChatEvents {
   ReactionChanged: (channelId: string, messageId: string, emoji: string, userId: string, on: boolean, count: number) => void
   /** Someone reacted to one picture of a gallery post, or took a reaction back. */
   PictureReactionChanged: (channelId: string, messageId: string, attachmentId: string, emoji: string, userId: string, on: boolean, count: number) => void
+  /** A file on a message was taken down by a moderator (removed), or put back. */
+  AttachmentRemoved: (channelId: string, messageId: string, attachmentId: string, removed: boolean) => void
   /** An event was put on a calendar channel, or one was changed. */
   CalendarEventChanged: (event: CalendarEventDto) => void
   CalendarEventDeleted: (channelId: string, eventId: string) => void

@@ -112,6 +112,16 @@ export class FileCache {
     this.total = total
   }
 
+  /** Lets go of the copy of one file: one a moderator took down is not kept on this computer either. */
+  async forget(id: string) {
+    if (!ID.test(id)) return
+    const file = this.file(id)
+    const size = (await fs.promises.stat(file).catch(() => null))?.size ?? 0
+    await fs.promises.rm(file, { force: true })
+    await fs.promises.rm(file + '.json', { force: true })
+    if (this.total !== null) this.total = Math.max(0, this.total - size)
+  }
+
   async clear() {
     await fs.promises.rm(this.dir, { recursive: true, force: true })
     this.total = 0
