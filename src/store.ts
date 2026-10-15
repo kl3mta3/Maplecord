@@ -649,6 +649,8 @@ export function useMaplecord() {
     if (mine && mine.choice !== RollChoice.Pass) {
       const won = result.winnerId === me()
       if (won) playSound(mine.value === 100 ? 'you100' : 'win', s.soundProfile, s.soundEnabled)
+      // Level with someone else at the top: a roll-off follows.
+      else if (result.tiedUserIds.length > 1 && result.tiedUserIds.includes(me())) playSound('tie', s.soundProfile, s.soundEnabled)
       else if (mine.value === 1) playSound('one', s.soundProfile, s.soundEnabled)
       else if (mine.value === 69) playSound('sixtyNine', s.soundProfile, s.soundEnabled)
       else if (result.winningValue === 100) playSound('they100', s.soundProfile, s.soundEnabled)
@@ -922,6 +924,9 @@ export function useMaplecord() {
         const s = settingsRef.current
         if (result.winnerIds.length === 1 && result.entries.some(e => e.userId === me()))
           playSound(result.winnerIds[0] === me() ? 'win' : 'lose', s.soundProfile, s.soundEnabled)
+        // Nobody won (everyone throws again), or several did and throw again among themselves, this one included.
+        else if (result.entries.some(e => e.userId === me()) && ((result.replay && result.winnerIds.length === 0) || (result.winnerIds.length > 1 && result.winnerIds.includes(me()))))
+          playSound('tie', s.soundProfile, s.soundEnabled)
         if (!result.replay) rpsClearTimer.current = window.setTimeout(() => setActiveRps(cur => (cur?.result ? null : cur)), 12_000)
       },
       ServerNotice: n => { if (n.startsWith('guild-membership-changed:')) void loadGuilds(); else setError(n) },

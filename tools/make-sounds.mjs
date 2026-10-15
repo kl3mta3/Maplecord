@@ -109,6 +109,13 @@ function write(name, buf) {
   tone(b, { at: 0, dur: 0.8, freq: note(75), slideTo: note(63), gain: 0.2, shape: 'soft', attack: 0.04 })
   write('emo', b)
 }
+// tie: two of the same note, then a little lift that asks to go again
+{
+  const b = buffer(0.85)
+  tone(b, { at: 0, dur: 0.22, freq: note(67), gain: 0.5 }); tone(b, { at: 0.17, dur: 0.22, freq: note(67), gain: 0.5 })
+  tone(b, { at: 0.42, dur: 0.38, freq: note(67), slideTo: note(72), gain: 0.4, shape: 'soft', attack: 0.02 })
+  write('tie', b)
+}
 // join: two knocks
 {
   const b = buffer(0.4)
