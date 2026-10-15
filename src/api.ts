@@ -45,6 +45,9 @@ export class Api {
   /** Null when the server is unreachable or too old to say. */
   /** What the support window shows. Only there while the support button is switched on. */
   support() { return this.request<SupportReportDto>('GET', '/api/support') }
+  /** Reporting a picture the server keeps, or a person, to whoever runs this Maplecord. */
+  reportPicture(kind: string, id: string, category: string, note: string) { return this.request<void>('POST', '/api/reports/picture', { kind, id, category, note }) }
+  reportPerson(userId: string, category: string, note: string, messageId?: string) { return this.request<void>('POST', '/api/reports/person', { userId, category, note, messageId }) }
   meta(serverUrl: string) {
     return fetch(serverUrl.replace(/\/$/, '') + '/api/meta').then(r => (r.ok ? (r.json() as Promise<ServerMetaDto>) : null)).catch(() => null)
   }

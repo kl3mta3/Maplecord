@@ -23,7 +23,7 @@ export function parseToken(text: string): { name: string; id: string } | null {
 
 /** A custom emoji, drawn. */
 export function CustomEmoji({ name, id, big }: { name: string; id: string; big?: boolean }) {
-  return <img className={'cemoji' + (big ? ' big' : '')} src={expressionUrl(id)} alt={`:${name}:`} title={`:${name}:`} draggable={false} loading="lazy" />
+  return <img className={'cemoji' + (big ? ' big' : '')} src={expressionUrl(id)} alt={`:${name}:`} title={`:${name}:`} draggable={false} loading="lazy" data-emoji={id} data-emoji-name={name} />
 }
 
 /** A reaction: an ordinary emoji as it is, a custom one as its picture. */

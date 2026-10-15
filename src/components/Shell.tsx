@@ -42,6 +42,7 @@ import { serverMediaUrl } from '../itemIcons'
 import { bridge, isElectron } from '../platform'
 import { linkRanOut, useFileLink } from '../fileLinks'
 import { SupportDialog } from './Support'
+import { ReportDialog, type ReportsOn, type ReportTarget } from './Report'
 import { CALENDAR_BACKGROUNDS } from '../calendarLooks'
 import { MAX_P2P_TEXT, P2P_PICTURE, type P2PFile } from '../p2pText'
 import { foldP2p, foldP2pChat, P2P_GALLERY_POLLS, P2P_META_ROOM, P2P_REACTIONS } from '../p2pPosts'
@@ -50,7 +51,7 @@ import { DEFAULT_GATE_LEVEL, DEFAULT_NOTIFY, type NotifyLevel } from '../setting
 import { ContextMenu, type MenuEntry } from './ContextMenu'
 import type { GuildFolder } from '../settings'
 import { Avatar, ProfileEditor, ProfilePopout, ProfileColumn, UserName } from './Profile'
-import { assetUrl, initials, nameplateLook, shownName, type Appearance } from '../profile'
+import { assetUrl, initials, NAMEPLATES, nameplateLook, shownName, type Appearance } from '../profile'
 import { STATUSES, UserSettingsDialog } from './UserSettings'
 import { ArrowLeftRight, AudioLines, ChartBarDecreasing, Smile, Sticker, Music2, ChevronDown, ChevronRight, HeadphoneOff, Headphones, Heart, Images, LoaderCircle, Menu, Mic, MicOff, MonitorUp, Paperclip, Phone, PhoneOff, Pin, Plus, Search, Settings as SettingsIcon, Signal, TriangleAlert, Users, Video } from 'lucide-react'
 import { AddServerDialog, CreateServerDialog, DiscoverDialog, JoinServerDialog } from './Servers'
@@ -326,9 +327,21 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   /** Which of custom emojis, stickers and sounds this Maplecord has switched on (asked with the support button's). */
   const [looks, setLooks] = useState({ emojis: false, stickers: false, sounds: false })
   const soundsOn = looks.sounds
+  /** Whether this Maplecord lets people report pictures, and people; and the report being written. */
+  const [reportsOn, setReportsOn] = useState<ReportsOn>({ pictures: false, people: false })
+  const [reporting, setReporting] = useState<ReportTarget | null>(null)
+  const anyReports = reportsOn.pictures || reportsOn.people
+  /** Reporting someone: them, and their profile picture and banner if they have one. */
+  const ownNameplate = (plate: string | null | undefined) => !!plate && !NAMEPLATES.some(n => n.id === plate)
+  const reportPerson = (userId: string, name: string, messageId?: string) => {
+    const known = store.appearanceOf(userId)
+    setReporting({ kind: 'person', userId, name, messageId, avatar: !!known?.avatarUrl })
+    // The banner is only in the full profile.
+    void store.loadProfile(userId).then(p => { if (p) setReporting(r => r?.kind === 'person' && r.userId === userId ? { ...r, avatar: !!p.avatarUrl, banner: !!p.bannerUrl, nameplate: ownNameplate(p.nameplate) } : r) })
+  }
   // Asked as the new-server dialog opens, so that it offers only the kinds that can be made right now.
   const newServerKinds = useCallback(() => store.api.newServerKinds(), [store.api])
-  useEffect(() => { void store.api.meta(store.settings.serverUrl).then(meta => { setInviteBase(meta?.inviteBase ?? null); setSupportOn(!!meta?.support); setLooks({ emojis: !!meta?.emojis, stickers: !!meta?.stickers, sounds: !!meta?.sounds }) }) }, [store.api, store.settings.serverUrl])
+  useEffect(() => { void store.api.meta(store.settings.serverUrl).then(meta => { setInviteBase(meta?.inviteBase ?? null); setSupportOn(!!meta?.support); setLooks({ emojis: !!meta?.emojis, stickers: !!meta?.stickers, sounds: !!meta?.sounds }); setReportsOn({ pictures: !!meta?.pictureReports, people: !!meta?.peopleReports }) }) }, [store.api, store.settings.serverUrl])
 
   // ---- Right-click menus ------------------------------------------------------
   // What they change about other people and servers is yours alone and kept on this device; nobody is told.
@@ -396,6 +409,8 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       notify('none', 'Nothing'),
       { kind: 'sep' },
       ...(allowed(Permission.ManageGuild) || allowed(Permission.ManageRoles) || allowed(Permission.ManageWebhooks) || allowed(Permission.ManageExpressions) ? [{ kind: 'item', label: 'Server settings', icon: '⚙', onClick: open('server') } as MenuEntry] : []),
+      ...(reportsOn.pictures && x.guild.ownerId !== me?.id && (x.guild.iconUrl || x.guild.bannerUrl)
+        ? [{ kind: 'item', label: 'Report server picture…', icon: '⚑', onClick: () => setReporting({ kind: 'server', guildId, name: x.guild.name, icon: !!x.guild.iconUrl, banner: !!x.guild.bannerUrl }) } as MenuEntry] : []),
       { kind: 'item', label: x.guild.ownerId === me?.id ? 'Delete server' : 'Leave server', icon: '⎋', danger: true, onClick: open('leaveGuild') },
     ]
   }
@@ -450,6 +465,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
     entries.push({ kind: 'item', label: 'Ignore', checked: !!prefs.ignored, onClick: () => store.setUserPrefs(userId, { ignored: !prefs.ignored }) })
     const isBlocked = store.blocked.some(u => u.id === userId)
     if (!isBot) entries.push({ kind: 'item', label: isBlocked ? 'Unblock' : 'Block', icon: '🚫', danger: !isBlocked, onClick: () => { void store.setBlocked(userId, !isBlocked) } })
+    if (!isBot && anyReports) entries.push({ kind: 'item', label: 'Report…', icon: '⚑', onClick: () => reportPerson(userId, username) })
     entries.push({ kind: 'item', label: 'Copy user ID', icon: '🆔', onClick: () => { void navigator.clipboard.writeText(userId) } })
     if (member && g && userId !== g.guild.ownerId && can(Permission.ManageGuild)) {
       entries.push({ kind: 'sep' })
@@ -805,7 +821,8 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
             roles={(g?.roles ?? []).filter(r => !r.isEveryone).sort((a, b) => b.position - a.position).map(r => ({ id: r.id, name: r.name, color: r.color }))}
             myRoleIds={g?.members.find(m => m.userId === me?.id)?.roleIds ?? []} />
         : <Chat store={store} openRollDialog={(rollKind: RollKind) => setDialog({ kind: 'startRoll', rollKind })} canRoll={g ? can(Permission.StartRolls) : !!store.selectedDm} colorOf={colorOf}
-          onCall={(userId, name, direct) => { if (direct) setDialog({ kind: 'p2pCall', userId, name }); else void store.startCall(userId, false) }} onUserMenu={openUserMenu} isIgnored={ignored} onUserCard={openCard} nameIn={nameIn} />}
+          onCall={(userId, name, direct) => { if (direct) setDialog({ kind: 'p2pCall', userId, name }); else void store.startCall(userId, false) }} onUserMenu={openUserMenu} isIgnored={ignored} onUserCard={openCard} nameIn={nameIn}
+          reportsOn={reportsOn} onReport={(target, messageId) => target.kind === 'person' ? reportPerson(target.userId, target.name, messageId) : setReporting(target)} />}
 
       {/* The edges of the chat: dragged, they resize the column on their other side. */}
       {grip('sidebar')}{grip('members')}
@@ -905,6 +922,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       })()}
       {card && (
         <ProfilePopout store={store} userId={card.userId} fallbackName={card.name} x={card.x} y={card.y} onClose={() => setCard(null)} onEdit={() => setDialog({ kind: 'profile' })}
+          onReport={anyReports ? p => setReporting({ kind: 'person', userId: p.id, name: p.username, avatar: !!p.avatarUrl, banner: !!p.bannerUrl, nameplate: ownNameplate(p.nameplate) }) : undefined}
           nickname={g?.members.find(m => m.userId === card.userId)?.nickname ?? null} serverName={g?.guild.name}
           roles={g ? (g.members.find(m => m.userId === card.userId)?.roleIds ?? []).map(id => g.roles?.find(r => r.id === id)).filter((r): r is RoleDto => !!r && !r.isEveryone).sort((a, b) => b.position - a.position) : undefined} />
       )}
@@ -953,6 +971,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       {dialog?.kind === 'ban' && <BanDialog name={dialog.member.username} onBan={deleteDays => store.banMember(dialog.member, deleteDays)} onClose={() => setDialog(null)} />}
       {supportOn && <button className="supportbtn" title="Support Maplecord" onClick={() => setDialog({ kind: 'support' })}><Heart size={13} /> Support</button>}
       {dialog?.kind === 'support' && <SupportDialog api={store.api} onClose={() => setDialog(null)} />}
+      {reporting && <ReportDialog api={store.api} target={reporting} on={reportsOn} onClose={() => setReporting(null)} />}
       {soundboard && (
         <SoundboardPanel x={soundboard.x} y={soundboard.y} server={voiceGuild ?? 'This server'} sounds={soundboard.sounds} favorites={store.settings.soundFavorites ?? []}
           onFavorite={(id, on) => store.updateSettings({ soundFavorites: on ? [...(store.settings.soundFavorites ?? []).filter(x => x !== id), id] : (store.settings.soundFavorites ?? []).filter(x => x !== id) })}
@@ -1023,8 +1042,10 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
 
 // ---- Chat column ------------------------------------------------------------
 
-function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, onUserCard, nameIn, onCall }: {
+function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, onUserCard, nameIn, onCall, reportsOn, onReport }: {
   onCall: (userId: string, name: string, direct: boolean) => void
+  /** Reporting a picture on a message, or whoever wrote it, when this Maplecord lets people. */
+  reportsOn: ReportsOn; onReport: (target: ReportTarget, messageId?: string) => void
   store: Store; openRollDialog: (kind: RollKind) => void; canRoll: boolean; colorOf: (userId: string) => string | undefined
   onUserMenu: (e: React.MouseEvent, userId: string, username: string) => void; isIgnored: (userId: string) => boolean
   onUserCard: (e: React.MouseEvent, userId: string, name: string) => void; nameIn: (userId: string, fallback: string) => string
@@ -1042,7 +1063,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
   const channel = store.selectedChannel
   // Right-click a message: copy it, or delete it if it is yours or you may manage messages here (the server decides).
   // (And, when it was a picture on it that was right-clicked, save that picture.)
-  const [messageMenu, setMessageMenu] = useState<{ m: MessageDto; x: number; y: number; picture?: { src: string; name: string } } | null>(null)
+  const [messageMenu, setMessageMenu] = useState<{ m: MessageDto; x: number; y: number; picture?: { src: string; name: string; fileId?: string }; emoji?: { id: string; name: string } } | null>(null)
   const [deleting, setDeleting] = useState<MessageDto | null>(null)
   // What a kept channel's messages can have: an answer, an edit, reactions, a pin, a thread, a poll. A P2P channel's
   // messages are on people's own devices, where none of this reaches.
@@ -1437,7 +1458,9 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
               onMenu={m.ephemeral ? undefined : e => {
                 e.preventDefault()
                 const on = (e.target as HTMLElement).closest<HTMLImageElement>('img[data-picture]')
-                setMessageMenu({ m, x: e.clientX, y: e.clientY, picture: on ? { src: on.currentSrc || on.src, name: on.dataset.picture ?? '' } : undefined })
+                const emoji = (e.target as HTMLElement).closest<HTMLImageElement>('img[data-emoji]')
+                setMessageMenu({ m, x: e.clientX, y: e.clientY, picture: on ? { src: on.currentSrc || on.src, name: on.dataset.picture ?? '', fileId: on.dataset.file } : undefined,
+                  emoji: emoji?.dataset.emoji ? { id: emoji.dataset.emoji, name: emoji.dataset.emojiName ?? '' } : undefined })
               }}
               onUserMenu={m.webhookId ? undefined : e => onUserMenu(e, m.authorId, m.authorName)} onUserCard={m.webhookId ? undefined : e => onUserCard(e, m.authorId, m.authorName)} />)}
           </>
@@ -1469,6 +1492,15 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
             { kind: 'sep' } as MenuEntry,
           ] : []),
           ...(messageMenu.m.content ? [{ kind: 'item', label: 'Copy text', onClick: () => { void navigator.clipboard.writeText(messageMenu.m.content).catch(() => { /* no clipboard */ }) } } as MenuEntry] : []),
+          // Reporting, to whoever runs this Maplecord: a picture the server keeps (never one sent P2P), or whoever wrote it.
+          ...(kept && reportsOn.pictures && messageMenu.m.authorId !== me?.id && messageMenu.picture?.fileId
+            ? [{ kind: 'item', label: 'Report picture…', icon: '⚑', onClick: () => onReport({ kind: 'picture', picture: 'attachment', id: messageMenu.picture!.fileId!, what: 'this picture' }) } as MenuEntry] : []),
+          ...(kept && reportsOn.pictures && messageMenu.emoji
+            ? [{ kind: 'item', label: `Report emoji :${messageMenu.emoji.name}:…`, icon: '⚑', onClick: () => onReport({ kind: 'picture', picture: 'emoji', id: messageMenu.emoji!.id, what: `the emoji :${messageMenu.emoji!.name}:` }) } as MenuEntry] : []),
+          ...(kept && reportsOn.pictures && messageMenu.m.authorId !== me?.id && messageMenu.m.sticker
+            ? [{ kind: 'item', label: 'Report sticker…', icon: '⚑', onClick: () => onReport({ kind: 'picture', picture: 'sticker', id: messageMenu.m.sticker!.id, what: 'the sticker ' + messageMenu.m.sticker!.name }) } as MenuEntry] : []),
+          ...(kept && reportsOn.people && messageMenu.m.authorId !== me?.id && !messageMenu.m.webhookId && !GAME_RESULTS.has(messageMenu.m.kind)
+            ? [{ kind: 'item', label: `Report ${nameIn(messageMenu.m.authorId, messageMenu.m.authorName)}…`, icon: '⚑', onClick: () => onReport({ kind: 'person', userId: messageMenu.m.authorId, name: nameIn(messageMenu.m.authorId, messageMenu.m.authorName) }, messageMenu.m.id) } as MenuEntry] : []),
           // In a P2P channel anyone may remove any message from their own device: it touches nobody else's copy.
           // The result of a roll, a flip or a round is the server's record: only someone who manages messages removes it.
           ...((messageMenu.m.authorId === me?.id && !GAME_RESULTS.has(messageMenu.m.kind)) || mayManageMessages || p2pChat
@@ -1986,7 +2018,7 @@ async function savePicture(src: string, name: string) {
  * A picture on a message. A click shows it as large as the window allows, with a button to save it; a click anywhere
  * else, or Escape, puts it away. (Right-clicking it offers saving too: see the message menu.)
  */
-function Picture({ src, name, onError }: { src: string; name: string; onError?: () => void }) {
+function Picture({ src, name, onError, fileId }: { src: string; name: string; onError?: () => void; fileId?: string }) {
   const [big, setBig] = useState(false)
   const [failed, setFailed] = useState('')
   useEffect(() => {
@@ -1998,7 +2030,7 @@ function Picture({ src, name, onError }: { src: string; name: string; onError?: 
   const save = () => { setFailed(''); void savePicture(src, name).catch(e => setFailed(e instanceof Error ? e.message : 'The picture could not be saved.')) }
   return (
     <>
-      <CheckedPicture src={src}><img className="attachment zoomable" src={src} alt={name} title={name} data-picture={name} onClick={() => setBig(true)} onError={onError} /></CheckedPicture>
+      <CheckedPicture src={src}><img className="attachment zoomable" src={src} alt={name} title={name} data-picture={name} data-file={fileId} onClick={() => setBig(true)} onError={onError} /></CheckedPicture>
       {big && createPortal(
         <div className="bigpicture" role="dialog" aria-label={name} onClick={() => setBig(false)}>
           <div className="bar" onClick={e => e.stopPropagation()}>
@@ -2043,7 +2075,7 @@ function AttachmentView({ file, pictures }: { file: AttachmentDto; pictures?: Me
   if (gone || (file.expired && (!desktop || kind === 'file'))) return expired
   if (kind === 'image') return (
     <>
-      <Picture src={src} name={file.fileName} onError={failed} />
+      <Picture src={src} name={file.fileName} onError={failed} fileId={file.id} />
       {pictures && <Reactions reactions={file.reactions ?? []} onToggle={(emoji, on) => pictures.toggle(file.id, emoji, on)} onMore={e => pictures.more(file.id, e)} />}
     </>
   )

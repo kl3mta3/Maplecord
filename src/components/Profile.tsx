@@ -149,11 +149,13 @@ const sketch = (a: Appearance): UserProfileDto => ({
 })
 
 /** A profile card at the pointer. */
-export function ProfilePopout({ store, userId, fallbackName, x, y, roles, nickname, serverName, onClose, onEdit }: {
+export function ProfilePopout({ store, userId, fallbackName, x, y, roles, nickname, serverName, onClose, onEdit, onReport }: {
   store: Store; userId: string; fallbackName: string; x: number; y: number; roles?: RoleDto[]
   /** Their nickname on the server being looked at, if any. */
   nickname?: string | null; serverName?: string
   onClose: () => void; onEdit: () => void
+  /** Reporting them, or their pictures: left out when this Maplecord has reporting switched off. */
+  onReport?: (profile: UserProfileDto) => void
 }) {
   const known = store.appearanceOf(userId)
   const [profile, setProfile] = useState<UserProfileDto>(() => sketch(known ?? { userId, username: fallbackName, displayName: null, avatarUrl: null, nameFont: null, nameColor: null, nameColor2: null, decoration: null }))
@@ -192,6 +194,7 @@ export function ProfilePopout({ store, userId, fallbackName, x, y, roles, nickna
             {isMe && <button className="accent" onClick={() => { onClose(); onEdit() }}>Edit profile</button>}
             {!isMe && !profile.isBot && <button className="accent" onClick={() => { void store.openDm(userId); onClose() }}>💬 Message</button>}
             {!isMe && !profile.isBot && !isFriend && <button disabled={pending} onClick={() => store.addFriend(userId)}>{pending ? 'Request sent' : '➕ Add friend'}</button>}
+            {!isMe && !profile.isBot && onReport && <button className="subtle" title="Report them, or their profile picture or banner" onClick={() => { onClose(); onReport(profile) }}>Report</button>}
           </div>
         </ProfileCardBody>
       </div>
