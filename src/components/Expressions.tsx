@@ -4,6 +4,7 @@ import type { ExpressionDto, ExpressionLibraryDto, GuildExpressionsDto, UsableEx
 import { CustomEmoji, nameFromFile, soundToWav } from '../expressions'
 import { ChevronDown, Search, Star, Volume2, VolumeX } from 'lucide-react'
 import { ConfirmDialog } from './Dialogs'
+import { checkBeforeSending } from '../pictureCheck'
 
 const KIND_NAMES = ['emoji', 'sticker', 'sound'] as const
 const KIND_TITLES = ['Emojis', 'Stickers', 'Sounds'] as const
@@ -182,6 +183,7 @@ export function GuildExpressionsTab({ api, guildId, meId, mayManage, mayGuild, i
   }
   const upload = () => adding && act(async () => {
     const file = adding.kind === 2 ? await soundToWav(adding.file) : adding.file
+    if (adding.kind !== 2) await checkBeforeSending(file, adding.kind === 0 ? 'as an emoji' : 'as a sticker')
     await api.uploadExpression(guildId, KIND_NAMES[adding.kind], adding.name.trim(), file, adding.kind === 2 ? 'sound.wav' : adding.file.name)
     setAdding(null)
   })

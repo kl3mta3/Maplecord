@@ -1,3 +1,4 @@
+import { CheckedPicture } from './CheckedPicture'
 import { useEffect, useRef, useState } from 'react'
 import type { AttachmentDto, MediaItem, MessageDto, NewPollDto, PollDto, ReactionDto, ReplyToDto, SearchResultDto } from '../types'
 import { isElectron } from '../platform'
@@ -213,7 +214,7 @@ function MediaPicture({ file }: { file: AttachmentDto }) {
   const { url, refresh } = useFileLink(file)
   const src = isElectron() ? `maplecord-plugin://files/${file.id}/${encodeURIComponent(file.fileName)}?u=${encodeURIComponent(url)}` : url
   return gone ? <span className="muted">No longer kept</span>
-    : <img src={src} alt={file.fileName} loading="lazy" onError={() => { void refresh().then(next => { if (!next || next === url) setGone(true) }) }} />
+    : <CheckedPicture src={src}><img src={src} alt={file.fileName} loading="lazy" onError={() => { void refresh().then(next => { if (!next || next === url) setGone(true) }) }} /></CheckedPicture>
 }
 
 /** One message as a line in a list (pins, search results): who, when, and the start of what it says. */
@@ -323,7 +324,7 @@ export function GalleryGrid({ posts, nameOf, onOpen, onLike, cover }: {
         return (
           <div key={m.id} className="gallerypost">
             <button className="cover" onClick={() => onOpen(m)} title={`${m.title ?? ''} — by ${nameOf(m)}`}>
-              {cover ? cover(m) : pictures[0] ? <img src={pictures[0].url} alt={m.title ?? ''} loading="lazy" /> : <span className="muted">This picture is no longer kept</span>}
+              {cover ? cover(m) : pictures[0] ? <CheckedPicture src={pictures[0].url}><img src={pictures[0].url} alt={m.title ?? ''} loading="lazy" /></CheckedPicture> : <span className="muted">This picture is no longer kept</span>}
               {many > 1 && <span className="more">+{many - 1}</span>}
             </button>
             <div className="posttitle" title={m.title ?? ''}>{m.title}</div>

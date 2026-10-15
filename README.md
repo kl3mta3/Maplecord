@@ -35,6 +35,10 @@ one.
 - Files, pictures and videos in chat; pictures and videos show right there
 - Send a file by dropping it on the chat, or by pasting it into the message box
 - See only the pictures and videos of a channel or a conversation, as a grid; click one to go to its message
+- Pictures that may be explicit stay blurred until clicked. Each is checked on your own device and nothing is sent
+  anywhere for it; it can be switched off in Settings, Status & privacy
+- A picture going somewhere public (a public server, your profile, a server's icon, an emoji or sticker) is checked on
+  your device before it is sent, and one that is plainly explicit is not sent. The server checks it again
 - Voice messages: record up to 15 minutes and post it, and it plays right in the chat (so do other sound files)
 - Unread counts, per-channel and per-server mute, and folders to group your servers. Drag servers and folders to
   put them in the order you like

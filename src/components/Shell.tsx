@@ -32,6 +32,8 @@ function parseRange(text: string): [number, number] | null {
 }
 import { PastedDialog, AllowDirectDialog, BanDialog, ConfirmDialog, CreateChannelDialog, DeleteGroupDialog, DirectChannelDialog, IncomingCallDialog, P2PCallDialog, NicknameDialog, PromptDialog, StartRollDialog } from './Dialogs'
 import { OverlaySettingsDialog, ServerSettingsDialog } from './Settings'
+import { CheckedPicture } from './CheckedPicture'
+import { readyPictureCheck, setPictureCheckOn } from '../pictureCheck'
 import { ExpressionPicker, SoundboardPanel, StickerView } from './Expressions'
 import { onlyEmojis, setExpressionServer, toTokens, withEmojis } from '../expressions'
 import type { ExpressionDto, UsableExpressionsDto } from '../types'
@@ -346,6 +348,14 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   const openCard = (e: React.MouseEvent, userId: string, name: string) => { e.stopPropagation(); if (g) store.needMembers(g.guild.id, [userId]); setCard({ userId, name, x: e.clientX + 12, y: e.clientY - 40 }) }
   const serverUrl = store.settings.serverUrl
   setExpressionServer(serverUrl)
+  setPictureCheckOn(store.settings.blurExplicit !== false)
+  // The picture check is made ready a few seconds after the app opens, out of the way of signing in and the first view.
+  const checkPictures = store.settings.blurExplicit !== false
+  useEffect(() => {
+    if (!checkPictures) return
+    const later = window.setTimeout(readyPictureCheck, 3000)
+    return () => window.clearTimeout(later)
+  }, [checkPictures])
   /** Someone's nameplate, drawn behind their row in the member, friends and conversation lists. */
   const plateOf = (userId: string) => nameplateLook(serverUrl, store.appearanceOf(userId)?.nameplate)
   const mine = me ? store.appearanceOf(me.id) : null
@@ -1818,7 +1828,7 @@ function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu,
             {e.title && <div className="title">{e.url ? <a href={e.url} target="_blank" rel="noreferrer" style={{ color: 'inherit' }}>{e.title}</a> : e.title}</div>}
             {e.description && <div className="body">{e.description}</div>}
             {e.fields?.map((f, j) => <div key={j} className="line"><b>{f.name}</b> {f.value}</div>)}
-            {serverMediaUrl(serverUrl, e.imageUrl) && <img className="attachment" src={serverMediaUrl(serverUrl, e.imageUrl)!} alt="" />}
+            {serverMediaUrl(serverUrl, e.imageUrl) && <CheckedPicture src={serverMediaUrl(serverUrl, e.imageUrl)!}><img className="attachment" src={serverMediaUrl(serverUrl, e.imageUrl)!} alt="" /></CheckedPicture>}
             {e.footer && <div className="line">{e.footer}</div>}
           </div>
         ))}
@@ -1911,7 +1921,7 @@ function P2PTile({ store, channelId, authorId, file }: { store: Store; channelId
   const reachable = store.p2pText?.channelId === channelId ? store.p2pText.reachable : 0
   const { loadP2pFile } = store
   useEffect(() => { void loadP2pFile(channelId, file, authorId, byItself) }, [loadP2pFile, channelId, file.hash, authorId, byItself, reachable]) // eslint-disable-line react-hooks/exhaustive-deps
-  if (view?.url) return <img src={view.url} alt={file.name} />
+  if (view?.url) return <CheckedPicture src={view.url}><img src={view.url} alt={file.name} /></CheckedPicture>
   return <span className="muted">{view?.state === 'fetching' ? `Fetching · ${Math.min(100, Math.round(view.got / file.size * 100))}%` : view?.state === 'nobody' ? 'Nobody connected has it right now' : byItself ? 'Fetching…' : file.name}</span>
 }
 
@@ -1925,7 +1935,7 @@ function P2PCover({ store, m }: { store: Store; m: MessageDto }) {
   const { loadP2pFile } = store
   useEffect(() => { if (file) void loadP2pFile(m.channelId, file, m.authorId, byItself) }, [loadP2pFile, m.channelId, file?.hash, m.authorId, byItself, reachable]) // eslint-disable-line react-hooks/exhaustive-deps
   if (!file) return <span className="muted">No picture</span>
-  if (view?.url) return <img src={view.url} alt={m.title ?? ''} />
+  if (view?.url) return <CheckedPicture src={view.url}><img src={view.url} alt={m.title ?? ''} /></CheckedPicture>
   return <span className="muted">{view?.state === 'fetching' ? `Fetching · ${Math.min(100, Math.round(view.got / file.size * 100))}%`
     : view?.state === 'nobody' ? 'Nobody connected has this picture right now' : view?.state === 'relay' ? 'Too large to fetch through the relay' : !byItself ? 'A large picture: open the post to fetch it' : 'Fetching…'}</span>
 }
@@ -1988,7 +1998,7 @@ function Picture({ src, name, onError }: { src: string; name: string; onError?: 
   const save = () => { setFailed(''); void savePicture(src, name).catch(e => setFailed(e instanceof Error ? e.message : 'The picture could not be saved.')) }
   return (
     <>
-      <img className="attachment zoomable" src={src} alt={name} title={name} data-picture={name} onClick={() => setBig(true)} onError={onError} />
+      <CheckedPicture src={src}><img className="attachment zoomable" src={src} alt={name} title={name} data-picture={name} onClick={() => setBig(true)} onError={onError} /></CheckedPicture>
       {big && createPortal(
         <div className="bigpicture" role="dialog" aria-label={name} onClick={() => setBig(false)}>
           <div className="bar" onClick={e => e.stopPropagation()}>

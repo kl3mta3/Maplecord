@@ -1,3 +1,4 @@
+import { checkBeforeSending } from './pictureCheck'
 import { plainEmojis, playSound as playExpressionSound } from './expressions'
 import type { CommunityPollAnswerDto, CommunityPollDto, UsableExpressionsDto } from './types'
 import { shouldAsk } from './communityPoll'
@@ -475,6 +476,8 @@ export function useMaplecord() {
 
   const selected = useRef({ guild: null as string | null, channel: null as string | null })
   const guildsRef = useRef<GuildState[]>([])
+  /** Whether a channel is in a public server, where pictures are checked before they are sent. */
+  const inPublicServer = (channelId: string) => guildsRef.current.some(g => g.guild.isPublic && g.channels.some(c => c.id === channelId))
   const activeRollRef = useRef<ActiveRoll | null>(null)
   const typingTimer = useRef<number | undefined>(undefined)
   const rollClearTimer = useRef<number | undefined>(undefined)
@@ -1534,6 +1537,8 @@ export function useMaplecord() {
         }
         throw new Error(`${file.name} is ${(file.size / 1048576).toFixed(1)} MB. The limit here is ${(rules.maxBytes / 1048576).toFixed(0)} MB.`)
       }
+      // In a public server the picture is checked here first (see checkBeforeSending); the server checks it again.
+      if (inPublicServer(channelId)) await checkBeforeSending(file, 'in a public server')
       setUploading(file.name)
       try {
         const a = await api.upload(channelId, file)
@@ -1617,6 +1622,7 @@ export function useMaplecord() {
     let ok = false
     await run(async () => {
       const ids: string[] = []
+      if (inPublicServer(channelId)) for (const file of files) await checkBeforeSending(file, 'in a public server')
       try {
         for (const file of files) { setUploading(file.name); ids.push((await api.upload(channelId, file)).id) }
       } finally { setUploading(null) }
@@ -2102,7 +2108,7 @@ export function useMaplecord() {
     const g = selected.current.guild
     if (!g) return
     await run(async () => {
-      if (file) { const guild = await api.uploadGuildIcon(g, file); patchGuild(g, x => ({ ...x, guild })) }
+      if (file) { await checkBeforeSending(file, 'as a server icon'); const guild = await api.uploadGuildIcon(g, file); patchGuild(g, x => ({ ...x, guild })) }
       else { await api.deleteGuildIcon(g); patchGuild(g, x => ({ ...x, guild: { ...x.guild, iconUrl: null } })) }
     })
   }, [api, patchGuild])
@@ -2110,7 +2116,7 @@ export function useMaplecord() {
     const g = selected.current.guild
     if (!g) return
     await run(async () => {
-      if (file) { const guild = await api.uploadGuildBanner(g, file); patchGuild(g, x => ({ ...x, guild })) }
+      if (file) { await checkBeforeSending(file, 'as a server banner'); const guild = await api.uploadGuildBanner(g, file); patchGuild(g, x => ({ ...x, guild })) }
       else { await api.deleteGuildBanner(g); patchGuild(g, x => ({ ...x, guild: { ...x.guild, bannerUrl: null } })) }
     })
   }, [api, patchGuild])
@@ -2512,6 +2518,7 @@ export function useMaplecord() {
   const saveProfile = useCallback(async (patch: UpdateProfileRequest) => { const p = await api.updateProfile(patch); applyOwnProfile(p); return p }, [api, applyOwnProfile])
   const setProfilePicture = useCallback(async (kind: 'avatar' | 'banner', file: File | null) => {
     const small = file ? await shrinkPicture(file, kind) : null
+    if (small) await checkBeforeSending(small, kind === 'avatar' ? 'as a profile picture' : 'as a profile banner')
     const p = small ? await (kind === 'avatar' ? api.uploadAvatar(small) : api.uploadBanner(small)) : await (kind === 'avatar' ? api.deleteAvatar() : api.deleteBanner())
     applyOwnProfile(p)
     return p
@@ -2519,6 +2526,7 @@ export function useMaplecord() {
 
   /** Stores a nameplate picture of our own and wears it, or with null takes ours away. */
   const setOwnNameplate = useCallback(async (file: File | null) => {
+    if (file) await checkBeforeSending(file, 'as a nameplate')
     const p = file ? await api.uploadNameplate(file) : await api.deleteNameplate()
     applyOwnProfile(p)
     return p

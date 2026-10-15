@@ -32,6 +32,8 @@ export interface Settings {
   /** Soundboard sounds marked as favourites, by id: shown first in the soundboard, on this device. */
   soundFavorites?: string[]
   /** Soundboard sounds chosen for moments (a win, a message) in place of the pack's, on this device (Customize sounds). */
+  /** Pictures in messages are checked on this device and blurred if they may be explicit (see pictureCheck.ts). Unset: on. */
+  blurExplicit?: boolean
   soundChoices?: Partial<Record<import('./soundTypes').SoundEvent, { id: string; name: string; url: string }>>
   /** When the microphone is sent: while talking (the default), or while a key is held. */
   voiceMode?: 'activity' | 'push'

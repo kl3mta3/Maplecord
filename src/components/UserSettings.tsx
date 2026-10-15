@@ -113,6 +113,13 @@ export function UserSettingsDialog({ store, initial, onOpen, onAllowDirect, onSi
               ))}
               <div className="muted">On Online, you are shown as idle by itself after 10 minutes without using the keyboard or mouse (anywhere on your computer in the desktop app, in Maplecord in a browser), unless you are in a voice channel or a call.</div>
 
+              <h4>Pictures</h4>
+              <label className="switch">
+                <input type="checkbox" checked={store.settings.blurExplicit !== false} onChange={e => store.updateSettings({ blurExplicit: e.target.checked })} />
+                <span className="track" /><span>Blur pictures that may be explicit</span>
+              </label>
+              <div className="muted">Pictures in messages are looked at on this device before they are shown, and nothing is sent anywhere for it. One that may be explicit stays blurred until you click it. It can be wrong both ways. This is set for this device only.</div>
+
               <h4>Friend requests</h4>
               <label className="switch">
                 <input type="checkbox" checked={prefs.ignoreFriendRequests} onChange={e => void store.savePreferences({ ignoreFriendRequests: e.target.checked })} />
