@@ -10,6 +10,7 @@ export function signInProblem(code: string): string {
     case 'login_failed': return 'Sign-in did not finish. Try again.'
     case 'signups_closed': return 'New accounts are closed right now.'
     case 'suspended': return 'This account is suspended.'
+    case 'signin_off': return 'That way of signing in is switched off on this server. Sign in another way.'
     case 'account_too_new': return 'That account is too new to start a Maplecord account with. Sign in another way, or try again when it is older.'
     case 'email_unverified': return 'The email address on that account has not been confirmed with its service. Confirm it there, then try again.'
     case 'email_needed': return 'That account has no email address, and a new Maplecord account needs one here.'

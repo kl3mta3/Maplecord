@@ -87,13 +87,20 @@ export interface NativeAppPlugin {
    * Asks the phone for leave to notify, and for the phone's push token. Null token: not allowed, or no answer from
    * Apple. `sandbox` says whether this build talks to Apple's test push service (one run from Xcode) or the real one.
    */
-  pushRegister(): Promise<{ token: string | null; sandbox: boolean; error?: string }>
+  pushRegister(): Promise<{ token: string | null; voipToken?: string | null; sandbox: boolean; error?: string }>
+  /**
+   * The sign-in, for the moments the page is not running: a call that comes in while the app is closed is looked up,
+   * and declined if declined, by the shell itself. Given on signing in and whenever the token is renewed; null on signing out.
+   */
+  setSession(o: { serverUrl: string | null; token: string | null }): Promise<void>
   addListener<K extends keyof NativeAppEvents>(event: K, handler: (data: NativeAppEvents[K]) => void): Promise<{ remove: () => Promise<void> }>
 }
 
 export interface NativeAppEvents {
   /** A notification was tapped: which conversation it was about. */
   pushOpened: { channelId?: string; guildId?: string }
+  /** A call was answered on the phone's own call screen: the page joins it. */
+  callAnswered: { callId: string; channelId: string; direct: boolean; callerName: string }
 }
 
 interface CapacitorGlobal {

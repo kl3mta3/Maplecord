@@ -55,6 +55,9 @@ button.provider.apple:disabled { opacity: .6; }
 .login button.more { align-self: center; }
 /* "Demo sign on": a small underlined label at the very bottom of the other ways to sign in. */
 .login button.demo-link { align-self: center; background: none; border: none; padding: 2px 4px; font-size: 12px; color: var(--muted); text-decoration: underline; cursor: pointer; }
+/* A way of signing in switched off on the server for now: still there, plainly not working; pressing it says why. */
+.login button.provider.off, .login button.provider.off:hover { background: var(--bg3, #2a2a36); color: var(--muted); border-style: dashed; opacity: 0.75; cursor: not-allowed; }
+.login button.demo-link.off { text-decoration: line-through; cursor: not-allowed; }
 
 /* ---- Shell ---- */
 .shell { display: grid; grid-template-columns: 72px 236px minmax(0, 1fr) 220px; height: 100%; }

@@ -20,6 +20,8 @@ export default function Login({ store, onSignedIn }: { store: Store; onSignedIn:
   // The server this app was made for. There is no choosing another one here.
   const serverUrl = DEFAULT_SERVER_URL
   const [providers, setProviders] = useState<string[] | null>(null)
+  // Ways whoever runs the server switched off for now: still shown, looking switched off, and saying so when pressed.
+  const [off, setOff] = useState<string[]>([])
   const [more, setMore] = useState(false)
   const [devUsername, setDevUsername] = useState('')
   // "Demo sign on": a demo ID and password in place of a sign-in service.
@@ -38,9 +40,10 @@ export default function Login({ store, onSignedIn }: { store: Store; onSignedIn:
   const check = async () => {
     setBusy(true); setStatus('Checking server…')
     try {
-      const list = await store.api.providers(serverUrl)
+      const [list, switchedOff] = await Promise.all([store.api.providers(serverUrl), store.api.providersOff(serverUrl)])
       setProviders(list)
-      setStatus(list.length === 0 ? 'Server has no sign-in providers configured.' : '')
+      setOff(switchedOff)
+      setStatus(list.length === 0 && switchedOff.length === 0 ? 'Server has no sign-in providers configured.' : '')
       store.updateSettings({ serverUrl: serverUrl.replace(/\/$/, '') })
     } catch (e) {
       setProviders(null)
@@ -108,14 +111,17 @@ export default function Login({ store, onSignedIn }: { store: Store; onSignedIn:
     finally { setBusy(false) }
   }
 
-  const first = SHOWN_FIRST.filter(p => providers?.includes(p))
-  const rest = BEHIND_MORE.filter(p => providers?.includes(p))
+  const listed = (p: string) => providers?.includes(p) || off.includes(p)
+  const first = SHOWN_FIRST.filter(listed)
+  const rest = BEHIND_MORE.filter(listed)
   // Offered while whoever runs the server has made demo accounts (for App Store review and the like).
-  const hasDemo = providers?.includes('demo') ?? false
+  const hasDemo = listed('demo')
+  const switchedOff = (what: string) => () => setStatus(`${what} is switched off on this server right now. Sign in another way.`)
   // With none of the first three on offer, the others are simply shown.
   const open = more || first.length === 0
   const button = (p: string) => (
-    <button key={p} className={providerButtonClass(p)} onClick={() => loginWith(p)} disabled={busy}
+    <button key={p} className={providerButtonClass(p) + (off.includes(p) ? ' off' : '')} aria-disabled={off.includes(p) || undefined}
+      onClick={off.includes(p) ? switchedOff(`Signing in with ${SIGN_IN_NAMES[p] ?? p}`) : () => loginWith(p)} disabled={busy}
       title={ADD_ONLY_SIGN_INS.includes(p) ? `For accounts that have added ${SIGN_IN_NAMES[p]} as a way to sign in. It cannot start a new account.` : undefined}><ProviderButtonBody provider={p} /></button>
   )
 
@@ -148,7 +154,8 @@ export default function Login({ store, onSignedIn }: { store: Store; onSignedIn:
               <button className="subtle more" onClick={() => setMore(on => !on)} aria-expanded={open}>{open ? 'Fewer ways to sign in' : 'More ways to sign in'}</button>
             )}
             {open && rest.map(button)}
-            {open && hasDemo && <button className="demo-link" onClick={() => { setDemo(true); setStatus('') }}>Demo sign on</button>}
+            {open && hasDemo && <button className={'demo-link' + (off.includes('demo') ? ' off' : '')}
+              onClick={off.includes('demo') ? switchedOff('Demo sign on') : () => { setDemo(true); setStatus('') }}>Demo sign on</button>}
           </>
         )}
         {!waiting && providers?.includes('dev') && (

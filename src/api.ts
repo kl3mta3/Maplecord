@@ -72,6 +72,10 @@ export class Api {
   providers(serverUrl: string) {
     return fetch(serverUrl.replace(/\/$/, '') + '/auth/providers').then(r => { if (!r.ok) throw new ApiError('Server unreachable', r.status); return r.json() as Promise<string[]> })
   }
+  /** The ways of signing in whoever runs the server switched off for now. Empty from a server too old to say. */
+  providersOff(serverUrl: string) {
+    return fetch(serverUrl.replace(/\/$/, '') + '/auth/providers/off').then(r => (r.ok ? (r.json() as Promise<string[]>) : [])).catch(() => [] as string[])
+  }
   devLogin(serverUrl: string, username: string) {
     return fetch(serverUrl.replace(/\/$/, '') + '/auth/dev-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username }) })
       .then(async r => { if (!r.ok) throw new ApiError('Dev login failed', r.status); return (await r.json()) as TokenResponse })
@@ -198,7 +202,7 @@ export class Api {
   privacy() { return this.request<PrivacyDto>('GET', '/api/me/privacy') }
   preferences() { return this.request<PreferencesDto>('GET', '/api/me/preferences') }
   /** The phone this app runs on, to be told of messages while the app is closed (the iPhone app; see native/app.ts). */
-  pushDevice(body: { platform: 'ios'; token: string; sandbox: boolean; choices: PushChoices }) { return this.request<void>('PUT', '/api/me/push-devices', body) }
+  pushDevice(body: { platform: 'ios'; token: string; voipToken?: string | null; sandbox: boolean; choices: PushChoices }) { return this.request<void>('PUT', '/api/me/push-devices', body) }
   forgetPushDevice(token: string) { return this.request<void>('DELETE', `/api/me/push-devices/${encodeURIComponent(token)}`) }
   setPreferences(p: PreferencesDto) { return this.request<PreferencesDto>('PUT', '/api/me/preferences', p) }
   blocks() { return this.request<UserDto[]>('GET', '/api/blocks') }

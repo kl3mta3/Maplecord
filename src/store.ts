@@ -20,7 +20,7 @@ import { readPackZip } from './soundPackZip'
 import { applyTheme } from './theme'
 import { VoiceConnectError, VoiceEngine, type IcePolicy, type VoiceEngineEvents } from './voice'
 import { NativeVoiceEngine } from './nativeVoice'
-import { isNativeApp, nativeApp } from './native/app'
+import { isNativeApp, nativeApp, type NativeAppEvents } from './native/app'
 import { nativeSignIn } from './native/signIn'
 import { phoneChoices } from './pushChoices'
 import { signInProblem } from './components/SignIn'
@@ -1173,20 +1173,43 @@ export function useMaplecord() {
   // The phone is registered with the server once signed in and loaded, and again whenever what it wants to be told
   // of changes; it is forgotten when signing out. A tapped notification opens its conversation.
   const phoneToken = useRef<string | null>(null)
+  const phoneVoipToken = useRef<string | null>(null)
   const openFromPush = useRef<string | null>(null)
   const registerPhone = useCallback(async () => {
     try {
       const got = await nativeApp().pushRegister()
       if (!got.token) { console.debug('[push]', got.error ?? 'no token'); return }
       phoneToken.current = got.token
-      await api.pushDevice({ platform: 'ios', token: got.token, sandbox: got.sandbox, choices: phoneChoices(settingsRef.current) })
+      phoneVoipToken.current = got.voipToken ?? null
+      await api.pushDevice({ platform: 'ios', token: got.token, voipToken: got.voipToken ?? null, sandbox: got.sandbox, choices: phoneChoices(settingsRef.current) })
     } catch (e) { console.debug('[push] not registered:', e instanceof Error ? e.message : e) }
   }, [api])
+  // The shell keeps the sign-in for calls that come in while the page is not running (see native/app.ts setSession).
+  const sessionToken = settings.accessToken ?? null
+  useEffect(() => {
+    if (!isNativeApp()) return
+    void nativeApp().setSession({ serverUrl: sessionToken ? settingsRef.current.serverUrl : null, token: sessionToken }).catch(() => {})
+  }, [sessionToken])
+  // A call answered on the phone's own screen: joined here once the page is up and connected.
+  const answerFromPhone = useRef<NativeAppEvents['callAnswered'] | null>(null)
+  const joinAnsweredRef = useRef<(c: NativeAppEvents['callAnswered']) => void>(() => {})
+  useEffect(() => {
+    if (!isNativeApp()) return
+    let handle: { remove: () => Promise<void> } | null = null
+    void nativeApp().addListener('callAnswered', c => { if (readyRef.current) joinAnsweredRef.current(c); else answerFromPhone.current = c }).then(h => { handle = h })
+    return () => { void handle?.remove() }
+  }, [])
+  useEffect(() => {
+    if (!ready || !answerFromPhone.current) return
+    const c = answerFromPhone.current
+    answerFromPhone.current = null
+    joinAnsweredRef.current(c)
+  }, [ready])
   const pushPrefsKey = isNativeApp() ? JSON.stringify(phoneChoices(settings)) : ''
   useEffect(() => {
     if (!isNativeApp() || !phoneToken.current || !ready) return
     const token = phoneToken.current
-    const t = window.setTimeout(() => { void api.pushDevice({ platform: 'ios', token, sandbox: false, choices: phoneChoices(settingsRef.current) }).catch(() => {}) }, 1500)
+    const t = window.setTimeout(() => { void api.pushDevice({ platform: 'ios', token, voipToken: phoneVoipToken.current, sandbox: false, choices: phoneChoices(settingsRef.current) }).catch(() => {}) }, 1500)
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-sent when the choices it carries change
   }, [pushPrefsKey, ready, api])
@@ -2616,6 +2639,13 @@ export function useMaplecord() {
       })
     } finally { answeringRef.current = false }
   }, [enterCall, leaveVoice, setCall, voiceHub])
+
+  // The phone's own call screen answered a call (see native/app.ts): it is the incoming call here, and is joined.
+  joinAnsweredRef.current = c => {
+    if (callRef.current && callRef.current.id !== c.callId) return
+    setCall({ id: c.callId, channelId: c.channelId, direct: c.direct, otherId: '', otherName: c.callerName, phase: 'incoming' })
+    void answerCall()
+  }
 
   const declineCall = useCallback(async () => {
     const c = callRef.current
