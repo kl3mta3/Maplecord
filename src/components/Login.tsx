@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
 import { bridge, DEFAULT_SERVER_URL } from '../platform'
+import { isNativeApp } from '../native/app'
+import { nativeSignIn } from '../native/signIn'
 import type { Store } from '../store'
-import { ADD_ONLY_SIGN_INS, SIGN_IN_NAMES, signInProblem } from './SignIn'
+import { ADD_ONLY_SIGN_INS, ProviderButtonBody, SIGN_IN_NAMES, providerButtonClass, signInProblem } from './SignIn'
 
 /** Where a browser keeps the ticket of a sign-in that is waiting on an email, across the trip to the sign-in service and back. */
 export const PENDING_SIGN_IN = 'maplecord.pendingSignIn'
 type Waiting = { ticket: string; email: string }
 /** The services shown straight away; any others the server offers are behind "More ways to sign in". */
-const SHOWN_FIRST = ['google', 'github', 'microsoft']
+const SHOWN_FIRST = ['apple', 'google', 'github', 'microsoft']
 const BEHIND_MORE = ['twitch', 'steam', 'battlenet']
 
 function waitingSignIn(): Waiting | null {
@@ -20,6 +22,10 @@ export default function Login({ store, onSignedIn }: { store: Store; onSignedIn:
   const [providers, setProviders] = useState<string[] | null>(null)
   const [more, setMore] = useState(false)
   const [devUsername, setDevUsername] = useState('')
+  // "Demo sign on": a demo ID and password in place of a sign-in service.
+  const [demo, setDemo] = useState(false)
+  const [demoId, setDemoId] = useState('')
+  const [demoPassword, setDemoPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('')
   // A new person on a server that wants the email confirmed first: nothing more happens here until the link is opened.
@@ -52,8 +58,9 @@ export default function Login({ store, onSignedIn }: { store: Store; onSignedIn:
     setBusy(true); setStatus('Waiting for sign-in in your browser…')
     try {
       const b = bridge()
-      if (b) {
-        const result = await b.oauthSignIn(serverUrl, provider)
+      if (b || isNativeApp()) {
+        // The desktop app opens the browser and listens for the answer; the phone app opens its own sign-in sheet.
+        const result = b ? await b.oauthSignIn(serverUrl, provider) : await nativeSignIn(serverUrl, provider)
         if (result.code) finish(await store.api.exchangeCode(serverUrl, result.code))
         else if (result.pending) setWaiting({ ticket: result.pending, email: result.email ?? '' })
         setStatus(result.code || result.pending ? '' : signInProblem(result.error ?? 'login_failed'))
@@ -93,13 +100,23 @@ export default function Login({ store, onSignedIn }: { store: Store; onSignedIn:
     finally { setBusy(false) }
   }
 
+  const demoLogin = async () => {
+    if (!demoId.trim() || !demoPassword) { setStatus('Enter the demo ID and password you were given.'); return }
+    setBusy(true); setStatus('')
+    try { finish(await store.api.demoLogin(serverUrl, demoId.trim(), demoPassword)) }
+    catch (e) { setStatus(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+
   const first = SHOWN_FIRST.filter(p => providers?.includes(p))
   const rest = BEHIND_MORE.filter(p => providers?.includes(p))
+  // Offered while whoever runs the server has made demo accounts (for App Store review and the like).
+  const hasDemo = providers?.includes('demo') ?? false
   // With none of the first three on offer, the others are simply shown.
   const open = more || first.length === 0
   const button = (p: string) => (
-    <button key={p} className="provider" onClick={() => loginWith(p)} disabled={busy}
-      title={ADD_ONLY_SIGN_INS.includes(p) ? `For accounts that have added ${SIGN_IN_NAMES[p]} as a way to sign in. It cannot start a new account.` : undefined}>Sign in with {SIGN_IN_NAMES[p]}</button>
+    <button key={p} className={providerButtonClass(p)} onClick={() => loginWith(p)} disabled={busy}
+      title={ADD_ONLY_SIGN_INS.includes(p) ? `For accounts that have added ${SIGN_IN_NAMES[p]} as a way to sign in. It cannot start a new account.` : undefined}><ProviderButtonBody provider={p} /></button>
   )
 
   return (
@@ -115,13 +132,23 @@ export default function Login({ store, onSignedIn }: { store: Store; onSignedIn:
             <button className="provider" onClick={() => void checkWaiting()} disabled={busy}>I have opened the link</button>
             <button className="subtle" onClick={() => { setWaiting(null); setStatus('') }}>Start again</button>
           </>
+        ) : demo ? (
+          <>
+            <h3 style={{ margin: '8px 0 0' }}>Demo sign on</h3>
+            <div className="muted">For the demo ID and password you were given.</div>
+            <input placeholder="Demo ID" value={demoId} onChange={e => setDemoId(e.target.value)} autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="username" disabled={busy} autoFocus />
+            <input type="password" placeholder="Demo password" value={demoPassword} onChange={e => setDemoPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && void demoLogin()} autoComplete="current-password" disabled={busy} />
+            <button className="provider accent" onClick={() => void demoLogin()} disabled={busy}>Sign in</button>
+            <button className="subtle" onClick={() => { setDemo(false); setDemoPassword(''); setStatus('') }} disabled={busy}>Other ways to sign in</button>
+          </>
         ) : (
           <>
             {first.map(button)}
-            {first.length > 0 && rest.length > 0 && (
+            {first.length > 0 && (rest.length > 0 || hasDemo) && (
               <button className="subtle more" onClick={() => setMore(on => !on)} aria-expanded={open}>{open ? 'Fewer ways to sign in' : 'More ways to sign in'}</button>
             )}
             {open && rest.map(button)}
+            {open && hasDemo && <button className="demo-link" onClick={() => { setDemo(true); setStatus('') }}>Demo sign on</button>}
           </>
         )}
         {!waiting && providers?.includes('dev') && (

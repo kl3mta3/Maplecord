@@ -20,12 +20,26 @@ export function signInProblem(code: string): string {
 }
 
 /** What each sign-in service is called on a button. */
-export const SIGN_IN_NAMES: Record<string, string> = { google: 'Google', github: 'GitHub', microsoft: 'Microsoft', twitch: 'Twitch', steam: 'Steam', battlenet: 'Battle.net' }
+export const SIGN_IN_NAMES: Record<string, string> = { apple: 'Apple', google: 'Google', github: 'GitHub', microsoft: 'Microsoft', twitch: 'Twitch', steam: 'Steam', battlenet: 'Battle.net' }
 /** The services that give no email address: they cannot start an account, only be added to one. */
 export const ADD_ONLY_SIGN_INS = ['steam', 'battlenet']
 
 /** What the button that signs in with a service says. */
 export const signInLabel = (provider: string) => (SIGN_IN_NAMES[provider] ? `Sign in with ${SIGN_IN_NAMES[provider]}` : provider)
+
+/**
+ * Apple's mark, for its button: Apple's rules for "Sign in with Apple" ask for the logo beside the words, on a black
+ * (or white) button in the system's own face. Used nowhere else.
+ */
+export const AppleMark = () => (
+  <svg className="applemark" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701" />
+  </svg>
+)
+
+/** The class of a sign-in button for a service, and what goes inside it (Apple's gets its mark). */
+export const providerButtonClass = (provider: string) => (provider === 'apple' ? 'provider apple' : 'provider')
+export const ProviderButtonBody = ({ provider }: { provider: string }) => <>{provider === 'apple' && <AppleMark />}{signInLabel(provider)}</>
 
 /**
  * Settings, My account: the services this account can be signed in to with (adding one, removing one), and the
@@ -101,7 +115,7 @@ export function AccountSignIn({ store }: { store: Store }) {
           <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
             {provers === null && <span className="muted">Checking how you can sign in…</span>}
             {provers?.length === 0 && <span className="muted">This server has no way to sign in again.</span>}
-            {provers?.map(p => <button key={p} className={p === 'dev' ? '' : 'provider'} onClick={() => void prove(p)}>{p === 'dev' ? `Development sign-in as ${store.settings.user?.username ?? ''}` : signInLabel(p)}</button>)}
+            {provers?.map(p => <button key={p} className={p === 'dev' ? '' : providerButtonClass(p)} onClick={() => void prove(p)}>{p === 'dev' ? `Development sign-in as ${store.settings.user?.username ?? ''}` : <ProviderButtonBody provider={p} />}</button>)}
             <button className="subtle" onClick={() => setProving(null)}>Cancel</button>
           </div>
           {provingProblem && <div className="muted">{provingProblem}</div>}

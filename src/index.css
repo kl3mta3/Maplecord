@@ -46,7 +46,15 @@ input:focus, textarea:focus { border-color: var(--accent); }
 .login h1 { margin: 0; text-align: center; font-size: 34px; font-weight: 900; }
 .login .tagline { text-align: center; margin-bottom: 12px; }
 .login button.provider { padding: 10px 12px; }
+/* Sign in with Apple, as Apple's rules have it: black, the system's own face, the mark beside the words. */
+button.provider.apple { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 10px 16px; border-radius: 8px;
+  background: #000; color: #fff; border: 1px solid #000; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-weight: 600; font-size: 15px; }
+button.provider.apple:hover:not(:disabled) { background: #1a1a1a; border-color: #1a1a1a; }
+button.provider.apple:disabled { opacity: .6; }
+.applemark { width: 18px; height: 18px; fill: currentColor; flex: none; margin-top: -2px; }
 .login button.more { align-self: center; }
+/* "Demo sign on": a small underlined label at the very bottom of the other ways to sign in. */
+.login button.demo-link { align-self: center; background: none; border: none; padding: 2px 4px; font-size: 12px; color: var(--muted); text-decoration: underline; cursor: pointer; }
 
 /* ---- Shell ---- */
 .shell { display: grid; grid-template-columns: 72px 236px minmax(0, 1fr) 220px; height: 100%; }
@@ -775,6 +783,13 @@ button.danger:hover { background: var(--red); color: #fff; }
   .fileoffer, .card { max-width: 100%; }
   .stage .tile video { max-height: 40dvh; }
   .selfbar .who { flex-basis: 100px; }
+  /* A phone's notch and home bar (the page asks for the whole screen: viewport-fit=cover in index.html). */
+  .shell > .mobilebar { padding-top: calc(6px + env(safe-area-inset-top, 0px)); }
+  .shell > .userpanel { padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
+  .shell > .chat .composer { padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
+  .shell.pane-people > .members { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .dialog { padding-top: calc(16px + env(safe-area-inset-top, 0px)); padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+  .login { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
 }
 
 .dialog label.row { flex-wrap: wrap; }

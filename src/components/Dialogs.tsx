@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { ChannelType, RollKind, RollRange, type ChannelDto, type RollItemDto } from '../types'
 import type { CatalogHit } from '../store'
-import { signInLabel } from './SignIn'
+import { ProviderButtonBody, providerButtonClass } from './SignIn'
 
 /** What P2P means, in a sentence or two, wherever it is mentioned. Shows on hover, on focus, and on click (for touch). */
 export function P2PInfo() {
@@ -114,7 +114,7 @@ export function AllowDirectDialog({ providers, username, onSignIn, onClose }: {
       <div className="muted">To make sure it is really you deciding, sign in again:</div>
       {providers === null && <div className="muted">Checking how you can sign in…</div>}
       {providers?.length === 0 && <div className="muted">This server has no way to sign in again.</div>}
-      {providers?.map(p => <button key={p} className={p === 'dev' ? '' : 'provider'} disabled={busy} onClick={() => void go(p)}>{p === 'dev' ? `Development sign-in as ${username}` : signInLabel(p)}</button>)}
+      {providers?.map(p => <button key={p} className={p === 'dev' ? '' : providerButtonClass(p)} disabled={busy} onClick={() => void go(p)}>{p === 'dev' ? `Development sign-in as ${username}` : <ProviderButtonBody provider={p} />}</button>)}
       {problem && <div className="muted">{problem}</div>}
       <div className="buttons"><button onClick={onClose} disabled={busy}>Cancel</button></div>
     </Dialog>

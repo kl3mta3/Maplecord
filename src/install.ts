@@ -1,4 +1,5 @@
 import { appleTouch, isElectron } from './platform'
+import { isNativeApp } from './native/app'
 
 /**
  * Putting the web app on a phone's home screen, where it opens full screen like an app of its own.
@@ -24,7 +25,8 @@ export const isInstalled = () =>
 export type InstallWay = 'prompt' | 'share' | 'menu' | null
 
 export function installWay(): InstallWay {
-  if (isElectron() || isInstalled()) return null
+  // The desktop app and the iPhone app are apps already.
+  if (isElectron() || isNativeApp() || isInstalled()) return null
   if (offered) return 'prompt'
   if (appleTouch()) return 'share'
   return window.matchMedia?.('(pointer: coarse)').matches ? 'menu' : null

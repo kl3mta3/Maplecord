@@ -62,6 +62,8 @@ export interface Settings {
   pushKey?: PushKey
   /** The "add to your Home Screen" card has been seen on this device. */
   installHintSeen?: boolean
+  /** The iPhone app: whether a notification shows the message's words, or only who wrote (on unless set to false). */
+  pushShowText?: boolean
   /** Send the microphone only while talking (on unless set to false), and how loud counts as talking, 1 (a whisper) to 10. */
   voiceGate?: boolean
   /** Record how calls go, for a problem report (see voiceReport.ts). Off unless switched on. */

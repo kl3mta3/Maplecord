@@ -1,5 +1,5 @@
 import type {
-  AccountDeletionDto, MemberPageDto, ConnectionTestDto, ConnectionTestPassDto, TestRelayDto, CommunityPollDto, CommunityPollAnswerDto, CalendarEventDto, ApplicationDto, CommandRuleDto, CommandRulesDto, QrDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, NewServerKinds, SupportReportDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto, RollStatsDto, SearchResultDto, MediaItemDto, SignInMethodsDto, ContactEmailDto, ConnectionDto, ConnectionServiceDto, FriendLinkDto, FriendLinkOwnerDto, UsableExpressionsDto, GuildExpressionsDto, ExpressionLibraryDto, ExpressionDto, ExpressionGroupDto } from './types'
+  AccountDeletionDto, MemberPageDto, ConnectionTestDto, ConnectionTestPassDto, TestRelayDto, CommunityPollDto, CommunityPollAnswerDto, CalendarEventDto, ApplicationDto, CommandRuleDto, CommandRulesDto, QrDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, NewServerKinds, SupportReportDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto, RollStatsDto, SearchResultDto, MediaItemDto, SignInMethodsDto, ContactEmailDto, ConnectionDto, ConnectionServiceDto, FriendLinkDto, FriendLinkOwnerDto, UsableExpressionsDto, GuildExpressionsDto, ExpressionLibraryDto, ExpressionDto, ExpressionGroupDto, PushChoices } from './types'
 
 /**
  * Asks the terms dialog (see TermsGate) to look again whether there are terms to agree to: sent when the server
@@ -44,7 +44,8 @@ export class Api {
         message = data.error ?? data.title ?? message
         code = typeof data.code === 'string' ? data.code : null
       } catch { /* non-JSON */ }
-      if (res.status === 401) message = 'Your session has expired. Please sign in again.'
+      // A demo account whose details ran out is told so, with what to do about it (see the server's DemoSignIn).
+      if (res.status === 401 && code !== 'demo-expired') message = 'Your session has expired. Please sign in again.'
       if (code === 'terms') askAboutTerms()
       throw new ApiError(message, res.status, code)
     }
@@ -74,6 +75,16 @@ export class Api {
   devLogin(serverUrl: string, username: string) {
     return fetch(serverUrl.replace(/\/$/, '') + '/auth/dev-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username }) })
       .then(async r => { if (!r.ok) throw new ApiError('Dev login failed', r.status); return (await r.json()) as TokenResponse })
+  }
+  /** A demo account's ID and password, set by whoever runs the server (for App Store review and the like). */
+  demoLogin(serverUrl: string, demoId: string, password: string) {
+    return fetch(serverUrl.replace(/\/$/, '') + '/auth/demo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ demoId, password }) })
+      .then(async r => {
+        if (r.ok) return (await r.json()) as TokenResponse
+        let said: { error?: string; code?: string } = {}
+        try { said = await r.json() } catch { /* no body */ }
+        throw new ApiError(said.error ?? (r.status === 429 ? 'Too many tries. Wait a minute and try again.' : 'Demo sign-in failed.'), r.status, said.code ?? null)
+      })
   }
   /**
    * A new person whose email has to be confirmed first holds a ticket: this asks whether the link has been opened yet.
@@ -186,6 +197,9 @@ export class Api {
 
   privacy() { return this.request<PrivacyDto>('GET', '/api/me/privacy') }
   preferences() { return this.request<PreferencesDto>('GET', '/api/me/preferences') }
+  /** The phone this app runs on, to be told of messages while the app is closed (the iPhone app; see native/app.ts). */
+  pushDevice(body: { platform: 'ios'; token: string; sandbox: boolean; choices: PushChoices }) { return this.request<void>('PUT', '/api/me/push-devices', body) }
+  forgetPushDevice(token: string) { return this.request<void>('DELETE', `/api/me/push-devices/${encodeURIComponent(token)}`) }
   setPreferences(p: PreferencesDto) { return this.request<PreferencesDto>('PUT', '/api/me/preferences', p) }
   blocks() { return this.request<UserDto[]>('GET', '/api/blocks') }
   block(userId: string) { return this.request<UserDto>('PUT', `/api/blocks/${userId}`) }

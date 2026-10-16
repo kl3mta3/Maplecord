@@ -4,6 +4,7 @@ import type { Store } from '../store'
 import { UserStatus } from '../types'
 import { DEFAULT_THEME, EDITABLE, MOST_SAVED_THEMES, SAVED_THEME_NAME, THEMES, colorsOf, contrast, fromThemeCode, ownColors, themeCode, withSaved } from '../theme'
 import { isElectron } from '../platform'
+import { isNativeApp } from '../native/app'
 import { shownName } from '../profile'
 import { Dialog } from './Dialogs'
 import { ConnectionsPane } from './Connections'
@@ -256,6 +257,16 @@ export function UserSettingsDialog({ store, initial, onOpen, onAllowDirect, onSi
                 <>
                   <h4>On this device</h4>
                   <div className="row"><button onClick={() => { onClose(); askToInstall() }}>Add to Home Screen…</button></div>
+                </>
+              )}
+              {isNativeApp() && (
+                <>
+                  <h4>Notifications on this phone</h4>
+                  <div className="muted">You are told of direct messages, and of messages that name you, while the app is closed. Muting a server or a channel here mutes it on this phone's lock screen too.</div>
+                  <label className="switch" title="Off: a notification says only who wrote, never what">
+                    <input type="checkbox" checked={store.settings.pushShowText !== false} onChange={e => store.updateSettings({ pushShowText: e.target.checked })} />
+                    <span className="track" /><span>Show the message's words in notifications</span>
+                  </label>
                 </>
               )}
               <h4>Sounds</h4>

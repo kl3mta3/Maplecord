@@ -18,7 +18,12 @@ import { appearanceOfMember, appearanceOfUser, shrinkPicture, type Appearance } 
 import { playSound, setChosenSounds, setQuiet, setSoundPacks, startRing, stopRing, type SoundPack } from './sounds'
 import { readPackZip } from './soundPackZip'
 import { applyTheme } from './theme'
-import { VoiceConnectError, VoiceEngine, type IcePolicy } from './voice'
+import { VoiceConnectError, VoiceEngine, type IcePolicy, type VoiceEngineEvents } from './voice'
+import { NativeVoiceEngine } from './nativeVoice'
+import { isNativeApp, nativeApp } from './native/app'
+import { nativeSignIn } from './native/signIn'
+import { phoneChoices } from './pushChoices'
+import { signInProblem } from './components/SignIn'
 import { type DirectTextPeer, P2PTextEngine, P2PFileUnavailable, describeFile, MAX_P2P_FILE, MAX_P2P_FILES, P2P_PICTURE, type P2PFile, type P2PMessage } from './p2pText'
 import { foldP2p, foldP2pChat, isP2pNoteText, p2pShape, packP2p, searchP2pChat, searchP2pGallery, type P2PMeta } from './p2pPosts'
 import { mayManageMessagesIn } from './channelViewers'
@@ -328,7 +333,12 @@ export function useMaplecord() {
 
   /** What to do when the voice engine loses its channel for good; set once leaving voice is defined, further down. */
   const voiceLostRef = useRef<(reason: string) => void>(() => {})
-  const [voiceEngine] = useState(() => new VoiceEngine(voiceHub, {
+  /** The phone's own call screen asked for mute, or hung up (the iPhone app only); set once those are defined, further down. */
+  const muteAskedRef = useRef<(muted: boolean) => void>(() => {})
+  const hangUpAskedRef = useRef<() => void>(() => {})
+  // In the iPhone app the shell does the sound, so that it carries on in the background (see nativeVoice.ts).
+  const [voiceEngine] = useState<VoiceEngine | NativeVoiceEngine>(() => isNativeApp() ? new NativeVoiceEngine(voiceHub, voiceEvents()) : new VoiceEngine(voiceHub, voiceEvents()))
+  function voiceEvents(): VoiceEngineEvents { return {
     peerState: (id, state) => setVoice(v => (v ? { ...v, participants: v.participants.map(p => (p.connectionId === id ? { ...p, state } : p)) } : v)),
     speaking: (id, speaking) => {
       if (id === null) setIsSpeaking(speaking)
@@ -342,7 +352,9 @@ export function useMaplecord() {
     overCap: (id, kbps) => { void voiceHub.reportBotSound(id, kbps) },
     // Whether we reach anyone in the call through the relay: said to the server, which counts who is on each relay.
     onRelay: on => { void voiceHub.setOnRelay(on) },
-  }))
+    muteAsked: muted => muteAskedRef.current(muted),
+    hangUpAsked: () => hangUpAskedRef.current(),
+  } }
   // Closing the app (or the page) while in voice: the server is told we left, so it does not keep our place for a
   // reconnect that is not coming (it keeps one for a few seconds when a connection ends without a word).
   useEffect(() => {
@@ -1151,10 +1163,45 @@ export function useMaplecord() {
       if (channel) setSelectedChannelId(channel.id)
     } else setHome(true)
     setReady(true)
+    if (isNativeApp()) void registerPhone()
     // Once in each run of the app: how far each relay is, so a voice channel nobody is in yet gets the one nearest
     // the first person into it (see relayPings.ts). After everything else has loaded, and in the background.
     if (self) void measureRelaysOnce(api, self.id)
   }, [api, applyPreferences, hub, loadGuilds, markDnd, onRollEnded, onRollStarted, patchGuild, setCall, updateSettings, voiceEngine, voiceHub])
+
+  // ---- The phone's notifications (the iPhone app) ---------------------------------------------------------------
+  // The phone is registered with the server once signed in and loaded, and again whenever what it wants to be told
+  // of changes; it is forgotten when signing out. A tapped notification opens its conversation.
+  const phoneToken = useRef<string | null>(null)
+  const openFromPush = useRef<string | null>(null)
+  const registerPhone = useCallback(async () => {
+    try {
+      const got = await nativeApp().pushRegister()
+      if (!got.token) { console.debug('[push]', got.error ?? 'no token'); return }
+      phoneToken.current = got.token
+      await api.pushDevice({ platform: 'ios', token: got.token, sandbox: got.sandbox, choices: phoneChoices(settingsRef.current) })
+    } catch (e) { console.debug('[push] not registered:', e instanceof Error ? e.message : e) }
+  }, [api])
+  const pushPrefsKey = isNativeApp() ? JSON.stringify(phoneChoices(settings)) : ''
+  useEffect(() => {
+    if (!isNativeApp() || !phoneToken.current || !ready) return
+    const token = phoneToken.current
+    const t = window.setTimeout(() => { void api.pushDevice({ platform: 'ios', token, sandbox: false, choices: phoneChoices(settingsRef.current) }).catch(() => {}) }, 1500)
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-sent when the choices it carries change
+  }, [pushPrefsKey, ready, api])
+  useEffect(() => {
+    if (!isNativeApp()) return
+    let handle: { remove: () => Promise<void> } | null = null
+    void nativeApp().addListener('pushOpened', d => { if (d.channelId) { openFromPush.current = d.channelId; if (readyRef.current) selectChannelRef.current(d.channelId) } }).then(h => { handle = h })
+    return () => { void handle?.remove() }
+  }, [])
+  useEffect(() => {
+    if (!ready || !openFromPush.current) return
+    const id = openFromPush.current
+    openFromPush.current = null
+    selectChannelRef.current(id)
+  }, [ready])
 
   // ---- Selection ----------------------------------------------------------
 
@@ -2247,6 +2294,7 @@ export function useMaplecord() {
   }, [setCall, voiceEngine, voiceHub])
   // The stream server carrying the channel's voice could not be reached again: out of the call, and say why.
   voiceLostRef.current = reason => { void leaveVoice(); setError(reason) }
+  hangUpAskedRef.current = () => { void leaveVoice() }
 
   // ---- Sharing a screen, an app window or a camera with the voice channel -----------------------------------------
 
@@ -2470,6 +2518,8 @@ export function useMaplecord() {
         } catch { /* not worth an error banner */ }
       })()
       if (isMuted) void voiceHub.setMuted(true)
+      // What a phone shows for this call on its lock screen.
+      if (voiceEngine instanceof NativeVoiceEngine) voiceEngine.callTitle = found.channel.name || 'Maplecord'
       try {
         await voiceEngine.join(others, answer.pass, voiceHub.selfSilenced, keptAway.map(p => p.connectionId), directSince ? others.filter(p => p.bot).map(p => p.connectionId) : [])
         // Any bot being heard among them comes with the most it may send (joining starts by clearing every limit).
@@ -2698,12 +2748,16 @@ export function useMaplecord() {
     if (provider === 'dev') token = await api.devLogin(serverUrl, devUsername)
     else {
       const desktop = bridge()
-      if (!desktop) {
+      if (isNativeApp()) {
+        const back = await nativeSignIn(serverUrl, provider)
+        if (!back.code) throw new Error(back.error ? signInProblem(back.error) : 'Sign-in did not finish.')
+        token = await api.exchangeCode(serverUrl, back.code)
+      } else if (!desktop) {
         sessionStorage.setItem(marker, mine)
         window.location.href = `${serverUrl.replace(/\/$/, '')}/auth/login/${provider}?redirect_uri=${encodeURIComponent(window.location.origin + window.location.pathname)}`
         return false
       }
-      token = await api.exchangeCode(serverUrl, await desktop.oauthLogin(serverUrl, provider))
+      else token = await api.exchangeCode(serverUrl, await desktop.oauthLogin(serverUrl, provider))
     }
     if (token.user.id !== mine) throw new Error('That sign-in is a different account. Sign in as the account you are using now.')
     updateSettings({ accessToken: token.accessToken, tokenExpires: token.expiresAt, user: token.user })
@@ -2791,6 +2845,16 @@ export function useMaplecord() {
       return next
     })
   }, [voiceEngine, voiceHub])
+  // The same, to a given state, when the phone's own call screen asks (the iPhone app).
+  muteAskedRef.current = muted => {
+    setIsMuted(m => {
+      if (m === muted) return m
+      voiceEngine.setMuted(muted)
+      if (voiceRef.current) void voiceHub.setMuted(muted)
+      setVoice(v => (v ? { ...v, participants: v.participants.map(p => (p.connectionId === voiceHub.connectionId ? { ...p, muted } : p)) } : v))
+      return muted
+    })
+  }
 
   const setAudioDevices = useCallback(async (input: string | null, output: string | null) => {
     const changed = input !== settingsRef.current.audioInputDeviceId || output !== settingsRef.current.audioOutputDeviceId
@@ -2871,6 +2935,8 @@ export function useMaplecord() {
 
   const signOut = useCallback(async () => {
     if (replacingSignIn.current) return
+    // The phone is no longer to be told anything for this account (said while the sign-in still counts).
+    if (phoneToken.current) { const token = phoneToken.current; phoneToken.current = null; await api.forgetPushDevice(token).catch(() => { /* the server drops it on the first failed push */ }) }
     await p2pEngine.leaveAll()
     await leaveVoice()
     await voiceHub.disconnect()
@@ -2882,7 +2948,7 @@ export function useMaplecord() {
     setStats(NO_STATS)
     updateSettings({ accessToken: null, tokenExpires: null, user: null })
     setGuilds([]); setSelectedGuildId(null); setSelectedChannelId(null); setHome(false); setFriends(EMPTY_FRIENDS); setDms([]); setReady(false)
-  }, [hub, leaveVoice, transferEngine, updateSettings, voiceHub])
+  }, [api, hub, leaveVoice, transferEngine, updateSettings, voiceHub])
 
   signOutRef.current = signOut
 

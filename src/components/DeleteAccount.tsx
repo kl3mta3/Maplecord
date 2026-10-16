@@ -3,7 +3,7 @@ import type { Store } from '../store'
 import { ApiError } from '../api'
 import type { AccountDeletionDto } from '../types'
 import { Dialog } from './Dialogs'
-import { signInLabel } from './SignIn'
+import { ProviderButtonBody, providerButtonClass } from './SignIn'
 
 /**
  * Deleting your own account, in two steps: what it means and a fresh sign-in to prove it is you, then typing your
@@ -65,7 +65,7 @@ export function DeleteAccountDialog({ store }: { store: Store }) {
           <div className="muted">To make sure it is really you, sign in again:</div>
           {providers === null && <div className="muted">Checking how you can sign in…</div>}
           {providers?.length === 0 && <div className="muted">This server has no way to sign in again.</div>}
-          {providers?.map(p => <button key={p} className={p === 'dev' ? '' : 'provider'} disabled={busy} onClick={() => void signIn(p)}>{p === 'dev' ? `Development sign-in as ${me.username}` : signInLabel(p)}</button>)}
+          {providers?.map(p => <button key={p} className={p === 'dev' ? '' : providerButtonClass(p)} disabled={busy} onClick={() => void signIn(p)}>{p === 'dev' ? `Development sign-in as ${me.username}` : <ProviderButtonBody provider={p} />}</button>)}
         </>
       ) : (
         <>

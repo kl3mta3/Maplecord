@@ -80,7 +80,11 @@ function MainApp() {
           if (confirmDeleteNow) store.openDeleteAccount('confirm')
           setSignedIn(true)
         } catch (e) {
-          if (e instanceof ApiError && e.unauthorized) store.updateSettings({ accessToken: null, tokenExpires: null, user: null })
+          if (e instanceof ApiError && e.unauthorized) {
+            store.updateSettings({ accessToken: null, tokenExpires: null, user: null })
+            // A demo account whose details ran out is told so on the sign-in screen, with what to do about it.
+            if (e.code === 'demo-expired') store.setError(e.message)
+          }
         }
       }
       setChecking(false)

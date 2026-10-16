@@ -40,6 +40,7 @@ import type { ExpressionDto, UsableExpressionsDto } from '../types'
 import Friends from './Home'
 import { serverMediaUrl } from '../itemIcons'
 import { bridge, isElectron } from '../platform'
+import { isNativeApp } from '../native/app'
 import { linkRanOut, useFileLink } from '../fileLinks'
 import { SupportDialog } from './Support'
 import { ReportDialog, type ReportsOn, type ReportTarget } from './Report'
@@ -154,7 +155,9 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
     ? { backgroundImage: `linear-gradient(rgba(11, 11, 16, .45), rgba(11, 11, 16, .8)), url("${banner}")`, backgroundSize: 'cover', backgroundPosition: 'center' }
     : accent ? { background: `linear-gradient(135deg, color-mix(in srgb, ${accent} 60%, var(--bg0)), color-mix(in srgb, ${accent} 18%, var(--bg0)))` } : undefined
   const screenSharing = store.sharing === 'screen' || store.sharing === 'window'
-  const canShareScreen = isElectron() || typeof navigator.mediaDevices?.getDisplayMedia === 'function'
+  // The iPhone app does voice only for now: no camera, no shared screen (see nativeVoice.ts).
+  const canShareScreen = !isNativeApp() && (isElectron() || typeof navigator.mediaDevices?.getDisplayMedia === 'function')
+  const canCamera = !isNativeApp()
   const toggleCamera = async () => {
     if (store.sharing === 'camera') { await store.stopShare(); return }
     if (store.sharing) await store.stopShare()
@@ -773,10 +776,10 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
                 void store.usableExpressions(voice.channelId).then(u => setSoundboard(open => open && { ...open, sounds: u.here.filter(x => x.kind === 2) }))
               }}><Music2 size={17} /></button>
             )}
-            <button className={'iconbtn' + (store.sharing === 'camera' ? ' on' : '')} onClick={() => void toggleCamera()} title={store.sharing === 'camera' ? 'Turn your camera off' : 'Turn your camera on'}><Video size={17} /></button>
-            <button className={'iconbtn' + (screenSharing ? ' on' : '')} disabled={!canShareScreen && !screenSharing}
+            {canCamera && <button className={'iconbtn' + (store.sharing === 'camera' ? ' on' : '')} onClick={() => void toggleCamera()} title={store.sharing === 'camera' ? 'Turn your camera off' : 'Turn your camera on'}><Video size={17} /></button>}
+            {(canCamera || canShareScreen) && <button className={'iconbtn' + (screenSharing ? ' on' : '')} disabled={!canShareScreen && !screenSharing}
               title={screenSharing ? 'Stop sharing' : canShareScreen ? 'Share an app or a screen' : 'This browser cannot share its screen. Your camera can still be shared.'}
-              onClick={() => { if (screenSharing) void store.stopShare(); else { void store.loadStreamRules().catch(() => null); setDialog({ kind: 'share' }) } }}><MonitorUp size={17} /></button>
+              onClick={() => { if (screenSharing) void store.stopShare(); else { void store.loadStreamRules().catch(() => null); setDialog({ kind: 'share' }) } }}><MonitorUp size={17} /></button>}
             <button className="iconbtn hangup" onClick={store.leaveVoice} title={inCall ? (inCall.phase === 'calling' ? 'Cancel the call' : 'Hang up') : 'Disconnect'}><PhoneOff size={17} /></button>
           </div>
         )}

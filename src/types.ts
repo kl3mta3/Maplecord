@@ -131,6 +131,8 @@ export const UserStatus = { Online: 0, DoNotDisturb: 1, Invisible: 2, Idle: 3 } 
 export type UserStatus = (typeof UserStatus)[keyof typeof UserStatus]
 /** A person's own choices, kept on their account. friendRequestsSharedOnly: only from people they share a server with. */
 export interface PreferencesDto { status: UserStatus; ignoreFriendRequests: boolean; friendRequestsSharedOnly: boolean }
+/** What a phone wants to be told of while the app is closed: this device's own choices, sent to the server with its push token. */
+export interface PushChoices { showText: boolean; mutedGuilds: string[]; mutedChannels: string[]; notify: Record<string, 'all' | 'mentions' | 'none'> }
 export interface RoleDto { id: string; guildId: string; name: string; color: string | null; position: number; permissions: number; isEveryone: boolean }
 export interface MemberDto {
   /** Their own choice, in this server: their name is drawn in their own colours here, not in the colour of their role. */

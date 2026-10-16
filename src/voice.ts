@@ -37,8 +37,8 @@ const voiceOf = (identity: string) => (identity.startsWith('a:') ? identity.slic
 /** Tried this many times in a row before a voice channel that keeps losing the stream server is given up on. */
 const RECONNECT_TRIES = 4
 
-/** Joining could not reach the stream server at all: there is no call to be in. */
-export class VoiceConnectError extends Error {}
+import { VoiceConnectError } from './voiceErrors'
+export { VoiceConnectError }
 export type IcePolicy = 'relay' | 'direct'
 
 export interface VoiceEngineEvents {
@@ -52,6 +52,10 @@ export interface VoiceEngineEvents {
   overCap?: (connectionId: string, kbps: number) => void
   /** Whether any of our connections to the people in the call goes through the relay has changed. */
   onRelay?: (onRelay: boolean) => void
+  /** The phone's own call screen (lock screen) asked for mute on or off. Only from the iPhone app (see nativeVoice.ts). */
+  muteAsked?: (muted: boolean) => void
+  /** The phone's own call screen hung up. Only from the iPhone app. */
+  hangUpAsked?: () => void
 }
 
 interface Peer {

@@ -1,5 +1,6 @@
 import type { Room, RoomOptions } from 'livekit-client'
 import type { SfuPassDto } from './types'
+import { isNativeApp } from './native/app'
 
 /**
  * Rooms on a stream server, with what is sent into them encrypted by this app.
@@ -19,8 +20,10 @@ import type { SfuPassDto } from './types'
  * voice; one that cannot is never sent through a stream server.
  */
 export const canEncryptMedia = (): boolean =>
-  typeof RTCRtpSender !== 'undefined'
-  && ('createEncodedStreams' in RTCRtpSender.prototype || typeof (globalThis as { RTCRtpScriptTransform?: unknown }).RTCRtpScriptTransform !== 'undefined')
+  // The iPhone app's shell does its own (see nativeVoice.ts), whatever its web view can do.
+  isNativeApp()
+  || (typeof RTCRtpSender !== 'undefined'
+    && ('createEncodedStreams' in RTCRtpSender.prototype || typeof (globalThis as { RTCRtpScriptTransform?: unknown }).RTCRtpScriptTransform !== 'undefined'))
 
 const workers = new WeakMap<Room, Worker>()
 
