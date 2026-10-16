@@ -23,6 +23,8 @@ export class Api {
   private serverUrl: () => string
   private token: () => string | null
   constructor(serverUrl: () => string, token: () => string | null) { this.serverUrl = serverUrl; this.token = token }
+  /** The Maplecord server this talks to. */
+  get server() { return this.serverUrl() }
 
   private async request<T>(method: string, path: string, body?: unknown, raw?: BodyInit): Promise<T> {
     const headers: Record<string, string> = {}
@@ -58,7 +60,8 @@ export class Api {
   terms() { return this.request<{ current: number; accepted: number; acceptedAt: string | null; updated: string }>('GET', '/api/me/terms') }
   agreeToTerms(version: number) { return this.request<void>('POST', '/api/me/terms', { version }) }
   /** Reporting a picture the server keeps, or a person, to whoever runs this Maplecord. */
-  reportPicture(kind: string, id: string, category: string, note: string) { return this.request<void>('POST', '/api/reports/picture', { kind, id, category, note }) }
+  /** `picture`: for a picture a webhook or bot put in a message ("embed"), its address here; `id` is then the message. */
+  reportPicture(kind: string, id: string, category: string, note: string, picture?: string) { return this.request<void>('POST', '/api/reports/picture', { kind, id, category, note, picture }) }
   reportPerson(userId: string, category: string, note: string, messageId?: string) { return this.request<void>('POST', '/api/reports/person', { userId, category, note, messageId }) }
   meta(serverUrl: string) {
     return fetch(serverUrl.replace(/\/$/, '') + '/api/meta').then(r => (r.ok ? (r.json() as Promise<ServerMetaDto>) : null)).catch(() => null)
@@ -178,6 +181,8 @@ export class Api {
   deletionPreview() { return this.request<AccountDeletionDto>('GET', '/api/me/deletion') }
   /** Deletes the signed-in account. Refused (code "reauth") unless this sign-in is only a few minutes old. */
   deleteAccount(username: string) { return this.request<void>('POST', '/api/me/delete', { username }) }
+  /** Every other sign-in of this account stops working; this one gets a fresh token. Refused (code "reauth") unless this sign-in is a few minutes old. */
+  signOutEverywhere() { return this.request<TokenResponse>('POST', '/api/me/sign-out-everywhere') }
 
   privacy() { return this.request<PrivacyDto>('GET', '/api/me/privacy') }
   preferences() { return this.request<PreferencesDto>('GET', '/api/me/preferences') }

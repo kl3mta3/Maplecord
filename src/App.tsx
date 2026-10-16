@@ -5,7 +5,7 @@ import Login from './components/Login'
 import Overlay from './components/Overlay'
 import Shell from './components/Shell'
 import InstallHint from './components/InstallHint'
-import { PENDING_DELETE, PENDING_DIRECT, useMaplecord } from './store'
+import { PENDING_ACCOUNT, PENDING_DELETE, PENDING_DIRECT, useMaplecord } from './store'
 import { hasValidToken } from './settings'
 import { ApiError } from './api'
 import { CLIENT_PROTOCOL } from './platform'
@@ -51,15 +51,19 @@ function MainApp() {
       // The same, when the reason was deleting the account: the question is asked once more on return, never assumed.
       const deletingFor = sessionStorage.getItem(PENDING_DELETE)
       sessionStorage.removeItem(PENDING_DELETE)
+      // And when it was to change how the account is signed in to: the change is made again by the person, on return.
+      const changingFor = sessionStorage.getItem(PENDING_ACCOUNT)
+      sessionStorage.removeItem(PENDING_ACCOUNT)
       let allowDirectNow = false
       let confirmDeleteNow = false
       if (code) {
         try {
           const token = await store.api.exchangeCode(store.settings.serverUrl, code)
-          const expected = provingFor ?? deletingFor
+          const expected = provingFor ?? deletingFor ?? changingFor
           if (expected !== null && token.user.id !== expected) {
             // Someone else's sign-in proves nothing about this account, and does not replace it.
-            store.setError(deletingFor !== null ? 'That sign-in is a different account, so nothing was deleted.' : 'That sign-in is a different account, so P2P was not turned on.')
+            store.setError(deletingFor !== null ? 'That sign-in is a different account, so nothing was deleted.'
+              : changingFor !== null ? 'That sign-in is a different account, so nothing was changed.' : 'That sign-in is a different account, so P2P was not turned on.')
           } else {
             store.updateSettings({ accessToken: token.accessToken, tokenExpires: token.expiresAt, user: token.user })
             allowDirectNow = provingFor !== null

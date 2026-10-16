@@ -90,7 +90,7 @@ async function download(file: ReleaseFile, to: string, progress: (fraction: numb
     }
   } finally { await new Promise<void>(resolve => out.end(() => resolve())) }
   if (got !== file.size) throw new Error(`${got} of ${file.size} bytes arrived`)
-  if (file.sha256 && hash.digest('hex') !== file.sha256.toLowerCase()) throw new Error('the file does not match its digest')
+  if (!file.sha256 || hash.digest('hex') !== file.sha256.toLowerCase()) throw new Error('the file does not match its digest')
 }
 
 /**
@@ -101,7 +101,15 @@ async function download(file: ReleaseFile, to: string, progress: (fraction: numb
  * break the command that starts it. It is started through cmd's "start": started directly from here, Windows never
  * runs it.
  */
-function replacePortable(zip: string, appDir: string, exeName: string, args: string[]) {
+/** Resolves once the program has started, and lets it carry on alone; rejects if it could not be started at all. */
+function started(child: ReturnType<typeof spawn>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    child.once('error', reject)
+    child.once('spawn', () => { child.unref(); resolve() })
+  })
+}
+
+function replacePortable(zip: string, appDir: string, exeName: string, args: string[]): Promise<void> {
   const script = path.join(path.dirname(zip), 'apply-update.ps1')
   fs.writeFileSync(script, `$ErrorActionPreference = 'Stop'
 $Zip = $env:MAPLECORD_UPDATE_ZIP; $Dir = $env:MAPLECORD_UPDATE_DIR; $Exe = $env:MAPLECORD_UPDATE_EXE; $Log = $env:MAPLECORD_UPDATE_LOG
@@ -134,14 +142,14 @@ $rest = @(($env:MAPLECORD_UPDATE_ARGS -split [char]10) | Where-Object { $_ } | F
 foreach ($name in 'ZIP', 'DIR', 'EXE', 'LOG', 'PID', 'ARGS', 'SCRIPT') { Remove-Item ('Env:MAPLECORD_UPDATE_' + $name) -ErrorAction SilentlyContinue }
 if ($rest.Count -gt 0) { Start-Process -FilePath (Join-Path $Dir $Exe) -ArgumentList $rest } else { Start-Process -FilePath (Join-Path $Dir $Exe) }
 `)
-  spawn('cmd.exe', ['/d /s /c "start "" /min powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "& $env:MAPLECORD_UPDATE_SCRIPT""'], {
+  return started(spawn('cmd.exe', ['/d /s /c "start "" /min powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "& $env:MAPLECORD_UPDATE_SCRIPT""'], {
     detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true,
     env: {
       ...process.env,
       MAPLECORD_UPDATE_SCRIPT: script, MAPLECORD_UPDATE_ZIP: zip, MAPLECORD_UPDATE_DIR: appDir, MAPLECORD_UPDATE_EXE: exeName,
       MAPLECORD_UPDATE_LOG: logFile ?? path.join(path.dirname(zip), 'update.log'), MAPLECORD_UPDATE_PID: String(process.pid), MAPLECORD_UPDATE_ARGS: args.join('\n'),
     },
-  }).unref()
+  }))
 }
 
 /** A newer release this copy can put in place by itself. */
@@ -166,7 +174,7 @@ async function look(server: string, repo: string, quiet = false): Promise<{ foun
   const appDir = path.dirname(process.execPath)
   const installed = fs.existsSync(path.join(appDir, `Uninstall ${app.getName()}.exe`))
   const file = fileFor(latest, installed)
-  if (!file || !trustedUrl(file.url, repo)) { log('the release has no file this copy can use'); return { found: null, notice: { version: latest.version, reason: 'no file' } } }
+  if (!file || !trustedUrl(file.url, repo, latest.version)) { log('the release has no file this copy can use'); return { found: null, notice: { version: latest.version, reason: 'no file' } } }
 
   // Put in place already, and this is still the old version: either it did not take, or the release is labelled
   // with a version its own files do not carry. Trying again every time would reinstall the same thing over and
@@ -206,8 +214,10 @@ async function putInPlace(found: FoundUpdate, progress: (fraction: number) => vo
   const appDir = path.dirname(process.execPath)
   const args = process.argv.slice(1).filter(a => !a.toLowerCase().startsWith('maplecord://'))
   if (DRY_RUN) { log(`dry run: would ${found.installed ? `run ${saved} --updated /S --force-run` : `unpack ${saved} over ${appDir} and start it again`}`); return false }
-  if (found.installed) spawn(saved, ['--updated', '/S', '--force-run'], { detached: true, stdio: 'ignore' }).unref()
-  else replacePortable(saved, appDir, path.basename(process.execPath), args)
+  // Only once what replaces the app has really started does the app quit: one that Windows or an antivirus would not
+  // start leaves the app running as it was, and says why.
+  if (found.installed) await started(spawn(saved, ['--updated', '/S', '--force-run'], { detached: true, stdio: 'ignore' }))
+  else await replacePortable(saved, appDir, path.basename(process.execPath), args)
   log(found.installed ? 'started the installer' : 'handed over to the script that replaces the app')
   return true
 }

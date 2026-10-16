@@ -40,6 +40,7 @@ export class SaveStreams {
     if (entry.failed) { await fs.promises.rm(entry.part, { force: true }); throw entry.failed }
     await fs.promises.rm(entry.final, { force: true })
     await fs.promises.rename(entry.part, entry.final)
+    await markFromInternet(entry.final)
     return entry.final
   }
 
@@ -53,4 +54,15 @@ export class SaveStreams {
 
   /** The app is closing: nothing half-written is left behind. */
   async abortAll() { for (const id of [...this.open.keys()]) await this.abort(id) }
+}
+
+/**
+ * On Windows, marks a file received from someone else as having come from the internet (its "Mark of the Web", the
+ * Zone.Identifier stream a browser writes on downloads), so that opening it is treated as opening a download:
+ * SmartScreen looks at a program, and Office opens a document in Protected View with its macros blocked. A drive that
+ * cannot hold the mark (a FAT memory stick) simply does without.
+ */
+export async function markFromInternet(file: string) {
+  if (process.platform !== 'win32') return
+  try { await fs.promises.writeFile(file + ':Zone.Identifier', '[ZoneTransfer]\r\nZoneId=3\r\n') } catch { /* no alternate streams here */ }
 }

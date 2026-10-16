@@ -51,6 +51,8 @@ const offerScope = (serverUrl: string, userId: string) => `${serverUrl.replace(/
 export const PENDING_DIRECT = 'maplecord.pendingDirect'
 /** The same, when the page left to prove who is here so that the account could be deleted. */
 export const PENDING_DELETE = 'maplecord.pendingDelete'
+/** The same, when it was to change how the account is signed in to (Settings, My account). */
+export const PENDING_ACCOUNT = 'maplecord.pendingAccount'
 
 export interface ActiveRps { session: RpsSessionDto; result: RpsResultDto | null; myPick: RpsChoice | null }
 
@@ -452,6 +454,12 @@ export function useMaplecord() {
   const [systemMessages, setSystemMessages] = useState<SystemMessageDto[]>([])
   /** signOut is defined further down; the connection's status handler needs to reach it. */
   const signOutRef = useRef<() => Promise<void>>(async () => {})
+  /**
+   * Set while this device's sign-in is being replaced (Sign out everywhere): the server closes this device's own
+   * connection too, and the app, trying again with the sign-in being replaced, is told it is over. That is not this
+   * device being signed out, so it is not acted on; the page starts again with the new sign-in.
+   */
+  const replacingSignIn = useRef(false)
   /** The ones closed since the app started. The log-on message comes again with every reconnect; once closed, it stays closed. */
   const closedSystemMessages = useRef(new Set<string>())
   const dismissSystemMessage = useCallback((id: string) => { closedSystemMessages.current.add(id); setSystemMessages(list => list.filter(m => m.id !== id)) }, [])
@@ -2725,6 +2733,32 @@ export function useMaplecord() {
   const reauthenticateForDelete = useCallback(async (provider: string, devUsername = '') => {
     if (await signInAgain(provider, devUsername, PENDING_DELETE)) setDeleteStep('confirm')
   }, [signInAgain])
+
+  // ---- Changing how the account is got into (Settings, My account): the server asks for a sign-in from just now
+  /** True once signed in again here; false when a browser went off to do it (and comes back to this page). */
+  const reauthenticateForAccount = useCallback((provider: string, devUsername = '') => signInAgain(provider, devUsername, PENDING_ACCOUNT), [signInAgain])
+  /** Runs such a change: 'reauth' when the server wants a sign-in from just now first; anything else that goes wrong is said. */
+  const accountChange = useCallback(async (change: () => Promise<unknown>): Promise<'done' | 'reauth' | 'failed'> => {
+    try { await change(); return 'done' }
+    catch (e) {
+      if (e instanceof ApiError && e.code === 'reauth') return 'reauth'
+      if (e instanceof ApiError && e.unauthorized) { setError(e.message); await signOutRef.current(); return 'failed' }
+      setError(e instanceof Error ? e.message : String(e))
+      return 'failed'
+    }
+  }, [setError])
+  /** Signs out every other device and browser: this one carries on with a fresh sign-in, started again so all of it uses that. */
+  const signOutEverywhere = useCallback(async () => {
+    replacingSignIn.current = true
+    try {
+      const token = await api.signOutEverywhere()
+      updateSettings({ accessToken: token.accessToken, tokenExpires: token.expiresAt, user: token.user })
+      window.location.reload()
+    } catch (e) {
+      replacingSignIn.current = false
+      throw e
+    }
+  }, [api, updateSettings])
   /** Throws what the server said if it refuses; on success the account is gone and this app is signed out. */
   const deleteAccount = useCallback(async (username: string) => {
     await api.deleteAccount(username)
@@ -2836,6 +2870,7 @@ export function useMaplecord() {
 
 
   const signOut = useCallback(async () => {
+    if (replacingSignIn.current) return
     await p2pEngine.leaveAll()
     await leaveVoice()
     await voiceHub.disconnect()
@@ -3313,6 +3348,7 @@ export function useMaplecord() {
     usableExpressions, forgetUsable, sendSticker, playSoundboard, setGuildOutside,
     markVoiceGap: () => voiceRecorder.mark(), voiceReport: () => voiceRecorder.report(__APP_VERSION__), clearVoiceReport: () => voiceRecorder.clear(),
     farewell, queueAhead, deleteStep, openDeleteAccount: (step: 'explain' | 'confirm' = 'explain') => setDeleteStep(step), closeDeleteAccount: () => setDeleteStep(null), reauthenticateForDelete, deleteAccount,
+    reauthenticateForAccount, accountChange, signOutEverywhere,
     p2pText, askDirectText, setP2pSubscribed, setP2pBroadcast, p2pFiles, loadP2pFile, saveP2pFile, p2pNewApps, acceptP2pApp, p2pBotsWaiting, acceptP2pBot, dismissP2pBot,
     allowDirect, setAllowDirect, reauthenticateForDirect, reauthProviders, directPrompt, confirmDirect, dismissDirectPrompt: () => setDirectPrompt(null), setChannelDirect,
     setAudioDevices, me: () => settingsRef.current.user,

@@ -8,6 +8,7 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import { isElectron } from '../platform'
 import { ChannelType, Permission, hasPermission, type ApplicationDto, type ChannelDto, type GuildDto, type MemberDto, type RoleDto } from '../types'
 import type { Api } from '../api'
+import { serverAssetUrl } from '../profile'
 import { Dialog } from './Dialogs'
 import { BotCommandsDialog, ServerBotsTab, WebhooksTab } from './Integrations'
 import { ListingSettings } from './Servers'
@@ -199,7 +200,7 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, fin
         <>
           <div className="row" style={{ gap: 14 }}>
             <div className="guildicon big" onClick={() => fileRef.current?.click()} title="Change icon">
-              {guild.iconUrl ? <img src={guild.iconUrl} alt="" /> : <span>{initialsOf(guild.name)}</span>}
+              {serverAssetUrl(api.server, guild.iconUrl) ? <img src={serverAssetUrl(api.server, guild.iconUrl)!} alt="" /> : <span>{initialsOf(guild.name)}</span>}
             </div>
             <div className="grow">
               <div className="muted">Server icon (png / jpg / gif / webp, up to 2 MB)</div>
@@ -212,7 +213,7 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, fin
           </div>
           {/* The banner: the picture over the top of the channel list, with the server's name on it. */}
           <div className="bannerpick" onClick={() => bannerRef.current?.click()} title="Change banner"
-            style={guild.bannerUrl ? { backgroundImage: `url("${guild.bannerUrl}")` } : undefined}>
+            style={serverAssetUrl(api.server, guild.bannerUrl) ? { backgroundImage: `url("${serverAssetUrl(api.server, guild.bannerUrl)}")` } : undefined}>
             {!guild.bannerUrl && <span className="muted">No banner</span>}
           </div>
           <div className="muted">Server banner, shown over the channel list (png / jpg / gif / webp, moving or not, up to 4 MB; about 960 × 540 looks best)</div>

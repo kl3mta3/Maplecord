@@ -163,6 +163,8 @@ export const appleTouch = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || 
  * The sign-in screen offers no other: an app belongs to the server it was built for.
  */
 export const DEFAULT_SERVER_URL: string = (import.meta.env.VITE_SERVER_URL as string | undefined)
-  // A Maplecord server that hosts this page says who it is as it hands the page out.
+  // A Maplecord server that hosts this page says who it is as it hands the page out (a meta tag: the page runs no
+  // script written into it; an older server wrote one).
+  ?? document.querySelector('meta[name="maplecord-server"]')?.getAttribute('content')
   ?? (window as unknown as { __MAPLECORD_SERVER__?: string }).__MAPLECORD_SERVER__
   ?? 'http://localhost:5080'

@@ -113,6 +113,16 @@ export const assetUrl = (serverUrl: string, path: string | null | undefined) =>
   path && SERVER_PATH.test(path) ? serverUrl.replace(/\/$/, '') + path : null
 
 /**
+ * The same for a picture the server names by its full address (a server's icon and banner): only its path is kept,
+ * on this Maplecord server, so whatever host the address names, nothing is loaded from anywhere else.
+ */
+export const serverAssetUrl = (serverUrl: string, url: string | null | undefined) => {
+  if (!url) return null
+  if (url.startsWith('/')) return assetUrl(serverUrl, url)
+  try { const parsed = new URL(url); return assetUrl(serverUrl, parsed.pathname + parsed.search) } catch { return null }
+}
+
+/**
  * The nameplates every app draws itself, so there is nothing to fetch (the server's ProfileLimits.Nameplates): what
  * is drawn behind a name in the member list, the friends list and the list of conversations. It fades in from the
  * left, so the name stays easy to read.

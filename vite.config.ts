@@ -9,6 +9,14 @@ const version = fs.readFileSync(new URL('./version.txt', import.meta.url), 'utf8
 const repository = String(JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8')).repository ?? '')
   .replace(/^github:/, '').replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '')
 
+/**
+ * What the app's page may run: its own scripts and workers, and nothing written into the page or brought in from
+ * anywhere else, so text that slipped past everything else still could not run as a script. (Pictures, sound and
+ * connections are not limited here: they come from whichever Maplecord server the app is pointed at.) Built pages
+ * only: the development server writes scripts of its own into the page.
+ */
+const contentSecurityPolicy = "script-src 'self' file:; worker-src 'self' file: blob:; object-src 'none'; base-uri 'none'"
+
 // `vite --mode web` builds/serves the renderer as a plain web app (phone roll page, browser testing).
 // Any other mode wraps it in Electron.
 export default defineConfig(({ mode }) => ({
@@ -17,6 +25,11 @@ export default defineConfig(({ mode }) => ({
   define: { __APP_VERSION__: JSON.stringify(version) },
   plugins: [
     react(),
+    {
+      name: 'content-security-policy',
+      apply: 'build',
+      transformIndexHtml: (html: string) => html.replace('<head>', `<head>\n    <meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}" />`),
+    },
     ...(mode === 'web'
       ? []
       : [

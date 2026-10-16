@@ -18,20 +18,27 @@ export function isNewer(candidate: string, current: string): boolean {
 }
 
 /**
- * An update is only ever taken from the releases of the repository this build was made from, over HTTPS. The server
- * the app is pointed at says where the newest file is, but it cannot send the app anywhere else.
+ * An update is only ever taken from the releases of the repository this build was made from, over HTTPS, and from
+ * the release of the version it says it is (tagged "0.5.7" or "v0.5.7"). The server the app is pointed at says where
+ * the newest file is, but it cannot send the app anywhere else, nor to an older release dressed up as a newer one.
  */
-export function trustedUrl(url: string, repo: string): boolean {
-  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) return false
+export function trustedUrl(url: string, repo: string, version: string): boolean {
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || !/^v?\d+(\.\d+)*$/.test(version)) return false
   try {
     const parsed = new URL(url)
+    const tag = version.replace(/^v/i, '').toLowerCase()
+    const path = parsed.pathname.toLowerCase()
+    const prefix = `/${repo.toLowerCase()}/releases/download/`
     return parsed.protocol === 'https:' && parsed.hostname === 'github.com' && parsed.username === '' && parsed.port === ''
-      && parsed.pathname.toLowerCase().startsWith(`/${repo.toLowerCase()}/releases/download/`) && !parsed.pathname.includes('..')
+      && !path.includes('..') && (path.startsWith(`${prefix}${tag}/`) || path.startsWith(`${prefix}v${tag}/`))
   } catch { return false }
 }
 
-/** The file this copy of the app updates itself with: the installer if it was installed, the portable zip if not. */
+/**
+ * The file this copy of the app updates itself with: the installer (.exe) if it was installed, the portable zip if
+ * not, and only one whose SHA-256 the release states, so that what arrives is checked against it before it is run.
+ */
 export function fileFor(latest: LatestRelease, installed: boolean): ReleaseFile | null {
   const file = installed ? latest.installer : latest.portable
-  return file && file.size > 0 && /\.(exe|zip)$/i.test(file.name) ? file : null
+  return file && file.size > 0 && (installed ? /\.exe$/i : /\.zip$/i).test(file.name) && /^[0-9a-f]{64}$/i.test(file.sha256 ?? '') ? file : null
 }

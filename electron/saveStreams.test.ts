@@ -43,6 +43,7 @@ const streams = new SaveStreams()
   await streams.write(id, Buffer.from('new'))
   await streams.end(id)
   check(fs.readFileSync(target, 'utf8') === 'new', 'saving over an existing file replaces it only once the new one is complete')
+  if (process.platform === 'win32') check(fs.readFileSync(target + ':Zone.Identifier', 'utf8').includes('ZoneId=3'), 'a received file is marked as coming from the internet, so Windows treats it as a download')
 }
 
 {

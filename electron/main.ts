@@ -1,4 +1,5 @@
 import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, powerMonitor, protocol, screen, session, shell, Tray, type IpcMainEvent, type IpcMainInvokeEvent, type NativeImage } from 'electron'
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
@@ -280,9 +281,20 @@ on('overlay-resize', (_event, size: { width: number; height: number }) => {
 type SignInResult = { code: string } | { pending: string; email: string } | { error: string }
 const signInInBrowser = (serverUrl: string, provider: string) =>
   new Promise<SignInResult>((resolve, reject) => {
+    // Only a Maplecord server's own sign-in page, over http(s): what the window hands over is not trusted to be a web
+    // address at all (a file: or ms- link would open something else entirely).
+    let start: URL
+    try {
+      start = new URL(String(serverUrl))
+      if (start.protocol !== 'https:' && start.protocol !== 'http:') throw new Error('not http')
+      if (!/^[a-z0-9_-]{1,32}$/i.test(String(provider))) throw new Error('not a service')
+    } catch { reject(new Error('That is not a sign-in this app can open.')); return }
+    // The answer is taken only at an address made for this sign-in: another program on this computer that finds the
+    // port cannot hand the app a sign-in of its own choosing.
+    const callback = '/callback/' + crypto.randomBytes(16).toString('hex')
     const server = http.createServer((req, res) => {
       const url = new URL(req.url ?? '/', 'http://127.0.0.1')
-      if (url.pathname !== '/callback') { res.statusCode = 404; res.end(); return }
+      if (url.pathname !== callback) { res.statusCode = 404; res.end(); return }
       const code = url.searchParams.get('code')
       const pending = url.searchParams.get('pending')
       const error = url.searchParams.get('error')
@@ -296,8 +308,9 @@ const signInInBrowser = (serverUrl: string, provider: string) =>
     server.on('error', reject)
     server.listen(0, '127.0.0.1', () => {
       const port = (server.address() as { port: number }).port
-      const redirect = `http://127.0.0.1:${port}/callback`
-      shell.openExternal(`${serverUrl.replace(/\/$/, '')}/auth/login/${provider}?redirect_uri=${encodeURIComponent(redirect)}`)
+      const login = new URL(start.href.replace(/\/$/, '') + '/auth/login/' + encodeURIComponent(provider))
+      login.searchParams.set('redirect_uri', `http://127.0.0.1:${port}${callback}`)
+      void shell.openExternal(login.href)
     })
     setTimeout(() => { server.close(); reject(new Error('Sign-in timed out.')) }, 5 * 60 * 1000)
   })
@@ -397,6 +410,17 @@ handle('share-sources', async () => {
 })
 handle('share-choose', (_event, id: string | null) => { chosenSource = typeof id === 'string' ? id : null })
 handle('system-idle-seconds', () => powerMonitor.getSystemIdleTime())
+
+/**
+ * What the app has no use for is refused outright, whatever its page asks: where the computer is, its USB, serial,
+ * HID, MIDI and Bluetooth devices. (A microphone, the camera, the screen, notifications and the rest are what it is for.)
+ */
+const NEVER_ALLOWED = new Set(['geolocation', 'midi', 'midiSysex', 'hid', 'serial', 'usb', 'bluetooth'])
+function refuseUnneededPermissions() {
+  session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => callback(!NEVER_ALLOWED.has(permission)))
+  session.defaultSession.setPermissionCheckHandler((_contents, permission) => !NEVER_ALLOWED.has(permission))
+  session.defaultSession.setDevicePermissionHandler(() => false)
+}
 
 function registerDisplayCapture() {
   session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
@@ -528,6 +552,7 @@ app.whenReady().then(async () => {
   updateNotice = update.notice
   registerPluginProtocol()
   registerDisplayCapture()
+  refuseUnneededPermissions()
   try { plugins.reload() } catch (e) { console.error('[plugins]', e) }
   createTray(logo)
   createWindow()

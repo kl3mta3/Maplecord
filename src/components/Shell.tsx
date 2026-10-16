@@ -53,7 +53,7 @@ import { DEFAULT_GATE_LEVEL, DEFAULT_NOTIFY, type NotifyLevel } from '../setting
 import { ContextMenu, type MenuEntry } from './ContextMenu'
 import type { GuildFolder } from '../settings'
 import { Avatar, ProfileEditor, ProfilePopout, ProfileColumn, UserName } from './Profile'
-import { assetUrl, initials, NAMEPLATES, nameplateLook, shownName, type Appearance } from '../profile'
+import { assetUrl, initials, NAMEPLATES, nameplateLook, serverAssetUrl, shownName, type Appearance } from '../profile'
 import { STATUSES, UserSettingsDialog } from './UserSettings'
 import { ArrowLeftRight, AudioLines, ChartBarDecreasing, Smile, Sticker, Music2, ChevronDown, ChevronRight, HeadphoneOff, Headphones, Heart, Images, LoaderCircle, Menu, Mic, MicOff, MonitorUp, Paperclip, Phone, PhoneOff, Pin, Plus, Search, Settings as SettingsIcon, Signal, TriangleAlert, Users, Video } from 'lucide-react'
 import { AddServerDialog, CreateServerDialog, DiscoverDialog, JoinServerDialog } from './Servers'
@@ -567,7 +567,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
               onClick={() => store.selectGuild(x.guild.id)} onContextMenu={e => openGuildMenu(e, x.guild.id)}
               onDragStart={e => { e.dataTransfer.setData(DRAG, x.guild.id); e.dataTransfer.effectAllowed = 'move' }} onDragEnd={() => setRailDrop(null)}
               onDragOver={railOver('s:' + x.guild.id, 'server')} onDrop={railLetGo({ server: x.guild.id }, 'server')}>
-              {x.guild.iconUrl ? <img src={x.guild.iconUrl} alt="" draggable={false} /> : initials(x.guild.name)}
+              {serverAssetUrl(store.settings.serverUrl, x.guild.iconUrl) ? <img src={serverAssetUrl(store.settings.serverUrl, x.guild.iconUrl)!} alt="" draggable={false} /> : initials(x.guild.name)}
               {x.unread > 0 && <span className="badge">{x.unread}</span>}
             </button>
           )
@@ -589,7 +589,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
                   onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setMenu({ kind: 'folder', folderId: f.id, x: e.clientX, y: e.clientY }) }}>
                   {/* No folder picture: the first four servers in it, small. */}
                   <span className="mini">
-                    {inside.slice(0, 4).map(y => (y.guild.iconUrl ? <img key={y.guild.id} src={y.guild.iconUrl} alt="" draggable={false} /> : <i key={y.guild.id}>{initials(y.guild.name)}</i>))}
+                    {inside.slice(0, 4).map(y => (serverAssetUrl(store.settings.serverUrl, y.guild.iconUrl) ? <img key={y.guild.id} src={serverAssetUrl(store.settings.serverUrl, y.guild.iconUrl)!} alt="" draggable={false} /> : <i key={y.guild.id}>{initials(y.guild.name)}</i>))}
                   </span>
                   {!f.open && unread > 0 && <span className="badge">{unread}</span>}
                 </button>
@@ -645,7 +645,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           <>
             {/* Left- or right-click the server name for everything you can do with this server. */}
             <div className={'header serverheader' + (serverMenu ? ' open' : '') + (g?.guild.bannerUrl ? ' withbanner' : '')} title={g ? 'Server menu' : undefined}
-              style={g?.guild.bannerUrl ? { backgroundImage: `url("${g.guild.bannerUrl}")` } : undefined}
+              style={serverAssetUrl(store.settings.serverUrl, g?.guild.bannerUrl) ? { backgroundImage: `url("${serverAssetUrl(store.settings.serverUrl, g?.guild.bannerUrl)}")` } : undefined}
               onClick={() => g && setServerMenu(open => !open)} onContextMenu={e => { e.preventDefault(); if (g) setServerMenu(true) }}>
               <span className="grow" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g?.guild.name ?? 'No server'}</span>
               {g && <span className="chevron">{serverMenu ? '✕' : '▾'}</span>}
@@ -1070,7 +1070,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
   const channel = store.selectedChannel
   // Right-click a message: copy it, or delete it if it is yours or you may manage messages here (the server decides).
   // (And, when it was a picture on it that was right-clicked, save that picture.)
-  const [messageMenu, setMessageMenu] = useState<{ m: MessageDto; x: number; y: number; picture?: { src: string; name: string; fileId?: string }; emoji?: { id: string; name: string } } | null>(null)
+  const [messageMenu, setMessageMenu] = useState<{ m: MessageDto; x: number; y: number; picture?: { src: string; name: string; fileId?: string }; emoji?: { id: string; name: string }; media?: string } | null>(null)
   const [deleting, setDeleting] = useState<MessageDto | null>(null)
   // What a kept channel's messages can have: an answer, an edit, reactions, a pin, a thread, a poll. A P2P channel's
   // messages are on people's own devices, where none of this reaches.
@@ -1478,8 +1478,10 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
                 e.preventDefault()
                 const on = (e.target as HTMLElement).closest<HTMLImageElement>('img[data-picture]')
                 const emoji = (e.target as HTMLElement).closest<HTMLImageElement>('img[data-emoji]')
+                // A picture a webhook or bot put in the message: the server's copy, reported by its address.
+                const media = (e.target as HTMLElement).closest<HTMLImageElement>('img[data-media]')?.dataset.media
                 setMessageMenu({ m, x: e.clientX, y: e.clientY, picture: on ? { src: on.currentSrc || on.src, name: on.dataset.picture ?? '', fileId: on.dataset.file } : undefined,
-                  emoji: emoji?.dataset.emoji ? { id: emoji.dataset.emoji, name: emoji.dataset.emojiName ?? '' } : undefined })
+                  emoji: emoji?.dataset.emoji ? { id: emoji.dataset.emoji, name: emoji.dataset.emojiName ?? '' } : undefined, media })
               }}
               onUserMenu={m.webhookId ? undefined : e => onUserMenu(e, m.authorId, m.authorName)} onUserCard={m.webhookId ? undefined : e => onUserCard(e, m.authorId, m.authorName)} />)}
           </>
@@ -1514,6 +1516,8 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
           // Reporting, to whoever runs this Maplecord: a picture the server keeps (never one sent P2P), or whoever wrote it.
           ...(kept && reportsOn.pictures && messageMenu.m.authorId !== me?.id && messageMenu.picture?.fileId
             ? [{ kind: 'item', label: 'Report picture…', icon: '⚑', onClick: () => onReport({ kind: 'picture', picture: 'attachment', id: messageMenu.picture!.fileId!, what: 'this picture' }) } as MenuEntry] : []),
+          ...(kept && reportsOn.pictures && messageMenu.m.authorId !== me?.id && messageMenu.media
+            ? [{ kind: 'item', label: 'Report picture…', icon: '⚑', onClick: () => onReport({ kind: 'picture', picture: 'embed', id: messageMenu.m.id, what: 'this picture', media: messageMenu.media }) } as MenuEntry] : []),
           ...(kept && reportsOn.pictures && messageMenu.emoji
             ? [{ kind: 'item', label: `Report emoji :${messageMenu.emoji.name}:…`, icon: '⚑', onClick: () => onReport({ kind: 'picture', picture: 'emoji', id: messageMenu.emoji!.id, what: `the emoji :${messageMenu.emoji!.name}:` }) } as MenuEntry] : []),
           ...(kept && reportsOn.pictures && messageMenu.m.authorId !== me?.id && messageMenu.m.sticker
@@ -1904,7 +1908,7 @@ function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu,
             {e.title && <div className="title">{e.url ? <a href={e.url} target="_blank" rel="noreferrer" style={{ color: 'inherit' }}>{e.title}</a> : e.title}</div>}
             {e.description && <div className="body">{e.description}</div>}
             {e.fields?.map((f, j) => <div key={j} className="line"><b>{f.name}</b> {f.value}</div>)}
-            {serverMediaUrl(serverUrl, e.imageUrl) && <CheckedPicture src={serverMediaUrl(serverUrl, e.imageUrl)!}><img className="attachment" src={serverMediaUrl(serverUrl, e.imageUrl)!} alt="" /></CheckedPicture>}
+            {serverMediaUrl(serverUrl, e.imageUrl) && <CheckedPicture src={serverMediaUrl(serverUrl, e.imageUrl)!}><img className="attachment" src={serverMediaUrl(serverUrl, e.imageUrl)!} alt="" data-media={e.imageUrl ?? undefined} /></CheckedPicture>}
             {e.footer && <div className="line">{e.footer}</div>}
           </div>
         ))}

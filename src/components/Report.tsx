@@ -6,9 +6,10 @@ import { Dialog } from './Dialogs'
 export type ReportTarget =
   | { kind: 'person'; userId: string; name: string; messageId?: string; avatar?: boolean; banner?: boolean; nameplate?: boolean }
   | { kind: 'server'; guildId: string; name: string; icon: boolean; banner: boolean }
-  | { kind: 'picture'; picture: PictureKind; id: string; what: string }
+  | { kind: 'picture'; picture: PictureKind; id: string; what: string; media?: string }
 
-export type PictureKind = 'attachment' | 'avatar' | 'profile_banner' | 'nameplate' | 'server_icon' | 'server_banner' | 'emoji' | 'sticker'
+/** "embed": a picture a webhook or bot put in a message (the server's copy of it); its id is the message, `media` its address. */
+export type PictureKind = 'attachment' | 'embed' | 'avatar' | 'profile_banner' | 'nameplate' | 'server_icon' | 'server_banner' | 'emoji' | 'sticker'
 
 /** Whether whoever runs this Maplecord lets people report pictures, and people (the admin panel's Switches). */
 export interface ReportsOn { pictures: boolean; people: boolean }
@@ -20,11 +21,11 @@ const PICTURE = [['sexual', 'Sexual or nude'], ['child_safety', 'A child, sexual
   ['self_harm', 'Self-harm'], ['illegal', 'Something illegal'], ['spam', 'Spam or scams'], ['other', 'Something else']] as const
 
 /** One thing the dialog can send: the person themselves, or one picture. */
-type Choice = { label: string; send: 'person' } | { label: string; send: PictureKind; id: string }
+type Choice = { label: string; send: 'person' } | { label: string; send: PictureKind; id: string; media?: string }
 
 /** What can be reported of a target, as this Maplecord allows. */
 function choicesOf(target: ReportTarget, on: ReportsOn): Choice[] {
-  if (target.kind === 'picture') return on.pictures ? [{ label: target.what, send: target.picture, id: target.id }] : []
+  if (target.kind === 'picture') return on.pictures ? [{ label: target.what, send: target.picture, id: target.id, media: target.media }] : []
   if (target.kind === 'server') return !on.pictures ? [] : [
     ...(target.icon ? [{ label: 'Its icon', send: 'server_icon' as const, id: target.guildId }] : []),
     ...(target.banner ? [{ label: 'Its banner', send: 'server_banner' as const, id: target.guildId }] : []),
@@ -60,7 +61,7 @@ export function ReportDialog({ api, target, on, onClose }: { api: Api; target: R
     setBusy(true); setProblem(null)
     try {
       if (choice.send === 'person') await api.reportPerson((target as { userId: string }).userId, category, note, target.kind === 'person' ? target.messageId : undefined)
-      else await api.reportPicture(choice.send, choice.id, category, note)
+      else await api.reportPicture(choice.send, choice.id, category, note, choice.media)
       setSent(true)
     } catch (e) {
       setProblem(e instanceof Error ? e.message : 'It could not be sent.')
