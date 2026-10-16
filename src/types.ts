@@ -26,7 +26,7 @@ export const Permission = {
   StartRolls: 1 << 4, JoinVoice: 1 << 5, Speak: 1 << 6, Stream: 1 << 7,
   CreateInvites: 1 << 8, ManageChannels: 1 << 9, ManageRoles: 1 << 10, ManageWebhooks: 1 << 11,
   ManageGuild: 1 << 12, KickMembers: 1 << 13, BanMembers: 1 << 14, MuteMembers: 1 << 15,
-  ManageDirectChannels: 1 << 16, StreamDirect: 1 << 17, JoinDirectVoice: 1 << 18, DisconnectMembers: 1 << 19, UseRelayInDirect: 1 << 20, WearTag: 1 << 21, MoveMembers: 1 << 22, PostEvents: 1 << 23, ShareEvents: 1 << 24, ManageExpressions: 1 << 25, UseSoundboard: 1 << 26,
+  ManageDirectChannels: 1 << 16, StreamDirect: 1 << 17, JoinDirectVoice: 1 << 18, DisconnectMembers: 1 << 19, UseRelayInDirect: 1 << 20, WearTag: 1 << 21, MoveMembers: 1 << 22, PostEvents: 1 << 23, ShareEvents: 1 << 24, ManageExpressions: 1 << 25, UseSoundboard: 1 << 26, AddBots: 1 << 27,
   Administrator: 1 << 30,
 } as const
 export const hasPermission = (held: number, required: number) =>
@@ -243,6 +243,14 @@ export interface CallDto { id: string; channelId: string; callerId: string; call
 export interface CallLogDto { outcome: 'ended' | 'missed' | 'declined'; seconds: number; direct: boolean }
 /** A button under a bot's message: the bot's own name for it, what it says, and 0 plain, 1 accent or 2 red. */
 export interface ButtonDto { id: string; label: string; style?: number }
+/** A menu under a bot's message: from minValues to maxValues of its options (one, unless the bot says otherwise). */
+export interface SelectDto { id: string; options: SelectOptionDto[]; placeholder?: string | null; minValues?: number; maxValues?: number }
+export interface SelectOptionDto { label: string; value: string; description?: string | null }
+/** A form a bot asks someone to fill in. */
+export interface ModalDto { id: string; title: string; fields: ModalFieldDto[] }
+export interface ModalFieldDto { id: string; label: string; paragraph?: boolean; required?: boolean; placeholder?: string | null; minLength?: number | null; maxLength?: number | null; value?: string | null }
+/** A form shown to this person, and the key to send it back with. */
+export interface ModalRequestDto { key: string; channelId: string; botName: string; modal: ModalDto }
 export interface MessageDto { /** A message that is a sticker. */ sticker?: StickerDto | null;
   id: string; channelId: string; authorId: string; authorName: string; kind: MessageKind; content: string
   createdAt: string; editedAt: string | null; attachments: AttachmentDto[]; roll: RollResultDto | null
@@ -265,6 +273,8 @@ export interface MessageDto { /** A message that is a sticker. */ sticker?: Stic
   markdown?: boolean
   /** Buttons under a bot's message. Pressing one tells the bot who pressed which. */
   buttons?: ButtonDto[] | null
+  /** Menus under a bot's message. Choosing tells the bot who chose what. */
+  selects?: SelectDto[] | null
   /** Files on a message from a P2P channel. They are not on the server: their contents come from other people's apps. */
   p2pFiles?: import('./p2pText').P2PFile[]
   /** A P2P message that is only someone's reaction to another message (see p2pPosts.ts). It is counted, never shown. */

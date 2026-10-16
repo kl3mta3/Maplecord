@@ -7,7 +7,7 @@ import { makeSealer, seal, unseal, type Sealer } from './p2pIdentity'
 /** The set-up messages that carry addresses. */
 const CARRIES_ADDRESSES = new Set(['offer', 'answer', 'ice'])
 import type {
-  ButtonDto, CalendarEventDto, ChannelDto, EmbedDto, GuildDto, InteractionDto, MemberDto, MessageDto, RoleDto, RollChoice, RollItemDto, RollKind, RollResultDto, RollSessionDto,
+  ButtonDto, SelectDto, ModalRequestDto, CalendarEventDto, ChannelDto, EmbedDto, GuildDto, InteractionDto, MemberDto, MessageDto, RoleDto, RollChoice, RollItemDto, RollKind, RollResultDto, RollSessionDto,
   RpsChoice, RpsResultDto, RpsSessionDto, VoiceParticipantDto, FriendDto, DmChannelDto, UserDto, SystemMessageDto, PostRequest, RollStatsDto,
 } from './types'
 
@@ -21,7 +21,9 @@ export interface ChatEvents {
   MessageEdited: (channelId: string, messageId: string, content: string, title: string | null, editedAt: string) => void
   MessagePinned: (channelId: string, messageId: string, pinnedAt: string | null) => void
   /** A bot changed one of its own messages when a button on it was pressed: its text, embeds and buttons are these now. */
-  MessageChanged: (channelId: string, messageId: string, content: string, embeds: EmbedDto[] | null, buttons: ButtonDto[] | null) => void
+  MessageChanged: (channelId: string, messageId: string, content: string, embeds: EmbedDto[] | null, buttons: ButtonDto[] | null, selects?: SelectDto[] | null) => void
+  /** A bot asks this person to fill in a form, in answer to their command, button or menu. */
+  ModalRequested: (request: ModalRequestDto) => void
   ReactionChanged: (channelId: string, messageId: string, emoji: string, userId: string, on: boolean, count: number) => void
   /** Someone reacted to one picture of a gallery post, or took a reaction back. */
   PictureReactionChanged: (channelId: string, messageId: string, attachmentId: string, emoji: string, userId: string, on: boolean, count: number) => void
@@ -295,6 +297,10 @@ export class ChatHub {
   }
   /** Presses a button under a bot's message. The bot answers as it would a slash command. */
   pressButton(messageId: string, buttonId: string) { return this.c.invoke<InteractionDto>('PressButton', messageId, buttonId) }
+  /** Chooses in a menu under a bot's message. The bot answers as it would a button. */
+  chooseOption(messageId: string, selectId: string, values: string[]) { return this.c.invoke<InteractionDto>('ChooseOption', messageId, selectId, values) }
+  /** Sends back a form a bot asked for. */
+  submitModal(key: string, fields: Record<string, string>) { return this.c.invoke<InteractionDto>('SubmitModal', key, fields) }
   invokeCommand(channelId: string, commandId: string, args: Record<string, string>) {
     return this.c.invoke<InteractionDto>('InvokeCommand', channelId, commandId, args)
   }

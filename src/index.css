@@ -1045,6 +1045,14 @@ button.chip { cursor: pointer; }
 .friendlink .row input { flex: 1; min-width: 0; }
 .qrpanel { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; margin-top: 4px; }
 .msgbuttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+/* Menus under a bot's message (see BotForms): a drop-down, or a list of boxes for one that takes several. */
+.msgmenus { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; max-width: 420px; }
+.msgmenus select { width: 100%; }
+.manymenu { position: relative; }
+.manymenu > button { width: 100%; text-align: left; }
+.manymenu-list { margin-top: 4px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg2); display: flex; flex-direction: column; gap: 6px; }
+.formfield { display: flex; flex-direction: column; gap: 4px; }
+.formfield textarea { resize: vertical; }
 .msgbuttons button { padding: 5px 12px; }
 .qrpanel .actions { display: flex; flex-direction: column; gap: 6px; }
 .qrpanel .actions label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }

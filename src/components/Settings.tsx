@@ -106,7 +106,8 @@ export const PERMISSION_LABELS: { group: string; bit: number; name: string; hint
   { group: 'Server', bit: Permission.ManageChannels, name: 'Manage channels', hint: 'Create, rename, delete, overrides' },
   { group: 'Server', bit: Permission.ManageRoles, name: 'Manage roles', hint: 'Only roles below your own' },
   { group: 'Server', bit: Permission.ManageWebhooks, name: 'Manage webhooks', hint: '' },
-  { group: 'Server', bit: Permission.ManageGuild, name: 'Manage server', hint: 'Name, icon, bots' },
+  { group: 'Server', bit: Permission.ManageGuild, name: 'Manage server', hint: 'Name, icon, welcome, and who may use bots\' commands' },
+  { group: 'Server', bit: Permission.AddBots, name: 'Add bots', hint: 'Add bots to this server and take them off it. A bot reads what its own role lets it' },
   { group: 'Server', bit: Permission.Administrator, name: 'Administrator', hint: 'Every permission, bypasses channel overrides' },
 ]
 /** The groups, in the order they are shown. */
@@ -151,7 +152,8 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, fin
   const canRoles = hasPermission(myPermissions, Permission.ManageRoles)
   const canHooks = hasPermission(myPermissions, Permission.ManageWebhooks)
   const canExpressions = hasPermission(myPermissions, Permission.ManageExpressions)
-  const [tab, setTab] = useState<'overview' | 'roles' | 'members' | 'webhooks' | 'bots' | 'expressions'>(canGuild ? 'overview' : canRoles ? 'roles' : canHooks ? 'webhooks' : 'expressions')
+  const canBots = hasPermission(myPermissions, Permission.AddBots)
+  const [tab, setTab] = useState<'overview' | 'roles' | 'members' | 'webhooks' | 'bots' | 'expressions'>(canGuild ? 'overview' : canRoles ? 'roles' : canHooks ? 'webhooks' : canBots ? 'bots' : 'expressions')
   const [name, setName] = useState(guild.name)
   const fileRef = useRef<HTMLInputElement>(null)
   const bannerRef = useRef<HTMLInputElement>(null)
@@ -184,7 +186,7 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, fin
         {canRoles && <button className={tab === 'roles' ? 'active' : ''} onClick={() => setTab('roles')}>Roles</button>}
         {canRoles && <button className={tab === 'members' ? 'active' : ''} onClick={() => setTab('members')}>Members</button>}
         {canHooks && <button className={tab === 'webhooks' ? 'active' : ''} onClick={() => setTab('webhooks')}>Webhooks</button>}
-        {canGuild && <button className={tab === 'bots' ? 'active' : ''} onClick={() => setTab('bots')}>Bots</button>}
+        {(canGuild || canBots) && <button className={tab === 'bots' ? 'active' : ''} onClick={() => setTab('bots')}>Bots</button>}
         {(canExpressions || canGuild) && <button className={tab === 'expressions' ? 'active' : ''} onClick={() => setTab('expressions')}>Emojis & sounds</button>}
       </div>
 
@@ -192,7 +194,7 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, fin
         onOutside={async allowed => { await onOutside(allowed); onExpressionsChanged() }} />}
 
       {tab === 'webhooks' && <WebhooksTab api={api} guildId={guild.id} channels={channels} />}
-      {tab === 'bots' && <ServerBotsTab api={api} guildId={guild.id} canManage={canGuild} onManage={canGuild ? setManaging : undefined}
+      {tab === 'bots' && <ServerBotsTab api={api} guildId={guild.id} canManage={canBots} onManage={canGuild ? setManaging : undefined}
         fullP2P={!!guild.fullP2P} hasP2PChannels={channels.some(c => !!c.directSince)}
         onRoles={canRoles ? botUserId => { setMemberId(botUserId); setTab('members') } : undefined} />}
 

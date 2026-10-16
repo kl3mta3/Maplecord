@@ -73,6 +73,7 @@ import { memberGroups, type MemberGroup } from '../memberGroups'
 import { dropInRail, railEntries, type RailThing, type RailWhere } from '../railOrder'
 import { CalendarView, EventCard } from './Calendar'
 import { Markdown } from './Markdown'
+import { BotFormDialog, MessageMenus } from './BotForms'
 import { ForumList, GalleryGrid, MediaGrid, NewPostDialog, PinsDialog, PollDialog, PollView, QUICK_REACTIONS, ReactionPicker, Reactions, ReplyQuote, SearchDialog } from './ChatExtras'
 
 type DialogState =
@@ -414,7 +415,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       notify('mentions', 'Only @mentions'),
       notify('none', 'Nothing'),
       { kind: 'sep' },
-      ...(allowed(Permission.ManageGuild) || allowed(Permission.ManageRoles) || allowed(Permission.ManageWebhooks) || allowed(Permission.ManageExpressions) ? [{ kind: 'item', label: 'Server settings', icon: '⚙', onClick: open('server') } as MenuEntry] : []),
+      ...(allowed(Permission.ManageGuild) || allowed(Permission.ManageRoles) || allowed(Permission.ManageWebhooks) || allowed(Permission.ManageExpressions) || allowed(Permission.AddBots) ? [{ kind: 'item', label: 'Server settings', icon: '⚙', onClick: open('server') } as MenuEntry] : []),
       ...(reportsOn.pictures && x.guild.ownerId !== me?.id && (x.guild.iconUrl || x.guild.bannerUrl)
         ? [{ kind: 'item', label: 'Report server picture…', icon: '⚑', onClick: () => setReporting({ kind: 'server', guildId, name: x.guild.name, icon: !!x.guild.iconUrl, banner: !!x.guild.bannerUrl }) } as MenuEntry] : []),
       { kind: 'item', label: x.guild.ownerId === me?.id ? 'Delete server' : 'Leave server', icon: '⎋', danger: true, onClick: open('leaveGuild') },
@@ -659,7 +660,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
             {serverMenu && g && (() => {
               const pick = (action: () => void) => () => { setServerMenu(false); action() }
               const owner = g.guild.ownerId === me?.id
-              const settings = can(Permission.ManageGuild) || can(Permission.ManageRoles) || can(Permission.ManageWebhooks) || can(Permission.ManageExpressions)
+              const settings = can(Permission.ManageGuild) || can(Permission.ManageRoles) || can(Permission.ManageWebhooks) || can(Permission.ManageExpressions) || can(Permission.AddBots)
               return (
                 <>
                   <div className="menubackdrop" onClick={() => setServerMenu(false)} onContextMenu={e => { e.preventDefault(); setServerMenu(false) }} />
@@ -890,6 +891,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       {tagOpen && <TagCardDialog guildId={tagOpen} serverUrl={store.settings.serverUrl} load={store.tagCard} onJoin={store.joinPublicGuild} onClose={() => setTagOpen(null)} />}
       {dialog?.kind === 'createGuild' && <CreateServerDialog kinds={newServerKinds} onCreate={(name, isPublic, kind) => void store.createGuild(name, isPublic, kind)} onClose={() => setDialog(null)} />}
       {store.deleteStep && <DeleteAccountDialog store={store} />}
+      {store.form && <BotFormDialog key={store.form.key} request={store.form} onSubmit={store.submitForm} onClose={store.closeForm} />}
       {store.pendingFriendLink && (
         <ConfirmDialog title={`Ask ${store.pendingFriendLink.user.displayName ?? store.pendingFriendLink.user.username} to be friends?`}
           message={`You followed the friend link of ${store.pendingFriendLink.user.displayName ?? store.pendingFriendLink.user.username} (@${store.pendingFriendLink.user.username}). They will get a friend request from you.`}
@@ -1475,7 +1477,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
         {(thread ? thread.canLoadOlder : store.canLoadOlder) && <div style={{ textAlign: 'center' }}><button className="subtle" onClick={thread ? store.loadOlderThread : store.loadOlder}>Load older messages</button></div>}
         {shown.map(m => isIgnored(m.authorId) && !m.webhookId && !revealed.has(m.id)
           ? <div key={m.id} className="message ignored"><span /><span className="muted">Message from {m.authorName}, who you ignore · <button className="subtle" onClick={() => setRevealed(new Set([...revealed, m.id]))}>show</button></span></div>
-          : <Message key={m.id} m={m} extras={extrasFor(m)} color={colorOf(m.authorId)} icon={store.itemIcon(m.roll?.item)} serverUrl={store.settings.serverUrl} onEvent={id => void store.openEvent(id)} onInvite={link => void store.openInvite(link)} onPress={id => void store.pressButton(m.id, id)}
+          : <Message key={m.id} m={m} extras={extrasFor(m)} color={colorOf(m.authorId)} icon={store.itemIcon(m.roll?.item)} serverUrl={store.settings.serverUrl} onEvent={id => void store.openEvent(id)} onInvite={link => void store.openInvite(link)} onPress={id => void store.pressButton(m.id, id)} onChoose={(selectId, values) => void store.chooseOption(m.id, selectId, values)}
               fileOffer={m.fileOffer ? <FileOfferView store={store} offer={m.fileOffer} mine={m.authorId === (me?.id ?? '')} /> : undefined}
               p2pFiles={m.p2pFiles?.map(f => <P2PFileChip key={f.hash} store={store} channelId={m.channelId} authorId={m.authorId} file={f} />)}
               author={m.webhookId ? null : store.appearanceOf(m.authorId)} name={m.webhookId ? m.authorName : nameIn(m.authorId, m.authorName)}
@@ -1840,10 +1842,12 @@ function MessageEditor({ text, title, onSave, onCancel }: { text: string; title:
   )
 }
 
-function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu, onUserCard, onMenu, onInvite, onEvent, onPress, fileOffer, p2pFiles, extras }: {
+function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu, onUserCard, onMenu, onInvite, onEvent, onPress, onChoose, fileOffer, p2pFiles, extras }: {
   extras?: MessageExtras
   /** Pressed one of the buttons under a bot's message. */
   onPress?: (buttonId: string) => void
+  /** Chose in one of the menus under a bot's message. */
+  onChoose?: (selectId: string, values: string[]) => void
   /** The files on a message from a P2P channel, drawn below its text. */
   p2pFiles?: React.ReactNode
   /** Pressed an invite link in the text. */
@@ -1925,6 +1929,7 @@ function Message({ m, color, icon, serverUrl, mention, author, name, onUserMenu,
             ))}
           </div>
         )}
+        {m.selects && m.selects.length > 0 && <MessageMenus selects={m.selects} onChoose={onChoose} />}
         {extras?.poll}
         {extras?.reactions}
         {extras?.threadLink}

@@ -1,6 +1,6 @@
 import { checkBeforeSending } from './pictureCheck'
 import { plainEmojis, playSound as playExpressionSound } from './expressions'
-import type { CommunityPollAnswerDto, CommunityPollDto, UsableExpressionsDto } from './types'
+import type { CommunityPollAnswerDto, CommunityPollDto, ModalRequestDto, UsableExpressionsDto } from './types'
 import { shouldAsk } from './communityPoll'
 import { inBatches, membersToAsk, mergeMembers } from './memberPaging'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -460,6 +460,8 @@ export function useMaplecord() {
   const [error, setError] = useState<string | null>(null)
   /** Said on the sign-in screen after the account was deleted, in place of whatever the closing connections reported. */
   const [farewell, setFarewell] = useState<string | null>(null)
+  // A form a bot asked this person to fill in (see ModalRequested), until it is sent or closed.
+  const [form, setForm] = useState<ModalRequestDto | null>(null)
   /** While the server is full and this app waits in line to get in: roughly how many are ahead (0 = next). Null otherwise. */
   const [queueAhead, setQueueAhead] = useState<number | null>(null)
   /** Messages from the server's admin, shown until dismissed. */
@@ -842,7 +844,9 @@ export function useMaplecord() {
       ThreadChanged: (_channelId, rootId, count, lastAt) => patchMessage(rootId, m => ({ ...m, threadCount: count, threadLastAt: lastAt })),
       MessageEdited: (_channelId, messageId, content, title, editedAt) => patchMessage(messageId, m => ({ ...m, content, title: title ?? m.title, editedAt })),
       MessagePinned: (_channelId, messageId, pinnedAt) => patchMessage(messageId, m => ({ ...m, pinnedAt })),
-      MessageChanged: (_channelId, messageId, content, embeds, buttons) => patchMessage(messageId, m => ({ ...m, content, embeds, buttons })),
+      MessageChanged: (_channelId, messageId, content, embeds, buttons, selects) => patchMessage(messageId, m => ({ ...m, content, embeds, buttons, selects: selects ?? null })),
+      // A form a bot asks this person to fill in. One at a time: a newer one takes the place of one left open.
+      ModalRequested: request => setForm(request),
       // Whose reaction it was says whether "mine" changes; the count is the server's.
       ReactionChanged: (_channelId, messageId, emoji, userId, on, count) => patchMessage(messageId, m => {
         const had = m.reactions ?? []
@@ -1894,6 +1898,18 @@ export function useMaplecord() {
 
   /** Presses a button under a bot's message. What the bot answers arrives as a message. */
   const pressButton = useCallback(async (messageId: string, buttonId: string) => { await run(() => hub.pressButton(messageId, buttonId)) }, [hub])
+  /** Chooses in a menu under a bot's message. What the bot answers arrives as a message, a change to that message, or a form. */
+  const chooseOption = useCallback(async (messageId: string, selectId: string, values: string[]) => { await run(() => hub.chooseOption(messageId, selectId, values)) }, [hub])
+  /**
+   * Sends back the form a bot asked for. Throws what the server said if what was entered will not do, so the form
+   * can stay open to be put right; closes it once sent.
+   */
+  const submitForm = useCallback(async (fields: Record<string, string>) => {
+    if (!form) return
+    await hub.submitModal(form.key, fields)
+    setForm(null)
+  }, [hub, form])
+  const closeForm = useCallback(() => setForm(null), [])
   const invokeCommand = useCallback(async (command: CommandDto, args: Record<string, string>) => {
     const channelId = selected.current.channel
     if (!channelId) return
@@ -3430,7 +3446,7 @@ export function useMaplecord() {
     plugins, pendingDrops, resolveItem, itemIcon, searchItems, acceptDrop, dismissDrop, simulateDrop,
     setPluginSettings, reloadPlugins, installPlugin, openPluginsFolder, pickPluginLog,
     soundPacks, reloadSoundPacks, openSoundsFolder, importSoundPack, deleteSoundPack, reachableSounds,
-    startRoll, quickRoll, roll, voteEnd, dismissRoll, coinFlip, invokeCommand, pressButton,
+    startRoll, quickRoll, roll, voteEnd, dismissRoll, coinFlip, invokeCommand, pressButton, chooseOption, form, submitForm, closeForm,
     activeRps, startRps, rpsPick, rpsThrow, dismissRps,
     createGuild, joinGuild, joinPublicGuild, tagSymbols, setGuildTag, removeGuildTag, wearTag, tagCard, setGuildListing, deleteMessage, disconnectMember, moveMember, setVoiceMuted, moveChannel, inviteToServer, openInvite, pendingInvite, acceptInvite, dismissInvite: () => setPendingInvite(null), createChannel, leaveGuild, kickMember, banMember, signOut,
     sharing, shareQuality: streamEngine.quality, localStream: streamEngine.localStream, shareViewers: streamEngine.viaServer ? { total: viewerCounts[voiceHub.connectionId ?? ''] ?? 0, relayed: 0 } : streamEngine.viewerCounts(), watching: streamEngine.watching(),
