@@ -13,9 +13,10 @@ const repository = String(JSON.parse(fs.readFileSync(new URL('./package.json', i
  * What the app's page may run: its own scripts and workers, and nothing written into the page or brought in from
  * anywhere else, so text that slipped past everything else still could not run as a script. (Pictures, sound and
  * connections are not limited here: they come from whichever Maplecord server the app is pointed at.) Built pages
- * only: the development server writes scripts of its own into the page.
+ * only: the development server writes scripts of its own into the page. (capacitor: is where the iPhone app's page
+ * comes from; it names that page's own files, nothing outside them.)
  */
-const contentSecurityPolicy = "script-src 'self' file:; worker-src 'self' file: blob:; object-src 'none'; base-uri 'none'"
+const contentSecurityPolicy = "script-src 'self' file: capacitor:; worker-src 'self' file: blob: capacitor:; object-src 'none'; base-uri 'none'"
 
 // `vite --mode web` builds/serves the renderer as a plain web app (phone roll page, browser testing).
 // Any other mode wraps it in Electron.
