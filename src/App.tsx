@@ -91,7 +91,12 @@ function MainApp() {
 
   useEffect(() => {
     if (!signedIn || store.ready) return
-    store.connect().catch(e => store.setError(`Could not connect: ${e instanceof Error ? e.message : e}`))
+    store.connect().catch(e => {
+      // Refused until the terms are agreed to: the terms are shown for that (see TermsGate), and agreeing starts the app again.
+      const said = e instanceof Error ? e.message : String(e)
+      if ((e instanceof ApiError && e.code === 'terms') || said.includes('"code":"terms"')) return
+      store.setError(`Could not connect: ${said}`)
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signedIn])
 

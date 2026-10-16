@@ -8,7 +8,7 @@ import { deletePack, listSoundPacks, resolveSound, savePack, type PackFileIn } f
 import { FileCache, respondWithFile } from './fileCache'
 import { SaveStreams } from './saveStreams'
 import { OfferedFiles } from './offeredFiles'
-import { updateAtStartup, type UpdateNotice } from './updater'
+import { lookForUpdate, updateAtStartup, updateNow, type FoundUpdate, type UpdateNotice } from './updater'
 import { stopPushKey, watchPushKey } from './pushKey'
 import { TRAY_SIZES, withDot } from './trayIcon'
 import { PLUGIN_ICON_SCHEME, type PluginRuntimeConfig } from '../src/pluginTypes'
@@ -490,6 +490,35 @@ handle('push-key-watch', (_event, key: unknown) => {
 let updateNotice: UpdateNotice | null = null
 handle('take-update-notice', () => { const notice = updateNotice; updateNotice = null; return notice })
 
+/**
+ * While the app is open, it looks for a newer version once an hour (the server remembers GitHub's answer, so each
+ * look is a small reply from its memory). One found is offered in the window as "Update now", which downloads it,
+ * quits and starts the new version.
+ */
+const UPDATE_LOOK_EVERY_MS = 60 * 60 * 1000
+let foundUpdate: FoundUpdate | null = null
+let updating = false
+async function lookAgainForUpdate() {
+  if (updating) return
+  const found = await lookForUpdate({ server: __UPDATE_SERVER__, repo: __UPDATE_REPO__ })
+  if (!found || found.version === foundUpdate?.version) return
+  foundUpdate = found
+  win?.webContents.send('update-found', found.version)
+}
+handle('update-found', () => foundUpdate?.version ?? null)
+handle('update-now', async () => {
+  if (!foundUpdate || updating) return { ok: false, error: updating ? 'It is already updating.' : 'There is no update to put in place.' }
+  updating = true
+  try {
+    const replaced = await updateNow(foundUpdate, fraction => win?.webContents.send('update-progress', fraction))
+    // A moment for the answer to reach the window, then gone: the new version is started by what replaces this one.
+    if (replaced) { setTimeout(() => { quitting = true; app.quit() }, 100); return { ok: true } }
+    return { ok: false, error: 'Nothing was put in place (a trial run).' }
+  } catch (e) {
+    return { ok: false, error: `The update could not be downloaded: ${e instanceof Error ? e.message : e}` }
+  } finally { updating = false }
+})
+
 app.whenReady().then(async () => {
   if (!onlyCopy) return
   // Before anything opens: is there a newer version? (See updater.ts. A development run skips this.)
@@ -504,6 +533,7 @@ app.whenReady().then(async () => {
   createWindow()
   update.done()
   registerHotkeys()
+  setInterval(() => void lookAgainForUpdate(), UPDATE_LOOK_EVERY_MS)
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
 })
 app.on('before-quit', () => { quitting = true })

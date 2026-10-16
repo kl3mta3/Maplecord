@@ -78,6 +78,14 @@ export interface MaplecordBridge {
   onPushKey(handler: (held: boolean) => void): () => void
   /** A newer version of the app that could not install itself at start-up, once; null when there is none to mention. */
   takeUpdateNotice(): Promise<{ version: string; reason: string } | null>
+  /** A newer version found while the app is open, that it can put in place by itself; null when there is none. */
+  updateFound?(): Promise<string | null>
+  /** Told when one is found. */
+  onUpdateFound?(handler: (version: string) => void): () => void
+  /** Downloads it, quits and starts the new version; resolves only if that did not happen. */
+  updateNow?(): Promise<{ ok: boolean; error?: string }>
+  /** How far the download is, from 0 to 1. */
+  onUpdateProgress?(handler: (fraction: number) => void): () => void
   /** Says whether there is something new to read, which puts a red dot on the app's icon beside the clock. */
   setUnread(has: boolean): void
   /** Brings the window back when it has been put away beside the clock. */

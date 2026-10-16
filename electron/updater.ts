@@ -6,7 +6,8 @@ import path from 'node:path'
 import { fileFor, isNewer, trustedUrl, type LatestRelease, type ReleaseFile } from './updateRules'
 
 /**
- * Updating the desktop app, before its window opens.
+ * Updating the desktop app: before its window opens, and when asked to from the window ("Update now", offered when
+ * a look made every so often while it is open finds something newer).
  *
  * At start-up the app asks the Maplecord server it was built for whether there is a newer release (the server asks
  * GitHub; the app does not, so starting the app tells nobody else anything). If there is one, the right file is
@@ -143,6 +144,76 @@ if ($rest.Count -gt 0) { Start-Process -FilePath (Join-Path $Dir $Exe) -Argument
   }).unref()
 }
 
+/** A newer release this copy can put in place by itself. */
+export interface FoundUpdate { version: string; file: ReleaseFile; installed: boolean }
+
+/**
+ * Asks the server whether there is something newer, and whether this copy can put it in place by itself: found, a
+ * notice to show once when it cannot, or neither. `quiet` leaves out of the log a look that found nothing, for the
+ * looks made every so often while the app is open.
+ */
+async function look(server: string, repo: string, quiet = false): Promise<{ found: FoundUpdate | null; notice: UpdateNotice | null }> {
+  const nothing = { found: null, notice: null }
+  const latest = await latestFrom(server)
+  const current = app.getVersion()
+  if (!latest?.version || !isNewer(latest.version, current)) {
+    // Written down too: when an update does not come, this says whether the server was asked and what it said.
+    if (!quiet) log(`this is ${current}; ${latest === null ? 'the server did not say what the newest release is' : latest.version ? `the server says the newest release is ${latest.version}` : 'the server knows of no release'}`)
+    return nothing
+  }
+  log(`this is ${current}; the newest release is ${latest.version}`)
+
+  const appDir = path.dirname(process.execPath)
+  const installed = fs.existsSync(path.join(appDir, `Uninstall ${app.getName()}.exe`))
+  const file = fileFor(latest, installed)
+  if (!file || !trustedUrl(file.url, repo)) { log('the release has no file this copy can use'); return { found: null, notice: { version: latest.version, reason: 'no file' } } }
+
+  // Put in place already, and this is still the old version: either it did not take, or the release is labelled
+  // with a version its own files do not carry. Trying again every time would reinstall the same thing over and
+  // over, so it is left for a week, and mentioned once.
+  const statePath = path.join(app.getPath('userData'), 'update.json')
+  try {
+    const state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as { attempted?: string; at?: number; told?: boolean }
+    if (state.attempted === latest.version && Date.now() - (state.at ?? 0) < RETRY_AFTER_MS) {
+      log('this version was put in place before and did not change what this app is; leaving it')
+      if (state.told) return nothing
+      fs.writeFileSync(statePath, JSON.stringify({ ...state, told: true }))
+      return { found: null, notice: { version: latest.version, reason: 'tried' } }
+    }
+  } catch { /* never tried */ }
+
+  if (!installed) {
+    // A portable copy has to be able to write to its own folder.
+    try { const probe = path.join(appDir, `.update-${process.pid}`); fs.writeFileSync(probe, ''); fs.rmSync(probe) }
+    catch { log('this folder cannot be written to'); return { found: null, notice: { version: latest.version, reason: 'folder' } } }
+  }
+  return { found: { version: latest.version, file, installed }, notice: null }
+}
+
+/**
+ * Downloads what was found, checks it, and hands over to what replaces the app (see the top of this file). True when
+ * the app must now quit and open nothing; false on a dry run. Throws if the download does not arrive whole.
+ */
+async function putInPlace(found: FoundUpdate, progress: (fraction: number) => void, installing: () => void): Promise<boolean> {
+  const dir = path.join(app.getPath('temp'), 'maplecord-update')
+  fs.rmSync(dir, { recursive: true, force: true })
+  fs.mkdirSync(dir, { recursive: true })
+  const saved = path.join(dir, path.basename(found.file.name))
+  await download(found.file, saved, progress)
+  log(`downloaded ${found.file.name} (${found.file.size} bytes${found.file.sha256 ? ', digest checked' : ''})`)
+  fs.writeFileSync(path.join(app.getPath('userData'), 'update.json'), JSON.stringify({ attempted: found.version, at: Date.now() }))
+  installing()
+  const appDir = path.dirname(process.execPath)
+  const args = process.argv.slice(1).filter(a => !a.toLowerCase().startsWith('maplecord://'))
+  if (DRY_RUN) { log(`dry run: would ${found.installed ? `run ${saved} --updated /S --force-run` : `unpack ${saved} over ${appDir} and start it again`}`); return false }
+  if (found.installed) spawn(saved, ['--updated', '/S', '--force-run'], { detached: true, stdio: 'ignore' }).unref()
+  else replacePortable(saved, appDir, path.basename(process.execPath), args)
+  log(found.installed ? 'started the installer' : 'handed over to the script that replaces the app')
+  return true
+}
+
+const canUpdate = (server: string) => app.isPackaged && process.platform === 'win32' && !!server
+
 /**
  * Checks, and updates if there is something newer. Resolves with `quitting: true` when the app is about to be
  * replaced (the caller must quit and open nothing), otherwise with a notice to show if a newer version exists that
@@ -150,64 +221,36 @@ if ($rest.Count -gt 0) { Start-Process -FilePath (Join-Path $Dir $Exe) -Argument
  */
 export async function updateAtStartup(options: { server: string; repo: string; logo: string }): Promise<{ quitting: boolean; notice: UpdateNotice | null; done: () => void }> {
   if (app.isPackaged && process.platform === 'win32' && !options.server) log(`this is ${app.getVersion()}; it was built without a server address, so it cannot look for updates`)
-  if (!app.isPackaged || process.platform !== 'win32' || !options.server) return { quitting: false, notice: null, done: () => {} }
+  if (!canUpdate(options.server)) return { quitting: false, notice: null, done: () => {} }
 
   const screen = splash(options.logo)
   // The splash stays until the caller has opened the real window: closing the only window would quit the app.
   const stay = (notice: UpdateNotice | null = null) => ({ quitting: false, notice, done: () => screen.close() })
   try {
-    const latest = await latestFrom(options.server)
-    const current = app.getVersion()
-    if (!latest?.version || !isNewer(latest.version, current)) {
-      // Written down too: when an update does not come, this says whether the server was asked and what it said.
-      log(`this is ${current}; ${latest === null ? 'the server did not say what the newest release is' : latest.version ? `the server says the newest release is ${latest.version}` : 'the server knows of no release'}`)
-      return stay()
-    }
-    log(`this is ${current}; the newest release is ${latest.version}`)
-
-    const appDir = path.dirname(process.execPath)
-    const installed = fs.existsSync(path.join(appDir, `Uninstall ${app.getName()}.exe`))
-    const file = fileFor(latest, installed)
-    if (!file || !trustedUrl(file.url, options.repo)) { log('the release has no file this copy can use'); return stay({ version: latest.version, reason: 'no file' }) }
-
-    // Put in place already, and this is still the old version: either it did not take, or the release is labelled
-    // with a version its own files do not carry. Trying again at every start would reinstall the same thing over and
-    // over, so it is left for a week, and mentioned once.
-    const statePath = path.join(app.getPath('userData'), 'update.json')
-    try {
-      const state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as { attempted?: string; at?: number; told?: boolean }
-      if (state.attempted === latest.version && Date.now() - (state.at ?? 0) < RETRY_AFTER_MS) {
-        log('this version was put in place before and did not change what this app is; leaving it')
-        if (state.told) return stay()
-        fs.writeFileSync(statePath, JSON.stringify({ ...state, told: true }))
-        return stay({ version: latest.version, reason: 'tried' })
-      }
-    } catch { /* never tried */ }
-
-    if (!installed) {
-      // A portable copy has to be able to write to its own folder.
-      try { const probe = path.join(appDir, `.update-${process.pid}`); fs.writeFileSync(probe, ''); fs.rmSync(probe) }
-      catch { log('this folder cannot be written to'); return stay({ version: latest.version, reason: 'folder' }) }
-    }
-
-    const dir = path.join(app.getPath('temp'), 'maplecord-update')
-    fs.rmSync(dir, { recursive: true, force: true })
-    fs.mkdirSync(dir, { recursive: true })
-    const saved = path.join(dir, path.basename(file.name))
-    screen.say(`Downloading version ${latest.version}…`, 0)
-    await download(file, saved, fraction => screen.say(`Downloading version ${latest.version}…`, fraction))
-    log(`downloaded ${file.name} (${file.size} bytes${file.sha256 ? ', digest checked' : ''})`)
-    fs.writeFileSync(statePath, JSON.stringify({ attempted: latest.version, at: Date.now() }))
-
-    screen.say(`Installing version ${latest.version}…`)
-    const args = process.argv.slice(1).filter(a => !a.toLowerCase().startsWith('maplecord://'))
-    if (DRY_RUN) { log(`dry run: would ${installed ? `run ${saved} --updated /S --force-run` : `unpack ${saved} over ${appDir} and start it again`}`); return stay() }
-    if (installed) spawn(saved, ['--updated', '/S', '--force-run'], { detached: true, stdio: 'ignore' }).unref()
-    else replacePortable(saved, appDir, path.basename(process.execPath), args)
-    log(installed ? 'started the installer' : 'handed over to the script that replaces the app')
-    return { quitting: true, notice: null, done: () => screen.close() }
+    const { found, notice } = await look(options.server, options.repo)
+    if (!found) return stay(notice)
+    screen.say(`Downloading version ${found.version}…`, 0)
+    const quitting = await putInPlace(found, fraction => screen.say(`Downloading version ${found.version}…`, fraction), () => screen.say(`Installing version ${found.version}…`))
+    return quitting ? { quitting: true, notice: null, done: () => screen.close() } : stay()
   } catch (e) {
     log(`update failed: ${e instanceof Error ? e.message : e}`)
     return stay()
   }
+}
+
+/**
+ * While the app is open: whether a newer version has come out that this copy can put in place, for the window to
+ * offer ("Update now"). Null when there is none, or this copy cannot update itself (a development run, or one that
+ * the start-up check already told about).
+ */
+export async function lookForUpdate(options: { server: string; repo: string }): Promise<FoundUpdate | null> {
+  if (!canUpdate(options.server)) return null
+  try { return (await look(options.server, options.repo, true)).found }
+  catch (e) { log(`looking for an update failed: ${e instanceof Error ? e.message : e}`); return null }
+}
+
+/** Puts in place what lookForUpdate found, when asked to from the window. True when the app must now quit. */
+export async function updateNow(found: FoundUpdate, progress: (fraction: number) => void): Promise<boolean> {
+  log(`updating to ${found.version} now, as asked`)
+  return putInPlace(found, progress, () => {})
 }

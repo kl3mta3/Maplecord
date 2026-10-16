@@ -554,6 +554,8 @@ export function useMaplecord() {
   const me = () => settingsRef.current.user?.id ?? ''
   /** SignalR wraps server HubExceptions as "An unexpected error occurred invoking 'X' on the server. HubException: <msg>"; show just <msg>. */
   const fail = (e: unknown) => {
+    // Refused until the terms are agreed to: the terms dialog is shown for that instead (see TermsGate).
+    if (e instanceof ApiError && e.code === 'terms') return
     const raw = e instanceof Error ? e.message : String(e)
     const m = /HubException: (.*)$/s.exec(raw)
     setError(m ? m[1].trim() : raw)

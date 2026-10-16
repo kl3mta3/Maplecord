@@ -8,14 +8,20 @@ import { checkPicture, pictureCheckOn, type Verdict } from '../pictureCheck'
  */
 export function CheckedPicture({ src, checkKey, children }: { src: string; checkKey?: string; children: React.ReactNode }) {
   const on = pictureCheckOn()
-  const [verdict, setVerdict] = useState<Verdict | null>(null)
-  const [shown, setShown] = useState(false)
+  // Both belong to one picture: when it is swapped for another (a new avatar, say), that one is checked afresh and
+  // starts blurred, rather than inheriting the last one's verdict or its having been shown.
+  const picture = checkKey ?? src
+  const [checked, setChecked] = useState<{ picture: string; verdict: Verdict } | null>(null)
+  const [shownFor, setShownFor] = useState<string | null>(null)
+  const verdict = checked?.picture === picture ? checked.verdict : null
+  const shown = shownFor === picture
+  const setShown = (show: boolean) => setShownFor(show ? picture : null)
   useEffect(() => {
     if (!on) return
     let current = true
-    void checkPicture(src, checkKey).then(v => { if (current) setVerdict(v) })
+    void checkPicture(src, checkKey).then(v => { if (current) setChecked({ picture, verdict: v }) })
     return () => { current = false }
-  }, [src, checkKey, on])
+  }, [src, checkKey, picture, on])
   // Shown after being blurred: a small button at the bottom blurs it again.
   if (on && shown && verdict === 'explicit') return (
     <span className="checkedpic revealed">

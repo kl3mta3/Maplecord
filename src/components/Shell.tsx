@@ -44,6 +44,7 @@ import { linkRanOut, useFileLink } from '../fileLinks'
 import { SupportDialog } from './Support'
 import { ReportDialog, type ReportsOn, type ReportTarget } from './Report'
 import { TermsGate } from './Terms'
+import { UpdateButton } from './UpdateButton'
 import { CALENDAR_BACKGROUNDS } from '../calendarLooks'
 import { MAX_P2P_TEXT, P2P_PICTURE, type P2PFile } from '../p2pText'
 import { foldP2p, foldP2pChat, P2P_GALLERY_POLLS, P2P_META_ROOM, P2P_REACTIONS } from '../p2pPosts'
@@ -325,6 +326,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   const [inviteBase, setInviteBase] = useState<string | null>(null)
   // Whether whoever runs this Maplecord switched the support button on: asked with the rest as the app starts.
   const [supportOn, setSupportOn] = useState(false)
+  const [updateShown, setUpdateShown] = useState(false)
   /** Which of custom emojis, stickers and sounds this Maplecord has switched on (asked with the support button's). */
   const [looks, setLooks] = useState({ emojis: false, stickers: false, sounds: false })
   const soundsOn = looks.sounds
@@ -543,7 +545,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   }
 
   return (
-    <div className={'shell pane-' + pane + (supportOn ? ' supporting' : '')} style={{ '--sidebar-w': columns.sidebar + 'px', '--members-w': columns.members + 'px' } as React.CSSProperties}>
+    <div className={'shell pane-' + pane + (supportOn ? ' supporting' : '') + (updateShown ? ' updatable' : '')} style={{ '--sidebar-w': columns.sidebar + 'px', '--members-w': columns.members + 'px' } as React.CSSProperties}>
       {/* Only shown on a phone: the way between the three panes. */}
       <div className="mobilebar">
         {/* Each button opens its panel, and pressed again puts the conversation back. */}
@@ -970,7 +972,10 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       ]} onClose={() => setMenu(null)} />}
       {dialog?.kind === 'kick' && <ConfirmDialog title={`Kick ${dialog.member.username}?`} message="They can rejoin with an invite." onConfirm={() => store.kickMember(dialog.member)} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'ban' && <BanDialog name={dialog.member.username} onBan={deleteDays => store.banMember(dialog.member, deleteDays)} onClose={() => setDialog(null)} />}
-      {supportOn && <button className="supportbtn" title="Support Maplecord" onClick={() => setDialog({ kind: 'support' })}><Heart size={13} /> Support</button>}
+      <div className="cornerbtns">
+        <UpdateButton onShown={setUpdateShown} onError={message => store.setError(message)} />
+        {supportOn && <button className="supportbtn" title="Support Maplecord" onClick={() => setDialog({ kind: 'support' })}><Heart size={13} /> Support</button>}
+      </div>
       {dialog?.kind === 'support' && <SupportDialog api={store.api} onClose={() => setDialog(null)} />}
       {reporting && <ReportDialog api={store.api} target={reporting} on={reportsOn} onClose={() => setReporting(null)} />}
       <TermsGate api={store.api} serverUrl={store.settings.serverUrl} onSignOut={async () => { await store.signOut(); onSignedOut() }} />

@@ -180,8 +180,9 @@ The desktop app updates itself on Windows. When it starts it asks the Maplecord 
 (`VITE_SERVER_URL`) whether there is a newer release; the server asks GitHub, the app does not. If there is one, the
 app downloads it from that release, checks it against its size and digest, and puts it in place before its window
 opens: an installed copy runs the new installer silently, a portable copy unpacks the new zip over its own folder.
-Then it starts again. The check is made only as the app starts, so a copy left running beside the clock gets a new
-release the next time it is quit and started.
+Then it starts again. While it is open it asks again once an hour; when a newer release has come out, an
+**Update now** button shows at the top of the chat, beside Support. Pressing it downloads the release, closes the
+app and starts the new version.
 
 An update is only ever taken from the releases of the repository named in `package.json` (`repository`). If
 anything goes wrong the app opens as it was and says so, and it does not try the same version again for a week.

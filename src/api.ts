@@ -1,6 +1,14 @@
 import type {
   AccountDeletionDto, MemberPageDto, ConnectionTestDto, ConnectionTestPassDto, TestRelayDto, CommunityPollDto, CommunityPollAnswerDto, CalendarEventDto, ApplicationDto, CommandRuleDto, CommandRulesDto, QrDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, NewServerKinds, SupportReportDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto, RollStatsDto, SearchResultDto, MediaItemDto, SignInMethodsDto, ContactEmailDto, ConnectionDto, ConnectionServiceDto, FriendLinkDto, FriendLinkOwnerDto, UsableExpressionsDto, GuildExpressionsDto, ExpressionLibraryDto, ExpressionDto, ExpressionGroupDto } from './types'
 
+/**
+ * Asks the terms dialog (see TermsGate) to look again whether there are terms to agree to: sent when the server
+ * refuses something until they are agreed to, and when the live connection drops (as it does when the server is
+ * updated, which is when new terms come).
+ */
+export const TERMS_CHECK_EVENT = 'maplecord:terms-check'
+export function askAboutTerms() { try { window.dispatchEvent(new Event(TERMS_CHECK_EVENT)) } catch { /* no window */ } }
+
 export class ApiError extends Error {
   status: number
   /** The server's own label for the failure, when it gives one (e.g. "suspended"). */
@@ -35,6 +43,7 @@ export class Api {
         code = typeof data.code === 'string' ? data.code : null
       } catch { /* non-JSON */ }
       if (res.status === 401) message = 'Your session has expired. Please sign in again.'
+      if (code === 'terms') askAboutTerms()
       throw new ApiError(message, res.status, code)
     }
     if (res.status === 204) return undefined as T

@@ -261,11 +261,22 @@ html.overlay-mode, html.overlay-mode body, html.overlay-mode #root { background:
 /* ---- Dialog ---- */
 /* The support button: small, at the top right of the conversation (left of the member list), with room kept for it in
    the conversation's header. */
-.supportbtn { position: fixed; top: 13px; right: 12px; z-index: 9; display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; font-size: 12px; border-radius: 999px; background: var(--bg2); color: var(--muted); border: 1px solid var(--border); }
+/* The buttons in the top corner of the chat: "Update now" (desktop, when a newer version is out) and Support. */
+.cornerbtns { position: fixed; top: 13px; right: 12px; z-index: 9; display: flex; align-items: center; gap: 6px; }
+.cornerbtns:empty { display: none; }
+.supportbtn, .updatebtn { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; font-size: 12px; border-radius: 999px; white-space: nowrap; }
+.supportbtn { background: var(--bg2); color: var(--muted); border: 1px solid var(--border); }
 .supportbtn:hover { color: var(--text); border-color: var(--accent); }
-@media (min-width: 901px) { .supportbtn { right: calc(min(var(--members-w, 220px), 28vw) + 12px); } }
-@media (min-width: 768px) { .shell.supporting .chat > .header { padding-right: 104px; } }
-@media (max-width: 767px) { .supportbtn { top: auto; bottom: 74px; right: 8px; } }
+.updatebtn { background: var(--accent); color: #fff; border: 1px solid var(--accent); }
+.updatebtn:hover:not(:disabled) { filter: brightness(1.15); }
+.updatebtn:disabled { opacity: .85; cursor: progress; }
+@media (min-width: 901px) { .cornerbtns { right: calc(min(var(--members-w, 220px), 28vw) + 12px); } }
+@media (min-width: 768px) {
+  .shell.supporting .chat > .header { padding-right: 104px; }
+  .shell.updatable .chat > .header { padding-right: 150px; }
+  .shell.supporting.updatable .chat > .header { padding-right: 240px; }
+}
+@media (max-width: 767px) { .cornerbtns { top: auto; bottom: 74px; right: 8px; } }
 /* Room kept for the scroll bar, and a gap before it, so the amounts never sit against it. */
 .support { display: flex; flex-direction: column; gap: 10px; max-height: 70vh; overflow-y: auto; scrollbar-gutter: stable; padding-right: 10px; }
 .supportlinks { display: flex; flex-wrap: wrap; gap: 8px; }

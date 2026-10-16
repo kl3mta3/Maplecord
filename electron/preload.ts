@@ -23,6 +23,11 @@ contextBridge.exposeInMainWorld('maplecord', {
 
   // a newer version that could not install itself (see electron/updater.ts), once
   takeUpdateNotice: (): Promise<{ version: string; reason: string } | null> => ipcRenderer.invoke('take-update-notice'),
+  // a newer version found while the app is open, and putting it in place when asked (it quits and starts the new one)
+  updateFound: (): Promise<string | null> => ipcRenderer.invoke('update-found'),
+  onUpdateFound: (handler: (version: string) => void) => subscribe<string>('update-found', handler),
+  updateNow: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('update-now'),
+  onUpdateProgress: (handler: (fraction: number) => void) => subscribe<number>('update-progress', handler),
 
   // the icon beside the clock: whether it shows the dot for something new, and bringing the window back
   setUnread: (has: boolean) => ipcRenderer.send('unread', has),

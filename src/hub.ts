@@ -1,3 +1,4 @@
+import { askAboutTerms } from './api'
 import { connectionIdOf, hubOptions } from './hubConnect'
 import { HubConnection, HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/signalr'
 import type { DirectTextPeer } from './p2pText'
@@ -205,10 +206,10 @@ export class ChatHub {
       if (this.sealerNow) this.fileKeys.set(`${offerId}|${requester}`, this.sealerNow.keyWith(theirSeal, publicKey, offerId).catch(() => null))
     })
     const forget = () => { this.presentedOn = null; this.fileKeys.clear(); this.outbox.clear(); this.inbox.clear() }
-    conn.onreconnecting(() => { this.ownId = null; this.setStatus('reconnecting') })
+    conn.onreconnecting(() => { this.ownId = null; this.setStatus('reconnecting'); askAboutTerms() })
     // A connection that came back is a new one to the server, with a new id; it is known before anyone is told we are back.
     conn.onreconnected(() => { forget(); if (this.waiting) return; void connectionIdOf(conn).then(id => { this.ownId = id; this.setStatus('connected') }) })
-    conn.onclose(() => this.setStatus('disconnected'))
+    conn.onclose(() => { this.setStatus('disconnected'); askAboutTerms() })
     this.setStatus('connecting')
     await conn.start()
     // A full server keeps new arrivals in line. Where this app stands is asked first: on a connection that is
