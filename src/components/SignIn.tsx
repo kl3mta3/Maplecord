@@ -89,7 +89,7 @@ export function AccountSignIn({ store }: { store: Store }) {
     setEmail(saved); setChanging(false); setWanted('')
   })
   const leaveEverywhere = () => guarded(async () => { await store.signOutEverywhere() })
-  const backToGiven = async () => { const saved = await store.clearContactEmail(); if (saved) setEmail(saved) }
+  const backToGiven = () => guarded(async () => { setEmail(await store.api.clearContactEmail()) })
 
   return (
     <>
