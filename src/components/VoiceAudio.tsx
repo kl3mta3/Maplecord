@@ -7,6 +7,7 @@ import { DEFAULT_PUSH_KEY, pushKeyFrom, setChoosingPushKey, type PushKey } from 
 import { P2PInfo } from './Dialogs'
 import { P2P_VIDEO_RATES, P2P_VOICE_RATES } from '../stream'
 import { MicTest, PhoneMicTest, PhoneSpeakerTest, SpeakerTest } from './AudioTests'
+import { p2pLogText } from '../p2pText'
 import { isNativeApp, nativeVoice } from '../native/app'
 
 /**
@@ -23,6 +24,8 @@ export function VoiceAudioSettings({ store, onAllowDirect }: {
   const [devices, setDevices] = useState<{ inputs: AudioChoice[]; outputs: AudioChoice[] }>({ inputs: [], outputs: [] })
   const [phoneLog, setPhoneLog] = useState<string | null>(null)
   const [logCopied, setLogCopied] = useState(false)
+  const [p2pLogShown, setP2pLogShown] = useState<string | null>(null)
+  const [p2pLogCopied, setP2pLogCopied] = useState(false)
   const [note, setNote] = useState('')
   const [choosing, setChoosing] = useState(false)
   const [reportCopied, setReportCopied] = useState(false)
@@ -205,6 +208,20 @@ export function VoiceAudioSettings({ store, onAllowDirect }: {
           ? 'P2P is allowed: you can join P2P voice channels and connect straight to friends who allow it too.'
           : 'Unticking this asks you to sign in again.'}
       </div>
+      <div className="muted">
+        The P2P connection log says how the connections in P2P channels went since the app started: each step, with whom,
+        and why a message was dropped. No addresses, keys or messages are in it.
+      </div>
+      <div className="row">
+        <button onClick={() => setP2pLogShown(p2pLogText() || 'Nothing in the log yet: open a P2P channel first.')}>{p2pLogShown === null ? 'Show P2P connection log' : 'Refresh P2P connection log'}</button>
+        {p2pLogShown !== null && (
+          <button onClick={() => {
+            void navigator.clipboard.writeText(p2pLogShown).then(() => { setP2pLogCopied(true); window.setTimeout(() => setP2pLogCopied(false), 2000) },
+              () => setNote('Copying was not allowed: press and hold in the log to select and copy it.'))
+          }}>{p2pLogCopied ? 'Copied' : 'Copy P2P connection log'}</button>
+        )}
+      </div>
+      {p2pLogShown !== null && <textarea className="phonelog" readOnly value={p2pLogShown} rows={10} aria-label="P2P connection log" />}
       {store.allowDirect && (
         <>
           <label className="row">

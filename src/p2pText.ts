@@ -123,6 +123,30 @@ const ASK_WAIT = 30_000
 const RETRIES = 3
 const RETRY_AFTER = 4000
 
+// ---- The connection log -------------------------------------------------------------------------------------------
+// What the connections in P2P channels did, kept in memory (the last few hundred lines) so that one that never comes
+// up can be looked at: Settings → Voice & audio → "P2P connection log". Never addresses, keys, set-up messages or
+// what anyone wrote: only which step happened, with whom (their name and the start of their connection's id).
+
+const LOG_MOST = 500
+const logLines: string[] = []
+let loggedApp = false
+
+export function p2pLog(line: string) {
+  logLines.push(`${new Date().toISOString().slice(11, 23)} ${line}`)
+  if (logLines.length > LOG_MOST) logLines.splice(0, logLines.length - LOG_MOST)
+}
+export const p2pLogText = () => logLines.join('\n')
+const who = (peer: { info: DirectTextPeer }) => `${peer.info.username}${peer.info.bot ? ' (bot)' : ''} [${peer.info.connectionId.slice(0, 6)}]`
+const chan = (channelId: string) => `channel ${channelId.slice(0, 8)}`
+const why = (e: unknown) => (e instanceof Error ? `${e.name}: ${e.message}` : String(e))
+/** "relay udp" for a route found, from what the browser says about it. No address is read. */
+function routeKind(candidate: RTCIceCandidate): string {
+  const type = candidate.type ?? / typ (\w+)/.exec(candidate.candidate)?.[1] ?? 'unknown'
+  const protocol = candidate.protocol ?? / (udp|tcp) /i.exec(candidate.candidate)?.[1]?.toLowerCase() ?? ''
+  return `${type}${protocol ? ' ' + protocol : ''}`
+}
+
 /** What travels between two apps. A bare message (no `t`) is accepted too. */
 type Wire =
   | { t: 'msg'; m: P2PMessage }
@@ -222,8 +246,14 @@ export class P2PTextEngine {
   /** Sends one set-up message to one app, sealed. Fails if that app gave no key to seal with. */
   private async tell(channelId: string, peer: Peer, kind: 'offer' | 'answer' | 'ice', payload: string) {
     const [mine, theirs] = [await this.sealer(), await peer.sealed]
-    if (!theirs) throw new Error('That app gave no key to seal set-up messages with.')
-    await this.deps.signal(channelId, peer.info.connectionId, kind, await seal(theirs.key, payload, `${kind}\n${mine.publicKey}`))
+    if (!theirs) { p2pLog(`${who(peer)}: could not send the ${kind}: no sealing key with them`); throw new Error('That app gave no key to seal set-up messages with.') }
+    try {
+      await this.deps.signal(channelId, peer.info.connectionId, kind, await seal(theirs.key, payload, `${kind}\n${mine.publicKey}`))
+    } catch (e) {
+      p2pLog(`${who(peer)}: the ${kind} could not be sent: ${why(e)}`)
+      throw e
+    }
+    if (kind !== 'ice') p2pLog(`${who(peer)}: sent the ${kind}`)
   }
 
   /** Whether we are connected to this channel at all (even if nobody else is there). */
@@ -248,14 +278,24 @@ export class P2PTextEngine {
   /** Connect to a channel: ask the server who is there, then offer a connection to each of them. */
   async join(channelId: string) {
     if (this.rooms.has(channelId)) return
-    const [mine, config, known] = await Promise.all([this.deps.identity(), this.deps.rtcConfig(channelId), this.deps.known(channelId).catch(() => [])])
+    if (!loggedApp) { loggedApp = true; p2pLog(`app: ${navigator.userAgent}`) }
+    let mine: Awaited<ReturnType<P2PTextDeps['identity']>>, config: RTCConfiguration, known: string[]
+    try {
+      [mine, config, known] = await Promise.all([this.deps.identity(), this.deps.rtcConfig(channelId), this.deps.known(channelId).catch(() => [])])
+    } catch (e) {
+      p2pLog(`${chan(channelId)}: could not get ready to join: ${why(e)}`)
+      throw e
+    }
+    const urls = (config.iceServers ?? []).flatMap(s => (Array.isArray(s.urls) ? s.urls : [s.urls]))
+    p2pLog(`${chan(channelId)}: joining; routes offered: ${urls.filter(u => /^stun:/i.test(u)).length} public-address, ${urls.filter(u => /^turns?:/i.test(u)).length} relay; ${config.iceTransportPolicy === 'relay' ? 'relay only' : 'direct or relay'}`)
     if (this.rooms.has(channelId)) return
     // What we already hold, or removed, is never asked for or shown again.
     const room: Room = { peers: new Map(), config, seen: new Set(known), asked: new Set(), inbox: new Map() }
     this.rooms.set(channelId, room)
     let others: DirectTextPeer[]
     try { others = await this.deps.join(channelId, mine.keyId, (await this.sealer()).hello) }
-    catch (e) { if (this.rooms.get(channelId) === room) this.rooms.delete(channelId); throw e }
+    catch (e) { p2pLog(`${chan(channelId)}: the server did not let us join: ${why(e)}`); if (this.rooms.get(channelId) === room) this.rooms.delete(channelId); throw e }
+    p2pLog(`${chan(channelId)}: joined; ${others.length} already here (we offer to each)`)
     if (this.rooms.get(channelId) !== room) return
     for (const other of others) {
       if (!this.deps.connectsTo(channelId, other)) continue
@@ -314,6 +354,8 @@ export class P2PTextEngine {
     const unsigned = { id: `${me.id}:${crypto.randomUUID()}`, channelId, authorId: me.id, authorName: me.name, sentAt: new Date().toISOString(), content: text, ...(files.length > 0 ? { files } : {}) }
     const message: P2PMessage = { ...unsigned, keyId: mine.keyId, signature: await mine.sign(signedPart(unsigned)) }
     room.seen.add(message.id)
+    const open = [...room.peers.values()].filter(p => p.channel?.readyState === 'open').length
+    p2pLog(`${chan(channelId)}: a message sent; ${open} of ${room.peers.size} connections here are open`)
     for (const peer of room.peers.values()) this.post(peer, { t: 'msg', m: message })
     return message
   }
@@ -446,6 +488,7 @@ export class P2PTextEngine {
   peerJoined(channelId: string, info: DirectTextPeer) {
     const room = this.rooms.get(channelId)
     if (!room || !this.deps.connectsTo(channelId, info)) return
+    p2pLog(`${who({ info })}: joined after us (they offer, we answer)`)
     this.make(channelId, room, info, false)
     this.deps.met(channelId, info)
     this.deps.changed(channelId)
@@ -455,6 +498,7 @@ export class P2PTextEngine {
     const room = this.rooms.get(channelId)
     const peer = room?.peers.get(connectionId)
     if (!room || !peer) return
+    p2pLog(`${who(peer)}: left`)
     room.peers.delete(connectionId)
     room.inbox.delete(connectionId)
     this.release(channelId, room, peer)
@@ -465,7 +509,7 @@ export class P2PTextEngine {
   /** A set-up message from another app, as the server passed it on. They are taken one at a time per app, in order. */
   signal(channelId: string, from: string, kind: string, payload: string): Promise<void> {
     const room = this.rooms.get(channelId)
-    if (!room || !room.peers.has(from)) return Promise.resolve()
+    if (!room || !room.peers.has(from)) { p2pLog(`${chan(channelId)}: a ${kind} from [${from.slice(0, 6)}], who is not known here: ignored`); return Promise.resolve() }
     const next = (room.inbox.get(from) ?? Promise.resolve()).then(() => this.setUp(channelId, room, from, kind, payload)).catch(() => {})
     room.inbox.set(from, next)
     return next
@@ -477,7 +521,9 @@ export class P2PTextEngine {
     // Sealed by that app, for us, as this kind of message; anything else is not read.
     const theirs = await peer.sealed
     const payload = theirs ? await unseal(theirs.key, sealedPayload, `${kind}\n${theirs.theirs}`) : null
-    if (payload === null || this.rooms.get(channelId) !== room || room.peers.get(from) !== peer) return
+    if (payload === null) { p2pLog(`${who(peer)}: their ${kind} ${theirs ? 'did not open with our sealing key' : 'came, but there is no sealing key with them'}: ignored`); return }
+    if (kind !== 'ice') p2pLog(`${who(peer)}: got their ${kind}`)
+    if (this.rooms.get(channelId) !== room || room.peers.get(from) !== peer) return
     try {
       if (kind === 'offer') {
         // A second offer from the same app means its side started the connection over (the first one failed): so do we.
@@ -499,7 +545,7 @@ export class P2PTextEngine {
         if (peer.pc.remoteDescription) await peer.pc.addIceCandidate(candidate)
         else peer.pendingIce.push(candidate)
       }
-    } catch { /* a set-up message we could not use: that connection simply does not come up */ }
+    } catch (e) { p2pLog(`${who(peer)}: their ${kind} could not be used: ${why(e)}`) /* that connection simply does not come up */ }
   }
 
   // ---- internals --------------------------------------------------------------------------------------------------
@@ -508,11 +554,24 @@ export class P2PTextEngine {
     const existing = room.peers.get(info.connectionId)
     if (existing) return existing
     // A bot is reached directly or not at all: the relay is not there to carry what a bot fetches and hands out.
-    const pc = new RTCPeerConnection(info.bot ? withoutRelay(room.config) : room.config)
+    let pc: RTCPeerConnection
+    try { pc = new RTCPeerConnection(info.bot ? withoutRelay(room.config) : room.config) }
+    catch (e) { p2pLog(`${who({ info })}: the connection could not be made: ${why(e)}`); throw e }
     const peer: Peer = { info, pc, channel: null, pendingIce: [], offerer, tries, taken: 0, bad: 0, asked: new Set(), has: null, wants: 0, askTimer: 0, expecting: 0, wantsLeft: 3, budget: BURST, budgetAt: Date.now(), relayed: null, serving: 0, served: 0, fetching: Promise.resolve(),
-      sealed: this.sealer().then(mine => mine.keyWith(info.seal ?? '', info.publicKey, channelId)).catch(() => null) }
+      sealed: this.sealer().then(mine => mine.keyWith(info.seal ?? '', info.publicKey, channelId)).catch(e => { p2pLog(`${who({ info })}: making the sealing key failed: ${why(e)}`); return null }) }
     room.peers.set(info.connectionId, peer)
-    pc.onicecandidate = e => { if (e.candidate) void this.tell(channelId, peer, 'ice', JSON.stringify(e.candidate.toJSON())).catch(() => {}) }
+    void peer.sealed.then(k => p2pLog(`${who(peer)}: ${k ? 'sealing key agreed' : 'their seal did not check out (no sealing key)'}`))
+    const found = new Map<string, number>()
+    pc.onicecandidate = e => {
+      if (e.candidate) {
+        const kind = routeKind(e.candidate)
+        found.set(kind, (found.get(kind) ?? 0) + 1)
+        void this.tell(channelId, peer, 'ice', JSON.stringify(e.candidate.toJSON())).catch(() => {})
+      } else {
+        p2pLog(`${who(peer)}: routes found here: ${found.size ? [...found].map(([k, n]) => `${n} ${k}`).join(', ') : 'none'}`)
+      }
+    }
+    pc.oniceconnectionstatechange = () => p2pLog(`${who(peer)}: route check ${pc.iceConnectionState}`)
     // One channel for messages per connection: a second one opened by the other app is not listened to. A channel
     // named for a file is that app asking for the file's contents.
     pc.ondatachannel = e => {
@@ -521,6 +580,7 @@ export class P2PTextEngine {
       else this.wire(channelId, room, peer, e.channel)
     }
     pc.onconnectionstatechange = () => {
+      p2pLog(`${who(peer)}: connection ${pc.connectionState}`)
       if (room.peers.get(info.connectionId) !== peer) return
       if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
         const failed = pc.connectionState === 'failed'
@@ -553,19 +613,20 @@ export class P2PTextEngine {
       this.wire(channelId, room, peer, peer.pc.createDataChannel('text', { ordered: true }))
       await peer.pc.setLocalDescription(await peer.pc.createOffer())
       await this.tell(channelId, peer, 'offer', JSON.stringify(peer.pc.localDescription))
-    } catch { room.peers.delete(info.connectionId); this.close(peer); this.deps.changed(channelId) }
+    } catch (e) { p2pLog(`${who(peer)}: the offer failed: ${why(e)}`); room.peers.delete(info.connectionId); this.close(peer); this.deps.changed(channelId) }
   }
 
   private wire(channelId: string, room: Room, peer: Peer, channel: RTCDataChannel) {
     peer.channel = channel
     const opened = () => {
+      p2pLog(`${who(peer)}: message channel open`)
       // Whether this connection goes through the relay decides how big a file may cross it. Until that is known it is treated as if it does.
       void isRelayed(peer.pc).then(relayed => { peer.relayed = relayed }, () => { peer.relayed = true })
       this.deps.changed(channelId)
       void this.announce(channelId, peer)
     }
     channel.onopen = opened
-    channel.onclose = () => this.deps.changed(channelId)
+    channel.onclose = () => { p2pLog(`${who(peer)}: message channel closed`); this.deps.changed(channelId) }
     channel.onmessage = e => { if (typeof e.data === 'string') void this.take(channelId, room, peer, e.data) }
     if (channel.readyState === 'open') opened()
   }
@@ -595,10 +656,16 @@ export class P2PTextEngine {
     if (wire.t === 'msg') {
       // Straight from its author's own app: it must be theirs, signed with the key the server gave us for that app.
       const m = wire.m
-      if (!this.allowed(peer)) return
-      if (!wellFormed(m, channelId) || m.authorId !== peer.info.userId || m.keyId !== peer.info.keyId) return
+      if (!this.allowed(peer)) { p2pLog(`${who(peer)}: a message dropped: sent too fast`); return }
+      if (!wellFormed(m, channelId)) {
+        const ahead = !!m && typeof m.sentAt === 'string' && Date.parse(m.sentAt) > Date.now() + AHEAD
+        p2pLog(`${who(peer)}: a message dropped: ${ahead ? 'dated ahead of the clock on this device' : 'not in the expected form'}`)
+        return
+      }
+      if (m.authorId !== peer.info.userId || m.keyId !== peer.info.keyId) { p2pLog(`${who(peer)}: a message dropped: ${m.authorId !== peer.info.userId ? 'not written by them' : 'signed with a different key than they joined with'}`); return }
       if (room.seen.has(m.id)) return
-      if (!await verifySignature(peer.info.publicKey, signedPart(m), m.signature)) return
+      if (!await verifySignature(peer.info.publicKey, signedPart(m), m.signature)) { p2pLog(`${who(peer)}: a message dropped: its signature did not check out`); return }
+      p2pLog(`${who(peer)}: a message arrived`)
       if (!here() || room.seen.has(m.id)) return
       // One this device already dealt with long ago (kept, or removed) is not taken a second time.
       const dealtWith = await this.deps.holds(channelId, [m.id]).then(held => held.has(m.id), () => false)
