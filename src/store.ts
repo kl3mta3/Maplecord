@@ -2119,13 +2119,18 @@ export function useMaplecord() {
       busy: () => !!voiceRef.current || !!callRef.current,
       changed: idle => { unusedRef.current = idle; try { void hub.setIdle(idle).catch(() => { /* said again once connected */ }) } catch { /* not connected: said once it is */ } },
     })
+    // The iPhone app put in the background: iOS freezes the page within moments, so the server is told at once that it
+    // is not in use, rather than ten minutes later. Then a new message is a notification on the phone, not something
+    // the server thinks this page is showing. Back on screen, it says again whatever the idle watch says.
+    const hiddenNow = () => { if (!isNativeApp()) return; try { void hub.setIdle(document.hidden ? true : unusedRef.current).catch(() => { /* said again once connected */ }) } catch { /* not connected */ } }
+    document.addEventListener("visibilitychange", hiddenNow)
     // Moving the mouse fires many times a second; once every couple of seconds is plenty to say "in use".
     let noted = 0
     const used = () => { const now = Date.now(); if (now - noted < 2000 && !watch.idle) return; noted = now; watch.used() }
     const kinds = ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart'] as const
     for (const kind of kinds) window.addEventListener(kind, used, { passive: true })
     idleWatchRef.current = watch
-    return () => { watch.stop(); idleWatchRef.current = null; for (const kind of kinds) window.removeEventListener(kind, used) }
+    return () => { watch.stop(); idleWatchRef.current = null; for (const kind of kinds) window.removeEventListener(kind, used); document.removeEventListener("visibilitychange", hiddenNow) }
   }, [hub])
   // Joining or leaving a voice channel or a call counts as using the app: the ten minutes start again from there.
   useEffect(() => { idleWatchRef.current?.used() }, [voice?.channelId, call?.channelId])

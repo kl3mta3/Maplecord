@@ -850,7 +850,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
               const speaking = isMe ? store.isSpeaking && !store.isMuted && !silencedHere : p.speaking
               return (
                 <div key={p.connectionId} className={'callperson' + (speaking ? ' speaking' : '')} onContextMenu={e => openUserMenu(e, p.userId, p.username)}>
-                  <Avatar who={store.appearanceOf(p.userId)} name={nameIn(p.userId, p.username)} serverUrl={serverUrl} size={76} animate="always" speaking={speaking}
+                  <Avatar who={store.appearanceOf(p.userId)} name={nameIn(p.userId, p.username)} serverUrl={serverUrl} size={76} animate="never" speaking={speaking}
                     onClick={e => openCard(e, p.userId, p.username)} />
                   <div className="callname"><UserName who={store.appearanceOf(p.userId)} label={nameIn(p.userId, p.username) + (isMe ? ' (you)' : '')} /></div>
                   <div className="callicons muted">
