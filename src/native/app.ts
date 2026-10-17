@@ -107,6 +107,8 @@ export interface NativeAppPlugin {
    * Apple. `sandbox` says whether this build talks to Apple's test push service (one run from Xcode) or the real one.
    */
   pushRegister(): Promise<{ token: string | null; voipToken?: string | null; sandbox: boolean; error?: string }>
+  /** The App Store country this app came from, as three letters ("USA"), or null when the phone cannot say. */
+  storefront(): Promise<{ country: string | null }>
   /**
    * The sign-in, for the moments the page is not running: a call that comes in while the app is closed is looked up,
    * and declined if declined, by the shell itself. Given on signing in and whenever the token is renewed; null on signing out.

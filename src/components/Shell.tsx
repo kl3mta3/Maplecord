@@ -40,7 +40,7 @@ import type { ExpressionDto, UsableExpressionsDto } from '../types'
 import Friends from './Home'
 import { serverMediaUrl } from '../itemIcons'
 import { bridge, isElectron } from '../platform'
-import { isNativeApp } from '../native/app'
+import { isNativeApp, nativeApp } from '../native/app'
 import { CallBubble } from './CallBubble'
 import { listAudioChoices, systemDefaultLabel, type AudioChoice } from '../audioDevices'
 import { linkRanOut, useFileLink } from '../fileLinks'
@@ -342,6 +342,15 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   const [inviteBase, setInviteBase] = useState<string | null>(null)
   // Whether whoever runs this Maplecord switched the support button on: asked with the rest as the app starts.
   const [supportOn, setSupportOn] = useState(false)
+  // In the iPhone app the Support button (its window links to places to give, outside the App Store) is shown only to
+  // people whose App Store is the United States one, where Apple allows such links; anywhere else, or if the phone
+  // cannot say, it is not shown. Elsewhere (desktop, browsers) it is up to the server, as before.
+  const [storeAllowsSupport, setStoreAllowsSupport] = useState(!isNativeApp())
+  useEffect(() => {
+    if (!isNativeApp()) return
+    void nativeApp().storefront().then(r => setStoreAllowsSupport(r.country === 'USA'), () => setStoreAllowsSupport(false))
+  }, [])
+  const supportShown = supportOn && storeAllowsSupport
   const [updateShown, setUpdateShown] = useState(false)
   /** Which of custom emojis, stickers and sounds this Maplecord has switched on (asked with the support button's). */
   const [looks, setLooks] = useState({ emojis: false, stickers: false, sounds: false })
@@ -564,14 +573,14 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   }
 
   return (
-    <div className={'shell pane-' + pane + (supportOn ? ' supporting' : '') + (updateShown ? ' updatable' : '')} style={{ '--sidebar-w': columns.sidebar + 'px', '--members-w': columns.members + 'px' } as React.CSSProperties}>
+    <div className={'shell pane-' + pane + (supportShown ? ' supporting' : '') + (updateShown ? ' updatable' : '')} style={{ '--sidebar-w': columns.sidebar + 'px', '--members-w': columns.members + 'px' } as React.CSSProperties}>
       {/* Only shown on a phone: the way between the three panes. */}
       <div className="mobilebar">
         {/* Each button opens its panel, and pressed again puts the conversation back. */}
         <button className={pane === 'list' ? 'accent' : ''} onClick={() => setPane(pane === 'list' ? 'chat' : 'list')} title={pane === 'list' ? 'Back to the conversation' : 'Servers and channels'}><Menu size={18} /></button>
         <span className="grow title" onClick={() => setPane('chat')}>{store.selectedChannel ? (store.selectedChannel.type === ChannelType.DirectMessage ? '@' : '#') + store.selectedChannel.name : 'Maplecord'}</span>
         {/* On a phone the support button sits here, left of the members button, rather than over the conversation. */}
-        {supportOn && <button className="supportbtn" title="Support Maplecord" onClick={() => setDialog({ kind: 'support' })}><Heart size={13} /> Support</button>}
+        {supportShown && <button className="supportbtn" title="Support Maplecord" onClick={() => setDialog({ kind: 'support' })}><Heart size={13} /> Support</button>}
         <button className={pane === 'people' ? 'accent' : ''} onClick={() => setPane(pane === 'people' ? 'chat' : 'people')} title={pane === 'people' ? 'Back to the conversation' : store.home ? 'Friends' : 'Members'}><Users size={18} /></button>
       </div>
       {/* ===== Guild rail ===== */}
@@ -1052,7 +1061,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
       {dialog?.kind === 'ban' && <BanDialog name={dialog.member.username} onBan={deleteDays => store.banMember(dialog.member, deleteDays)} onClose={() => setDialog(null)} />}
       <div className="cornerbtns">
         <UpdateButton onShown={setUpdateShown} onError={message => store.setError(message)} />
-        {supportOn && <button className="supportbtn" title="Support Maplecord" onClick={() => setDialog({ kind: 'support' })}><Heart size={13} /> Support</button>}
+        {supportShown && <button className="supportbtn" title="Support Maplecord" onClick={() => setDialog({ kind: 'support' })}><Heart size={13} /> Support</button>}
       </div>
       {dialog?.kind === 'support' && <SupportDialog api={store.api} onClose={() => setDialog(null)} />}
       {reporting && <ReportDialog api={store.api} target={reporting} on={reportsOn} onClose={() => setReporting(null)} />}
