@@ -167,7 +167,7 @@ a.filechip:hover { border-color: var(--accent2); }
 .typing { padding: 0 18px 2px; height: 16px; }
 .error { margin: 2px 12px; padding: 6px 10px; background: rgba(255,0,140,0.2); border-radius: 4px; display: flex; gap: 8px; align-items: center; }
 .error .grow { white-space: pre-wrap; }
-.sysmsgs { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 1000; display: grid; gap: 6px; width: min(560px, calc(100vw - 24px)); }
+.sysmsgs { position: fixed; top: calc(10px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); z-index: 1000; display: grid; gap: 6px; width: min(560px, calc(100vw - 24px)); }
 .sysmsg { display: flex; align-items: flex-start; gap: 10px; background: var(--bg3); border: 1px solid var(--accent2); border-radius: 6px; padding: 10px 12px; box-shadow: 0 6px 24px rgba(0,0,0,0.5); }
 .sysmsg .from { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent2); }
 .sysmsg .text { white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -287,7 +287,10 @@ html.overlay-mode, html.overlay-mode body, html.overlay-mode #root { background:
   .shell.updatable .chat > .header { padding-right: 150px; }
   .shell.supporting.updatable .chat > .header { padding-right: 240px; }
 }
-@media (max-width: 767px) { .cornerbtns { top: auto; bottom: 74px; right: 8px; } }
+@media (max-width: 767px) { .cornerbtns { top: auto; bottom: calc(74px + env(safe-area-inset-bottom, 0px)); right: 8px; } }
+/* On a phone the support button is in the top bar (see Shell.tsx), not over the conversation; elsewhere the bar is hidden. */
+.mobilebar .supportbtn { min-width: 0; height: 30px; padding: 0 10px; flex: none; }
+@media (max-width: 700px) { .cornerbtns .supportbtn { display: none; } }
 /* Room kept for the scroll bar, and a gap before it, so the amounts never sit against it. */
 .support { display: flex; flex-direction: column; gap: 10px; max-height: 70vh; overflow-y: auto; scrollbar-gutter: stable; padding-right: 10px; }
 .supportlinks { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -890,6 +893,12 @@ button.chip { cursor: pointer; }
 
 /* Voice settings: the microphone sensitivity slider. */
 .sensitivity { gap: 8px; align-items: center; }
+/* Settings → Voice & audio: the microphone and speaker tests. */
+.audiotest { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 2px 0 6px; }
+.audiotest .meter { position: relative; flex: 1 1 160px; min-width: 120px; height: 10px; border-radius: 5px; background: var(--bg3); overflow: hidden; }
+.audiotest .meter .fill { position: absolute; inset: 0 auto 0 0; background: var(--muted); transition: width 60ms linear; }
+.audiotest .meter .fill.talking { background: var(--accent2); }
+.audiotest .meter .mark { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--text); opacity: .7; }
 .sensitivity input[type=range] { min-width: 0; }
 
 /* Settings → Voice & audio: the push-to-talk key. */

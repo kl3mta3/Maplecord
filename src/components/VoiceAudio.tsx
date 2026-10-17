@@ -6,6 +6,8 @@ import { isElectron } from '../platform'
 import { DEFAULT_PUSH_KEY, pushKeyFrom, setChoosingPushKey, type PushKey } from '../pushToTalk'
 import { P2PInfo } from './Dialogs'
 import { P2P_VIDEO_RATES, P2P_VOICE_RATES } from '../stream'
+import { MicTest, SpeakerTest } from './AudioTests'
+import { isNativeApp } from '../native/app'
 
 /**
  * Settings → Voice & audio: which microphone and speakers, how loud everyone is, when the microphone is sent (while
@@ -25,8 +27,12 @@ export function VoiceAudioSettings({ store, onAllowDirect }: {
   const push = s.voiceMode === 'push'
   const gate = s.voiceGate !== false
   const pushKey: PushKey = s.pushKey ?? DEFAULT_PUSH_KEY
+  // The iPhone app: its calls are done by the phone itself, which picks the microphone and where sound plays. The page
+  // opening the microphone here as well would fight the phone's own call for it.
+  const phone = isNativeApp()
 
   useEffect(() => {
+    if (phone) return
     (async () => {
       try {
         // Device names are only given out once the microphone has been allowed.
@@ -34,7 +40,7 @@ export function VoiceAudioSettings({ store, onAllowDirect }: {
         setDevices(await listAudioDevices())
       } catch (e) { setNote(e instanceof Error ? e.message : String(e)) }
     })()
-  }, [])
+  }, [phone])
 
   // Choosing a key: the next key or mouse button pressed becomes it. Escape leaves it as it was.
   useEffect(() => {
@@ -59,16 +65,27 @@ export function VoiceAudioSettings({ store, onAllowDirect }: {
   return (
     <>
       <h4>Voice &amp; audio</h4>
-      <div className="muted">Microphone</div>
-      <select value={s.audioInputDeviceId ?? ''} onChange={e => pick('in', e.target.value)} aria-label="Microphone">
-        <option value="">System default</option>
-        {devices.inputs.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || 'Microphone'}</option>)}
-      </select>
-      <div className="muted">Speakers / headset</div>
-      <select value={s.audioOutputDeviceId ?? ''} onChange={e => pick('out', e.target.value)} aria-label="Speakers">
-        <option value="">System default</option>
-        {devices.outputs.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || 'Speakers'}</option>)}
-      </select>
+      {phone ? (
+        <div className="muted">
+          The phone chooses the microphone and where sound plays, as for a phone call. To switch between the speaker, the
+          earpiece and headphones during a call, use the audio button on the call screen or in Control Center.
+        </div>
+      ) : (
+        <>
+          <div className="muted">Microphone</div>
+          <select value={s.audioInputDeviceId ?? ''} onChange={e => pick('in', e.target.value)} aria-label="Microphone">
+            <option value="">System default</option>
+            {devices.inputs.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || 'Microphone'}</option>)}
+          </select>
+          <MicTest deviceId={s.audioInputDeviceId ?? null} gateLevel={s.voiceGateLevel} />
+          <div className="muted">Speakers / headset</div>
+          <select value={s.audioOutputDeviceId ?? ''} onChange={e => pick('out', e.target.value)} aria-label="Speakers">
+            <option value="">System default</option>
+            {devices.outputs.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || 'Speakers'}</option>)}
+          </select>
+          <SpeakerTest deviceId={s.audioOutputDeviceId ?? null} volume={s.outputVolume ?? 1} />
+        </>
+      )}
       <label className="row sensitivity">
         <span className="muted">Output volume</span>
         <input className="grow" type="range" min={0} max={100} step={5} value={Math.round((s.outputVolume ?? 1) * 100)} aria-label="Output volume" onChange={e => store.updateSettings({ outputVolume: Number(e.target.value) / 100 })} />

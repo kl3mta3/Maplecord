@@ -558,6 +558,8 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
         {/* Each button opens its panel, and pressed again puts the conversation back. */}
         <button className={pane === 'list' ? 'accent' : ''} onClick={() => setPane(pane === 'list' ? 'chat' : 'list')} title={pane === 'list' ? 'Back to the conversation' : 'Servers and channels'}><Menu size={18} /></button>
         <span className="grow title" onClick={() => setPane('chat')}>{store.selectedChannel ? (store.selectedChannel.type === ChannelType.DirectMessage ? '@' : '#') + store.selectedChannel.name : 'Maplecord'}</span>
+        {/* On a phone the support button sits here, left of the members button, rather than over the conversation. */}
+        {supportOn && <button className="supportbtn" title="Support Maplecord" onClick={() => setDialog({ kind: 'support' })}><Heart size={13} /> Support</button>}
         <button className={pane === 'people' ? 'accent' : ''} onClick={() => setPane(pane === 'people' ? 'chat' : 'people')} title={pane === 'people' ? 'Back to the conversation' : store.home ? 'Friends' : 'Members'}><Users size={18} /></button>
       </div>
       {/* ===== Guild rail ===== */}
