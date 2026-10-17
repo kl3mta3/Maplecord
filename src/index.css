@@ -97,7 +97,7 @@ button.provider.apple:disabled { opacity: .6; }
 .message .meta .name { font-weight: 600; }
 .message .meta .tag { font-size: 10px; background: var(--accent); color: #fff; border-radius: 3px; padding: 0 4px; }
 .message .body { white-space: pre-wrap; word-break: break-word; }
-.message video.attachment { max-width: 420px; max-height: 320px; border-radius: 6px; margin-top: 6px; display: block; background: #000; }
+.message video.attachment { max-width: min(420px, 100%); max-height: 320px; border-radius: 6px; margin-top: 6px; display: block; background: #000; }
 /* P2P voice channels are told apart three ways at once: slanted name, their own colour, and a tag. */
 .channel.p2p .grow { font-style: italic; color: var(--need); }
 .p2ptag { font-size: 9px; font-weight: 700; letter-spacing: 0.06em; color: #000; background: var(--need); border-radius: 3px; padding: 0 4px; line-height: 14px; font-style: normal; }
@@ -148,8 +148,10 @@ button.livebadge.on { background: var(--accent); }
 .filechip .get { color: var(--accent2); font-weight: 600; }
 a.filechip:hover { border-color: var(--accent2); }
 .filechip.expired { color: var(--muted); border-style: dashed; }
-.message img.attachment { max-width: 420px; max-height: 320px; border-radius: 6px; margin-top: 6px; display: block; background: var(--bg0); }
+.message img.attachment { max-width: min(420px, 100%); max-height: 320px; border-radius: 6px; margin-top: 6px; display: block; background: var(--bg0); }
 .message img.attachment.zoomable { cursor: zoom-in; }
+/* The call screen and the call bubble are for phones only (see the narrow-screen rules). */
+.callscreen, .callbubble { display: none; }
 /* A picture shown large, over everything: the picture, and above it its name and the buttons. */
 .bigpicture { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,0.86); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 16px; cursor: zoom-out; }
 .bigpicture > img { max-width: 100%; max-height: calc(100% - 52px); object-fit: contain; border-radius: 6px; cursor: default; }
@@ -778,6 +780,31 @@ button.danger:hover { background: var(--red); color: #fff; }
   .shell.pane-chat > .rail, .shell.pane-chat > .sidebar, .shell.pane-chat > .userpanel, .shell.pane-chat > .members { display: none; }
   .shell.pane-people > .rail, .shell.pane-people > .sidebar, .shell.pane-people > .userpanel, .shell.pane-people > .chat { display: none; }
   .shell.pane-people > .members { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+  /* The call on a phone: a screen of its own, over the rest, and a bubble that brings it back from anywhere. */
+  .shell.pane-call > .chat, .shell.pane-call > .members { display: none; }
+  .callscreen { position: fixed; inset: 0; z-index: 8; display: flex; flex-direction: column; background: var(--bg1); padding: calc(8px + env(safe-area-inset-top, 0px)) 12px calc(16px + env(safe-area-inset-bottom, 0px)); }
+  .callhead { display: flex; align-items: center; gap: 8px; }
+  .callhead .iconbtn { min-width: 44px; height: 44px; }
+  .callwhere { min-width: 0; }
+  .calltitle { font-weight: 700; font-size: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .callpeople { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 20px 10px; align-content: start; padding: 28px 4px; }
+  .callperson { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; min-width: 0; }
+  .callperson .av { box-shadow: 0 0 0 3px var(--bg3); transition: box-shadow 120ms; }
+  .callperson.speaking .av { box-shadow: 0 0 0 3px var(--accent2), 0 0 18px var(--accent2); }
+  .callname { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+  .callicons { display: flex; gap: 6px; align-items: center; min-height: 16px; }
+  .callcontrols { display: flex; justify-content: center; align-items: center; gap: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .callcontrols .split { display: flex; align-items: center; gap: 2px; background: transparent; border: 0; padding: 0; }
+  .callcontrols .iconbtn { width: 56px; height: 56px; border-radius: 50%; background: var(--bg3); display: grid; place-items: center; }
+  .callcontrols .iconbtn.off { color: var(--red); }
+  .callcontrols .iconbtn.hangup { background: var(--red); color: #fff; }
+  .callcontrols .caret { min-height: 0; height: 32px; padding: 0 4px; }
+  .callbubble { position: fixed; z-index: 7; display: block; width: 64px; height: 64px; min-height: 0; padding: 0; border: 0; border-radius: 50%; background: var(--bg2); touch-action: none; user-select: none; -webkit-user-select: none; box-shadow: 0 0 0 3px var(--bg3), 0 6px 18px rgba(0, 0, 0, 0.5); transition: left 0.18s ease, top 0.18s ease, box-shadow 0.12s; }
+  .callbubble.held { transition: box-shadow 0.12s; }
+  .callbubble.speaking { box-shadow: 0 0 0 3px var(--accent2), 0 0 18px var(--accent2), 0 6px 18px rgba(0, 0, 0, 0.5); }
+  .callbubble .av { width: 64px; height: 64px; pointer-events: none; }
+  .callbubble .av.speaking { box-shadow: none; }
+  .callbubble-muted { position: absolute; right: -2px; bottom: -2px; width: 22px; height: 22px; border-radius: 50%; background: var(--red); color: #fff; display: grid; place-items: center; border: 2px solid var(--bg1); }
   /* The bar already says which channel this is. */
   .shell.pane-chat > .chat > .header > span:first-child, .shell.pane-chat > .chat > .header > span:nth-child(2) { display: none; }
   .chat .header { min-height: 0; padding: 4px 8px; border-bottom: 0; }

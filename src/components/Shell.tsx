@@ -41,6 +41,7 @@ import Friends from './Home'
 import { serverMediaUrl } from '../itemIcons'
 import { bridge, isElectron } from '../platform'
 import { isNativeApp } from '../native/app'
+import { CallBubble } from './CallBubble'
 import { listAudioChoices, systemDefaultLabel, type AudioChoice } from '../audioDevices'
 import { linkRanOut, useFileLink } from '../fileLinks'
 import { SupportDialog } from './Support'
@@ -57,7 +58,7 @@ import type { GuildFolder } from '../settings'
 import { Avatar, ProfileEditor, ProfilePopout, ProfileColumn, UserName } from './Profile'
 import { assetUrl, initials, NAMEPLATES, nameplateLook, serverAssetUrl, shownName, type Appearance } from '../profile'
 import { STATUSES, UserSettingsDialog } from './UserSettings'
-import { ArrowLeftRight, AudioLines, ChartBarDecreasing, Smile, Sticker, Music2, ChevronDown, ChevronRight, HeadphoneOff, Headphones, Heart, Images, LoaderCircle, Menu, Mic, MicOff, MonitorUp, Paperclip, Phone, PhoneOff, Pin, Plus, Search, Settings as SettingsIcon, Signal, TriangleAlert, Users, Video } from 'lucide-react'
+import { ArrowLeftRight, AudioLines, ChartBarDecreasing, Smile, Sticker, Music2, ChevronDown, ChevronLeft, ChevronRight, HeadphoneOff, Headphones, Heart, Images, LoaderCircle, Menu, Mic, MicOff, MonitorUp, Paperclip, Phone, PhoneOff, Pin, Plus, Search, Settings as SettingsIcon, Signal, TriangleAlert, Users, Video } from 'lucide-react'
 import { AddServerDialog, CreateServerDialog, DiscoverDialog, JoinServerDialog } from './Servers'
 import { ChannelAccessDialog } from './ChannelAccess'
 import { InviteDialog } from './Invites'
@@ -96,7 +97,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
    * On a phone there is room for one thing at a time: the channel list, the conversation, or the people in it.
    * Wide windows show all three and ignore this.
    */
-  const [pane, setPane] = useState<'list' | 'chat' | 'people'>('chat')
+  const [pane, setPane] = useState<'list' | 'chat' | 'people' | 'call'>('chat')
   // The channel list and the member list can be dragged wider or narrower; the widths are remembered on this device.
   const [columns, setColumns] = useState(() => ({
     sidebar: clampColumn('sidebar', store.settings.columnWidths?.sidebar ?? COLUMNS.sidebar.usual),
@@ -126,6 +127,15 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   const openChannelId = store.selectedChannel?.id ?? null
   const atHome = store.home
   useEffect(() => { setPane('chat') }, [openChannelId, atHome])
+  // A phone shows the call by itself as soon as one is joined (see the call screen below); once the call is over, the
+  // channel list is what is left. A wide window has the call panel on screen all along and ignores this.
+  const joinedVoiceId = store.voice?.channelId ?? null
+  const joinedBefore = useRef<string | null>(null)
+  useEffect(() => {
+    if (joinedVoiceId && joinedVoiceId !== joinedBefore.current && window.matchMedia('(max-width: 700px)').matches) setPane('call')
+    if (!joinedVoiceId) setPane(p => (p === 'call' ? 'list' : p))
+    joinedBefore.current = joinedVoiceId
+  }, [joinedVoiceId])
   /** The dropdown under the server name. */
   const [serverMenu, setServerMenu] = useState(false)
   useEffect(() => {
@@ -822,6 +832,62 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           <span>Rolls {s.totalRolls}</span>
         </div>
       </div>
+
+      {/* ===== The call, on a phone: a screen of its own, and a bubble that brings it back from anywhere else ===== */}
+      {voice && pane === 'call' && (
+        <div className="callscreen">
+          <div className="callhead">
+            <button className="iconbtn" onClick={() => setPane('list')} title="Back to the channels" aria-label="Back to the channels"><ChevronLeft size={22} /></button>
+            <div className="grow callwhere">
+              <div className="calltitle">{voiceChannelName}</div>
+              <div className="muted small">{voiceGuild ? voiceGuild + ' · ' : ''}{voiceDetail}</div>
+            </div>
+          </div>
+          <div className="callpeople">
+            {voice.participants.map(p => {
+              const isMe = p.userId === me?.id
+              // Our own light is the one our microphone gives; everyone else's comes with their entry.
+              const speaking = isMe ? store.isSpeaking && !store.isMuted && !silencedHere : p.speaking
+              return (
+                <div key={p.connectionId} className={'callperson' + (speaking ? ' speaking' : '')} onContextMenu={e => openUserMenu(e, p.userId, p.username)}>
+                  <Avatar who={store.appearanceOf(p.userId)} name={nameIn(p.userId, p.username)} serverUrl={serverUrl} size={76} animate="always" speaking={speaking}
+                    onClick={e => openCard(e, p.userId, p.username)} />
+                  <div className="callname"><UserName who={store.appearanceOf(p.userId)} label={nameIn(p.userId, p.username) + (isMe ? ' (you)' : '')} /></div>
+                  <div className="callicons muted">
+                    {(isMe ? store.isMuted || silencedHere : p.muted || p.silenced) && <MicOff size={14} aria-label="Muted" />}
+                    {(isMe ? store.deafened : p.deafened) && <HeadphoneOff size={14} aria-label="Deafened" />}
+                    {!isMe && p.state !== 'connected' && p.state !== '' && <span className="small">{p.state}</span>}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="callcontrols">
+            <span className="split">
+              {silencedHere
+                ? <button className="iconbtn off" disabled title="You can listen; nobody hears you here."><MicOff size={22} /></button>
+                : <button className={'iconbtn' + (store.isMuted ? ' off' : '')} onClick={store.toggleMute} title={store.isMuted ? 'Unmute your microphone' : 'Mute your microphone'}>{store.isMuted ? <MicOff size={22} /> : <Mic size={22} />}</button>}
+              <button className="caret" onClick={e => openPanelMenu(e, 'mic')} title="Choose a microphone"><ChevronDown size={14} /></button>
+            </span>
+            <span className="split">
+              <button className={'iconbtn' + (store.deafened ? ' off' : '')} onClick={store.toggleDeafen} title={store.deafened ? 'Hear people again' : 'Stop hearing everyone'}>{store.deafened ? <HeadphoneOff size={22} /> : <Headphones size={22} />}</button>
+              <button className="caret" onClick={e => openPanelMenu(e, 'speaker')} title="Choose where sound plays and the volume"><ChevronDown size={14} /></button>
+            </span>
+            <button className="iconbtn hangup" onClick={store.leaveVoice} title={inCall ? (inCall.phase === 'calling' ? 'Cancel the call' : 'Hang up') : 'Disconnect'}><PhoneOff size={22} /></button>
+          </div>
+        </div>
+      )}
+      {voice && pane !== 'call' && (() => {
+        // Whoever is talking, else ourselves.
+        const talker = voice.participants.find(p => p.userId !== me?.id && p.speaking)
+        const meSpeaking = store.isSpeaking && !store.isMuted && !silencedHere
+        const face = talker ?? voice.participants.find(p => p.userId === me?.id)
+        return (
+          <CallBubble speaking={!!talker || meSpeaking} muted={store.isMuted || silencedHere}
+            label={`Back to the call${voiceChannelName ? ' in ' + voiceChannelName : ''}`} onOpen={() => setPane('call')}
+            face={<Avatar who={face ? store.appearanceOf(face.userId) : mine} name={face ? nameIn(face.userId, face.username) : me ? shownName(me) : '?'} serverUrl={serverUrl} size={64} animate="never" />} />
+        )
+      })()}
 
       {/* ===== Chat / friends ===== */}
       {store.home && !store.selectedChannel
