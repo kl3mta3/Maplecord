@@ -45,7 +45,7 @@ export function TermsGate({ api, serverUrl, onSignOut }: { api: Api; serverUrl: 
     finally { setBusy(false) }
   }
   return (
-    <Dialog title={due.first ? 'Terms of service' : 'The terms have changed'} onClose={() => {}}>
+    <Dialog title={due.first ? 'Terms of service' : 'The terms have changed'} onClose={() => {}} noClose>
       <div>{due.first ? 'To keep using Maplecord, read and agree to its terms of service.' : `The terms of service were updated on ${due.updated}. To keep using Maplecord, read and agree to them.`}</div>
       <div className="row" style={{ gap: 12 }}>
         <a href={`${base}/terms`} target="_blank" rel="noreferrer noopener">Terms of service</a>

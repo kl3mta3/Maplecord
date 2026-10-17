@@ -41,6 +41,7 @@ import Friends from './Home'
 import { serverMediaUrl } from '../itemIcons'
 import { bridge, isElectron } from '../platform'
 import { isNativeApp } from '../native/app'
+import { listAudioChoices, systemDefaultLabel, type AudioChoice } from '../audioDevices'
 import { linkRanOut, useFileLink } from '../fileLinks'
 import { SupportDialog } from './Support'
 import { ReportDialog, type ReportsOn, type ReportTarget } from './Report'
@@ -308,17 +309,18 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
     const chosen = kind === 'audioinput' ? store.settings.audioInputDeviceId : store.settings.audioOutputDeviceId
     const pick = (id: string | null) => void store.setAudioDevices(kind === 'audioinput' ? id : store.settings.audioInputDeviceId, kind === 'audiooutput' ? id : store.settings.audioOutputDeviceId)
     const list = devices.filter(d => d.kind === kind && d.deviceId && d.deviceId !== 'default' && d.deviceId !== 'communications')
+    const phone = isNativeApp()
     return [
-      { kind: 'label', text: kind === 'audioinput' ? 'Input device' : 'Output device' },
-      { kind: 'item', label: 'System default', checked: !chosen, onClick: () => pick(null) },
-      ...list.map((d, i) => ({ kind: 'item', label: d.label || `${kind === 'audioinput' ? 'Microphone' : 'Speakers'} ${i + 1}`, checked: chosen === d.deviceId, onClick: () => pick(d.deviceId) } as MenuEntry)),
+      { kind: 'label', text: kind === 'audioinput' ? 'Input device' : (phone ? 'Where sound plays' : 'Output device') },
+      { kind: 'item', label: systemDefaultLabel(), checked: !chosen, onClick: () => pick(null) },
+      ...list.map((d, i) => ({ kind: 'item', label: (d.label || `${kind === 'audioinput' ? 'Microphone' : 'Speakers'} ${i + 1}`) + (phone && d.active ? ' (in use)' : ''), checked: chosen === d.deviceId, onClick: () => pick(d.deviceId) } as MenuEntry)),
       ...(kind === 'audioinput' ? [
         { kind: 'sep' } as MenuEntry,
         { kind: 'label', text: 'Send my microphone' } as MenuEntry,
         { kind: 'item', label: 'While I talk (voice activity)', checked: store.settings.voiceMode !== 'push', onClick: () => store.updateSettings({ voiceMode: 'activity' }) } as MenuEntry,
         { kind: 'item', label: `While I hold ${(store.settings.pushKey ?? DEFAULT_PUSH_KEY).label} (push to talk)`, checked: store.settings.voiceMode === 'push', onClick: () => store.updateSettings({ voiceMode: 'push' }) } as MenuEntry,
-        ...(store.settings.voiceMode !== 'push' ? [{ kind: 'item', label: 'Only send my voice while I talk', checked: store.settings.voiceGate !== false, onClick: () => store.updateSettings({ voiceGate: store.settings.voiceGate === false }) } as MenuEntry] : []),
-        ...(store.settings.voiceMode !== 'push' && store.settings.voiceGate !== false ? [{ kind: 'slider', label: 'How loud counts as talking', min: 1, max: 10, step: 1, value: store.settings.voiceGateLevel ?? DEFAULT_GATE_LEVEL, format: (v: number) => (v <= 2 ? v + ' · a whisper' : v >= 8 ? v + ' · a raised voice' : String(v)), onChange: (v: number) => store.updateSettings({ voiceGateLevel: v }) } as MenuEntry] : []),
+        ...(store.settings.voiceMode !== 'push' && !phone ? [{ kind: 'item', label: 'Only send my voice while I talk', checked: store.settings.voiceGate !== false, onClick: () => store.updateSettings({ voiceGate: store.settings.voiceGate === false }) } as MenuEntry] : []),
+        ...(store.settings.voiceMode !== 'push' && (phone || store.settings.voiceGate !== false) ? [{ kind: 'slider', label: phone ? 'How loud lights you up' : 'How loud counts as talking', min: 1, max: 10, step: 1, value: store.settings.voiceGateLevel ?? DEFAULT_GATE_LEVEL, format: (v: number) => (v <= 2 ? v + ' · a whisper' : v >= 8 ? v + ' · a raised voice' : String(v)), onChange: (v: number) => store.updateSettings({ voiceGateLevel: v }) } as MenuEntry] : []),
       ] : []),
       ...(kind === 'audiooutput' ? [{ kind: 'slider', label: 'Output volume', min: 0, max: 100, step: 5, value: Math.round((store.settings.outputVolume ?? 1) * 100), format: (v: number) => v + '%', onChange: (v: number) => store.updateSettings({ outputVolume: v / 100 }) } as MenuEntry] : []),
       { kind: 'sep' },
@@ -354,11 +356,11 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
   // What they change about other people and servers is yours alone and kept on this device; nobody is told.
   const [menu, setMenu] = useState<({ kind: 'guild'; guildId: string } | { kind: 'user'; userId: string; username: string } | { kind: 'channel'; channelId: string; name: string; direct: boolean; voice: boolean } | { kind: 'group'; channelId: string; name: string } | { kind: 'status' } | { kind: 'mic' } | { kind: 'speaker' } | { kind: 'stats' } | { kind: 'folder'; folderId: string }) & { x: number; y: number } | null>(null)
   /** Microphones and speakers, looked up each time one of the little menus beside the mute buttons opens. */
-  const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
+  const [devices, setDevices] = useState<AudioChoice[]>([])
   const openPanelMenu = (e: React.MouseEvent, kind: 'status' | 'mic' | 'speaker') => {
     e.preventDefault(); e.stopPropagation()
     const box = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    if (kind !== 'status') void navigator.mediaDevices?.enumerateDevices().then(setDevices).catch(() => setDevices([]))
+    if (kind !== 'status') void listAudioChoices().then(setDevices).catch(() => setDevices([]))
     setMenu({ kind, x: box.left, y: box.top - 8 })
   }
   const openGuildMenu = (e: React.MouseEvent, guildId: string) => { e.preventDefault(); e.stopPropagation(); setMenu({ kind: 'guild', guildId, x: e.clientX, y: e.clientY }) }

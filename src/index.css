@@ -307,8 +307,11 @@ html.overlay-mode, html.overlay-mode body, html.overlay-mode #root { background:
 .backdrop.waitline { z-index: 60; background: rgba(0,0,0,0.82); }
 .dialog { background: var(--bg1); border: 1px solid var(--border); border-radius: 10px; padding: 20px; width: 420px; max-width: 95vw; display: flex; flex-direction: column; gap: 10px; position: relative; }
 /* A button in the top right corner of a dialog, level with its title. */
-.dialog .dialogcorner { position: absolute; top: 14px; right: 16px; padding: 5px 12px; }
-.dialog h3 { margin: 0 0 4px; }
+.dialog .dialogcorner { position: absolute; top: 14px; right: 56px; padding: 5px 12px; }
+.dialog h3 { margin: 0 0 4px; padding-right: 40px; }
+/* Every dialog's close button (X), top right. */
+.dialog .dialogclose { position: absolute; top: 12px; right: 12px; width: 34px; height: 34px; min-height: 0; padding: 0; display: grid; place-items: center; font-size: 22px; line-height: 1; border-radius: 50%; background: var(--bg3); color: var(--text); border: 1px solid var(--border); z-index: 2; }
+.dialog .dialogclose:hover { background: var(--bg2); }
 .dialog .buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .dialog .list { max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: 4px; }
 .dialog .list div { padding: 6px 10px; cursor: pointer; }
@@ -795,6 +798,8 @@ button.danger:hover { background: var(--red); color: #fff; }
   .shell > .chat .composer { padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
   .shell.pane-people > .members { padding-bottom: env(safe-area-inset-bottom, 0px); }
   .dialog { padding-top: calc(16px + env(safe-area-inset-top, 0px)); padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+  /* A phone's dialog fills the screen and scrolls, so its X stays put below the notch however far down it is scrolled. */
+  .dialog .dialogclose { position: fixed; top: calc(10px + env(safe-area-inset-top, 0px)); right: 12px; width: 40px; height: 40px; font-size: 26px; }
   .login { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
 }
 
@@ -899,6 +904,8 @@ button.chip { cursor: pointer; }
 .audiotest .meter .fill { position: absolute; inset: 0 auto 0 0; background: var(--muted); transition: width 60ms linear; }
 .audiotest .meter .fill.talking { background: var(--accent2); }
 .audiotest .meter .mark { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--text); opacity: .7; }
+/* The phone voice log (Settings → Voice & audio, in the iPhone app). */
+.phonelog { width: 100%; font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: pre; overflow: auto; }
 .sensitivity input[type=range] { min-width: 0; }
 
 /* Settings → Voice & audio: the push-to-talk key. */

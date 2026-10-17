@@ -54,6 +54,20 @@ export interface NativeVoicePlugin {
   callEnd(): Promise<void>
   setSpeaker(o: { on: boolean }): Promise<void>
 
+  // ---- Microphones and where sound plays, the two tests, and the phone's voice log
+  /** What can be chosen now, what was chosen ("" is the system's choice), and what is in use. */
+  audioRoutes(): Promise<NativeAudioRoutes>
+  /** input: a microphone's id or ""; output: "speaker", "receiver", a headset's id, or "". */
+  audioChoose(o: { input: string; output: string }): Promise<void>
+  /** The microphone test: outside a call it opens the microphone itself; in a call it reads the call's. */
+  micTestStart(): Promise<void>
+  micTestLevel(): Promise<{ level: number }>
+  micTestStop(): Promise<void>
+  /** A short chime where sound is going now, at this volume (0 to 1). */
+  testSound(o: { volume: number }): Promise<void>
+  /** The last few hundred lines of what the phone's voice did (no secrets in it). */
+  voiceLog(): Promise<{ text: string }>
+
   addListener<K extends keyof NativeVoiceEvents>(event: K, handler: (data: NativeVoiceEvents[K]) => void): Promise<{ remove: () => Promise<void> }>
   removeAllListeners(): Promise<void>
 }
@@ -77,7 +91,12 @@ export interface NativeVoiceEvents {
   callMute: { muted: boolean }
   /** The call ended from the phone's side: hung up on the lock screen, or another call took over. */
   callEnd: Record<string, never>
+  /** Something connected or disconnected (headphones, a Bluetooth headset): what can be chosen may have changed. */
+  audioRoutes: Record<string, never>
 }
+
+export interface NativeAudioRoute { id: string; label: string; active: boolean }
+export interface NativeAudioRoutes { inputs: NativeAudioRoute[]; outputs: NativeAudioRoute[]; input: string; output: string }
 
 /** The rest of what the shell does for the page: signing in through the phone's own sheet, and the phone's notifications. */
 export interface NativeAppPlugin {

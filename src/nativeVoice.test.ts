@@ -157,16 +157,23 @@ async function main() {
     check(s.named('peerSetSending').length === 0 && !ev.seen.some(e => e.what === 'speaking' && e.id === null && e.value === false), 'gate: a moment of quiet does not switch us off yet')
     await tick(400)
     s.emit('levels', { me: 0.0, peers: {} })
-    const off = s.named('peerSetSending')
-    check(off.length === 3 && off.every(x => x.active === false), 'gate: quiet for long enough, our voice stops going out on every connection')
-    engine.setGate(false, 0.02)
-    check(s.named('peerSetSending').slice(-3).every(x => x.active === true), 'gate: switched off, the voice is sent whatever the sound')
+    // On the phone the gate only sets the light: going quiet must never stop the voice going out (that left the phone
+    // unable to be heard again, since the stream server way measured our voice from what we sent).
+    check(ev.seen.some(e => e.what === 'speaking' && e.id === null && e.value === false), 'light: quiet for long enough, our light goes out')
+    check(s.named('peerSetSending').length === 0, 'gate: quiet for long enough, our voice still goes out')
     engine.setGate(true, 0.02)
+    check(s.named('peerSetSending').every(x => x.active === true), 'gate: turning it on does not hold the voice back')
     engine.setPushToTalk(true, false)
     check(s.named('peerSetSending').slice(-3).every(x => x.active === false), 'push to talk: nothing is sent until the key is held')
     engine.setPushToTalk(true, true)
     check(s.named('peerSetSending').slice(-3).every(x => x.active === true), 'push to talk: held, it is sent')
     engine.setPushToTalk(false, false)
+
+    // The microphone and output chosen on the page go to the phone ("" is the phone's own choice).
+    s.reset()
+    engine.setDevices('mic-1', 'receiver')
+    check(s.named('audioChoose').pop()?.input === 'mic-1' && s.named('audioChoose')[0]?.output === 'receiver', 'devices: the chosen microphone and output go to the phone')
+    check(await engine.switchDevices(null, 'speaker') === true && s.named('audioChoose').pop()?.input === '' && s.named('audioChoose').pop()?.output === 'speaker', 'devices: switched in a call, on the spot; the system default is ""')
 
     // Mute and silence go to the microphone, not to the connections.
     s.reset()

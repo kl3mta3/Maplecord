@@ -74,7 +74,7 @@ export function IncomingCallDialog({ name, direct, allowed, onAnswer, onDecline,
 }) {
   return (
     // Only its buttons answer or decline: a stray click beside it, or Escape pressed for something else, does neither.
-    <Dialog title={`${name} is calling`} onClose={() => { /* stays until answered or declined */ }}>
+    <Dialog title={`${name} is calling`} onClose={() => { /* stays until answered or declined */ }} noClose>
       {direct ? (
         <div>
           <span className="p2ptag">P2P</span> This is a P2P call: your apps would connect straight to each other. <b>{name} will be able to find your IP address</b>, and you theirs. <P2PInfo />
@@ -129,8 +129,9 @@ const TAB_STOPS = 'button:not(:disabled), [href], input:not(:disabled):not([type
  * keyboard stays inside it (Tab goes round its controls, Escape closes it), and when it closes the keyboard goes
  * back to whatever had it before.
  */
-/** `scrolls`: a dialog that can hold more than the window is tall scrolls as a whole, title and all. */
-export function Dialog({ title, children, onClose, wide, scrolls }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean; scrolls?: boolean }) {
+/** `scrolls`: a dialog that can hold more than the window is tall scrolls as a whole, title and all.
+ *  `noClose`: a dialog that has to be answered (an incoming call, new terms) gets no X. */
+export function Dialog({ title, children, onClose, wide, scrolls, noClose }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean; scrolls?: boolean; noClose?: boolean }) {
   const box = useRef<HTMLDivElement>(null)
   const titleId = useId()
   useEffect(() => {
@@ -156,7 +157,9 @@ export function Dialog({ title, children, onClose, wide, scrolls }: { title: str
   return (
     <div className="backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
       <div ref={box} className={'dialog' + (wide ? ' wide' : '') + (scrolls ? ' scrolls' : '')} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onKeyDown={keepInside}>
-        <h3 id={titleId}>{title}</h3>{children}
+        <h3 id={titleId}>{title}</h3>
+        {!noClose && <button type="button" className="dialogclose" onClick={onClose} aria-label="Close" title="Close">×</button>}
+        {children}
       </div>
     </div>
   )

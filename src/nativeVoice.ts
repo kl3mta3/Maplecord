@@ -76,17 +76,21 @@ export class NativeVoiceEngine {
   relayedAudioKbps = 0
 
   // ---- The gate, push to talk ------------------------------------------------------------------------------------
+  //
+  // On the phone the gate does not hold the voice back: it is sent whenever the microphone is on (the phone's own
+  // noise suppression cleans it, and silence costs next to nothing to send). How loud counts as talking still decides
+  // when our light shows. Holding the voice back until it was heard is what kept the phone silent: the stream server
+  // way measured our voice from what we sent, so once held back it could never be heard starting again. Push to talk
+  // still sends only while held.
 
-  private gateOn = true
   private gateThreshold = SPEAKING_THRESHOLD
   private talking = false
   private sending = true
   private push = false
 
-  setGate(on: boolean, threshold: number) {
-    this.gateOn = on
+  setGate(_on: boolean, threshold: number) {
     this.gateThreshold = threshold
-    if (!this.push) this.setSending(this.talking || !on)
+    if (!this.push) this.setSending(true)
   }
 
   /** The shell keeps listening for speech whether the page is showing or not: nothing changes here when it is hidden. */
@@ -94,7 +98,7 @@ export class NativeVoiceEngine {
 
   setPushToTalk(on: boolean, held: boolean) {
     this.push = on
-    if (!on) { this.setSending(this.talking || !this.gateOn); return }
+    if (!on) { this.setSending(true); return }
     const talking = held && !this.muted && this.local
     if (talking !== this.talking) { this.talking = talking; this.events.speaking(null, talking) }
     this.setSending(talking)
@@ -103,7 +107,7 @@ export class NativeVoiceEngine {
   private setTalking(talking: boolean) {
     if (this.push) return
     if (talking !== this.talking) { this.talking = talking; this.events.speaking(null, talking) }
-    this.setSending(talking || !this.gateOn)
+    this.setSending(true)
   }
 
   private setSending(sending: boolean) {
@@ -148,9 +152,15 @@ export class NativeVoiceEngine {
     return policy
   }
 
-  /** A phone has the one microphone and the one speaker; what is chosen here is kept for a desktop. */
-  setDevices(_inputDeviceId: string | null, _outputDeviceId: string | null) { /* nothing to choose from */ }
-  async switchDevices(_inputDeviceId: string | null, _outputDeviceId: string | null): Promise<boolean> { return true }
+  /** The microphone and where sound plays, as the phone offers them (see audioDevices.ts): handed to the shell, which
+   *  asks the phone for them now if a call is on, otherwise when one begins. */
+  setDevices(inputDeviceId: string | null, outputDeviceId: string | null) {
+    void this.shell.audioChoose({ input: inputDeviceId ?? '', output: outputDeviceId ?? '' }).catch(() => { /* an older shell */ })
+  }
+  async switchDevices(inputDeviceId: string | null, outputDeviceId: string | null): Promise<boolean> {
+    await this.shell.audioChoose({ input: inputDeviceId ?? '', output: outputDeviceId ?? '' }).catch(() => { /* an older shell */ })
+    return true
+  }
   /** The shell's sound does not stop while the page is hidden, so there is nothing to start again. */
   async recover(): Promise<void> { /* nothing stopped */ }
 

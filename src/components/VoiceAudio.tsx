@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import type { Store } from '../store'
 import { DEFAULT_GATE_LEVEL } from '../settings'
-import { listAudioDevices } from '../voice'
+import { listAudioChoices, systemDefaultLabel, watchAudioChoices, type AudioChoice } from '../audioDevices'
 import { isElectron } from '../platform'
 import { DEFAULT_PUSH_KEY, pushKeyFrom, setChoosingPushKey, type PushKey } from '../pushToTalk'
 import { P2PInfo } from './Dialogs'
 import { P2P_VIDEO_RATES, P2P_VOICE_RATES } from '../stream'
-import { MicTest, SpeakerTest } from './AudioTests'
-import { isNativeApp } from '../native/app'
+import { MicTest, PhoneMicTest, PhoneSpeakerTest, SpeakerTest } from './AudioTests'
+import { isNativeApp, nativeVoice } from '../native/app'
 
 /**
  * Settings → Voice & audio: which microphone and speakers, how loud everyone is, when the microphone is sent (while
@@ -20,27 +20,50 @@ export function VoiceAudioSettings({ store, onAllowDirect }: {
   onAllowDirect: (allow: boolean) => void
 }) {
   const s = store.settings
-  const [devices, setDevices] = useState<{ inputs: MediaDeviceInfo[]; outputs: MediaDeviceInfo[] }>({ inputs: [], outputs: [] })
+  const [devices, setDevices] = useState<{ inputs: AudioChoice[]; outputs: AudioChoice[] }>({ inputs: [], outputs: [] })
+  const [phoneLog, setPhoneLog] = useState<string | null>(null)
+  const [logCopied, setLogCopied] = useState(false)
   const [note, setNote] = useState('')
   const [choosing, setChoosing] = useState(false)
   const [reportCopied, setReportCopied] = useState(false)
   const push = s.voiceMode === 'push'
   const gate = s.voiceGate !== false
   const pushKey: PushKey = s.pushKey ?? DEFAULT_PUSH_KEY
-  // The iPhone app: its calls are done by the phone itself, which picks the microphone and where sound plays. The page
-  // opening the microphone here as well would fight the phone's own call for it.
+  // The iPhone app: the phone does the sound (see nativeVoice.ts), so it is the phone that lists the microphones and
+  // outputs and is asked for the one chosen. The page never opens the microphone there: that would fight the call.
   const phone = isNativeApp()
 
   useEffect(() => {
-    if (phone) return
-    (async () => {
+    let gone = false
+    const load = async () => {
       try {
-        // Device names are only given out once the microphone has been allowed.
-        try { (await navigator.mediaDevices.getUserMedia({ audio: true })).getTracks().forEach(t => t.stop()) } catch { setNote('Microphone permission was not granted.') }
-        setDevices(await listAudioDevices())
-      } catch (e) { setNote(e instanceof Error ? e.message : String(e)) }
+        const all = await listAudioChoices()
+        if (!gone) setDevices({ inputs: all.filter(d => d.kind === 'audioinput'), outputs: all.filter(d => d.kind === 'audiooutput') })
+      } catch (e) { if (!gone) setNote(e instanceof Error ? e.message : String(e)) }
+    }
+    void (async () => {
+      // A browser only gives out device names once the microphone has been allowed.
+      if (!phone) { try { (await navigator.mediaDevices.getUserMedia({ audio: true })).getTracks().forEach(t => t.stop()) } catch { setNote('Microphone permission was not granted.') } }
+      await load()
     })()
+    const stop = watchAudioChoices(() => void load())
+    return () => { gone = true; stop() }
   }, [phone])
+
+  const showPhoneLog = async () => {
+    try { setPhoneLog((await nativeVoice().voiceLog()).text || 'Nothing in the log yet: join a voice channel first.') }
+    catch (e) { setPhoneLog(e instanceof Error ? e.message : String(e)) }
+  }
+  const copyPhoneLog = async () => {
+    if (phoneLog === null) return
+    try { await navigator.clipboard.writeText(phoneLog); setLogCopied(true); window.setTimeout(() => setLogCopied(false), 2000) }
+    catch { setNote('Copying was not allowed: press and hold in the log to select and copy it.') }
+  }
+  /** A choice saved earlier that is not connected now still shows as chosen (it is used again once it is back). */
+  const options = (list: AudioChoice[], chosen: string | null, fallback: string) => [
+    ...list.map(d => <option key={d.deviceId} value={d.deviceId}>{(d.label || fallback) + (phone && d.active ? ' (in use)' : '')}</option>),
+    ...(chosen && !list.some(d => d.deviceId === chosen) ? [<option key={chosen} value={chosen}>{phone ? 'Chosen earlier (not connected now)' : 'Chosen device (not connected)'}</option>] : []),
+  ]
 
   // Choosing a key: the next key or mouse button pressed becomes it. Escape leaves it as it was.
   useEffect(() => {
@@ -65,26 +88,23 @@ export function VoiceAudioSettings({ store, onAllowDirect }: {
   return (
     <>
       <h4>Voice &amp; audio</h4>
-      {phone ? (
+      <div className="muted">Microphone</div>
+      <select value={s.audioInputDeviceId ?? ''} onChange={e => pick('in', e.target.value)} aria-label="Microphone">
+        <option value="">{systemDefaultLabel()}</option>
+        {options(devices.inputs, s.audioInputDeviceId, 'Microphone')}
+      </select>
+      {phone ? <PhoneMicTest gateLevel={s.voiceGateLevel} /> : <MicTest deviceId={s.audioInputDeviceId ?? null} gateLevel={s.voiceGateLevel} />}
+      <div className="muted">{phone ? 'Where sound plays' : 'Speakers / headset'}</div>
+      <select value={s.audioOutputDeviceId ?? ''} onChange={e => pick('out', e.target.value)} aria-label="Speakers">
+        <option value="">{systemDefaultLabel()}</option>
+        {options(devices.outputs, s.audioOutputDeviceId, 'Speakers')}
+      </select>
+      {phone ? <PhoneSpeakerTest volume={s.outputVolume ?? 1} /> : <SpeakerTest deviceId={s.audioOutputDeviceId ?? null} volume={s.outputVolume ?? 1} />}
+      {phone && (
         <div className="muted">
-          The phone chooses the microphone and where sound plays, as for a phone call. To switch between the speaker, the
-          earpiece and headphones during a call, use the audio button on the call screen or in Control Center.
+          On an iPhone a Bluetooth headset's microphone and its sound go together. A headset's microphone is listed once
+          a call has started or the microphone test is running.
         </div>
-      ) : (
-        <>
-          <div className="muted">Microphone</div>
-          <select value={s.audioInputDeviceId ?? ''} onChange={e => pick('in', e.target.value)} aria-label="Microphone">
-            <option value="">System default</option>
-            {devices.inputs.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || 'Microphone'}</option>)}
-          </select>
-          <MicTest deviceId={s.audioInputDeviceId ?? null} gateLevel={s.voiceGateLevel} />
-          <div className="muted">Speakers / headset</div>
-          <select value={s.audioOutputDeviceId ?? ''} onChange={e => pick('out', e.target.value)} aria-label="Speakers">
-            <option value="">System default</option>
-            {devices.outputs.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || 'Speakers'}</option>)}
-          </select>
-          <SpeakerTest deviceId={s.audioOutputDeviceId ?? null} volume={s.outputVolume ?? 1} />
-        </>
       )}
       <label className="row sensitivity">
         <span className="muted">Output volume</span>
@@ -97,7 +117,21 @@ export function VoiceAudioSettings({ store, onAllowDirect }: {
       <label className="choice"><input type="radio" name="voicemode" checked={!push} onChange={() => store.updateSettings({ voiceMode: 'activity' })} /><span><b>Voice activity</b> <span className="muted">while you are talking</span></span></label>
       <label className="choice"><input type="radio" name="voicemode" checked={push} onChange={() => store.updateSettings({ voiceMode: 'push' })} /><span><b>Push to talk</b> <span className="muted">while you hold a key</span></span></label>
 
-      {!push && (
+      {!push && phone && (
+        <>
+          <label className="row sensitivity">
+            <span className="muted">Whisper</span>
+            <input className="grow" type="range" min={1} max={10} step={1} value={s.voiceGateLevel ?? DEFAULT_GATE_LEVEL} aria-label="How loud lights you up" onChange={e => store.updateSettings({ voiceGateLevel: Number(e.target.value) })} />
+            <span className="muted">Raised voice</span>
+            <b>{s.voiceGateLevel ?? DEFAULT_GATE_LEVEL}</b>
+          </label>
+          <div className="muted">
+            On the phone your voice is sent the whole time you are unmuted, cleaned up by the phone's own noise
+            suppression. This sets how loud you have to be for your name to light up.
+          </div>
+        </>
+      )}
+      {!push && !phone && (
         <>
           <label className="row">
             <input type="checkbox" checked={gate} onChange={e => store.updateSettings({ voiceGate: e.target.checked })} />
@@ -144,6 +178,19 @@ export function VoiceAudioSettings({ store, onAllowDirect }: {
         <button onClick={() => { void navigator.clipboard.writeText(store.voiceReport()).then(() => setReportCopied(true)); window.setTimeout(() => setReportCopied(false), 1500) }}>{reportCopied ? "Copied" : "Copy voice report"}</button>
         <button className="subtle" onClick={() => store.clearVoiceReport()}>Start it over</button>
       </div>
+      {phone && (
+        <>
+          <div className="muted">
+            The phone voice log says what the phone's sound did in the last calls: which microphone and output it used,
+            whether the microphone was sent, and how loud it heard you. No sound, addresses or keys are in it.
+          </div>
+          <div className="row">
+            <button onClick={() => void showPhoneLog()}>{phoneLog === null ? 'Show phone voice log' : 'Refresh phone voice log'}</button>
+            {phoneLog !== null && <button onClick={() => void copyPhoneLog()}>{logCopied ? 'Copied' : 'Copy phone voice log'}</button>}
+          </div>
+          {phoneLog !== null && <textarea className="phonelog" readOnly value={phoneLog} rows={10} aria-label="Phone voice log" />}
+        </>
+      )}
 
       <h4>P2P</h4>
       <div className="row">

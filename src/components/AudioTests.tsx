@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { gateThreshold, DEFAULT_GATE_LEVEL } from '../settings'
+import { nativeVoice } from '../native/app'
 
 type SinkableContext = AudioContext & { setSinkId?: (id: string) => Promise<void> }
 
@@ -116,6 +117,79 @@ export function SpeakerTest({ deviceId, volume }: { deviceId: string | null; vol
     }
   }
 
+  return (
+    <div className="audiotest">
+      <button onClick={() => void play()} disabled={playing}>{playing ? 'Playing…' : 'Play test sound'}</button>
+      {problem && <span className="muted">{problem}</span>}
+    </div>
+  )
+}
+
+/**
+ * The microphone test in the iPhone app. The phone does the listening (see the shell's AudioRoutes.swift): outside a
+ * call it opens the chosen microphone just to measure it, and in a call it shows the call's own microphone.
+ */
+export function PhoneMicTest({ gateLevel }: { gateLevel?: number }) {
+  const [on, setOn] = useState(false)
+  const [level, setLevel] = useState(0)
+  const [problem, setProblem] = useState('')
+  const threshold = gateThreshold(gateLevel ?? DEFAULT_GATE_LEVEL)
+
+  useEffect(() => {
+    if (!on) { setLevel(0); return }
+    let stopped = false
+    let timer: number | undefined
+    const shell = nativeVoice()
+    setProblem('')
+    void shell.micTestStart().then(() => {
+      if (stopped) return
+      timer = window.setInterval(() => { void shell.micTestLevel().then(r => { if (!stopped) setLevel(r.level) }).catch(() => {}) }, 80)
+    }).catch(e => {
+      if (!stopped) { setProblem(e instanceof Error ? e.message : String(e)); setOn(false) }
+    })
+    return () => {
+      stopped = true
+      window.clearInterval(timer)
+      void shell.micTestStop().catch(() => {})
+    }
+  }, [on])
+
+  const shown = Math.min(1, level * 4)
+  const mark = Math.min(1, threshold * 4)
+  const talking = level >= threshold
+  return (
+    <div className="audiotest">
+      <button onClick={() => setOn(o => !o)}>{on ? 'Stop the test' : 'Test microphone'}</button>
+      {on && (
+        <>
+          <div className="meter" role="meter" aria-label="Microphone level" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(shown * 100)}>
+            <div className={'fill' + (talking ? ' talking' : '')} style={{ width: `${shown * 100}%` }} />
+            <div className="mark" style={{ left: `${mark * 100}%` }} title="Where your light comes on" />
+          </div>
+          <span className="muted">{talking ? 'Hearing you' : level > 0.0005 ? 'Quiet: speak up a little' : 'Nothing heard yet: say something'}</span>
+        </>
+      )}
+      {problem && <div className="muted">{problem}</div>}
+    </div>
+  )
+}
+
+/** The speaker test in the iPhone app: the phone plays a short chime wherever its sound is going now. */
+export function PhoneSpeakerTest({ volume }: { volume: number }) {
+  const [playing, setPlaying] = useState(false)
+  const [problem, setProblem] = useState('')
+  const play = async () => {
+    setProblem('')
+    setPlaying(true)
+    try {
+      await nativeVoice().testSound({ volume: Math.max(0, Math.min(1, volume)) })
+      await new Promise(r => window.setTimeout(r, 900))
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : String(e))
+    } finally {
+      setPlaying(false)
+    }
+  }
   return (
     <div className="audiotest">
       <button onClick={() => void play()} disabled={playing}>{playing ? 'Playing…' : 'Play test sound'}</button>
