@@ -115,8 +115,10 @@ export const PERMISSION_GROUPS = [...new Set(PERMISSION_LABELS.map(p => p.group)
 
 const ROLE_SWATCHES = ['#9000ff', '#00ddff', '#ff008c', '#2cfc00', '#f19511', '#ff3b3b', '#ffd700', '#1abc9c', '#e91e63', '#3498db', '#95a5a6', '#ffffff']
 
-export function ServerSettingsDialog({ api, channels, guild, roles, members, findMembers, moreMembers, myPermissions, meId, onRename, onIcon, onBanner, onOutside, onExpressionsChanged, onListing, tagSymbols, onSetTag, onRemoveTag, onCountRolls, onHideOwner, onWelcome, onCreateRole, onUpdateRole, onDeleteRole, onSetMemberRoles, onClose }: {
+export function ServerSettingsDialog({ api, channels, guild, roles, members, findMembers, moreMembers, myPermissions, meId, onRename, onIcon, onBanner, onOutside, onExpressionsChanged, onListing, tagSymbols, onSetTag, onRemoveTag, onCountRolls, onHideOwner, onWelcome, onCreateRole, onUpdateRole, onDeleteRole, onSetMemberRoles, onClose, relayChoice = true }: {
   api: Api; channels: ChannelDto[]
+  /** Whether this server lets people choose the relay in P2P channels (an admin switch): without it, the permission for that is not shown. */
+  relayChoice?: boolean
   guild: GuildDto; roles: RoleDto[]; members: MemberDto[]; myPermissions: number; meId: string
   /**
    * In a server with a great many members, `members` is not everyone. These fetch the ones whose name starts with
@@ -313,7 +315,7 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, fin
                 {PERMISSION_GROUPS.map(group => (
                   <Fragment key={group}>
                     <div className="permgroup">{group}</div>
-                    {PERMISSION_LABELS.filter(p => p.group === group).map(p => (
+                    {PERMISSION_LABELS.filter(p => p.group === group && (relayChoice || p.bit !== Permission.UseRelayInDirect)).map(p => (
                       <label key={p.bit} className="row" title={p.hint}>
                         <input type="checkbox" checked={(draft.permissions & p.bit) !== 0} onChange={e => setDraft({ ...draft, permissions: e.target.checked ? draft.permissions | p.bit : draft.permissions & ~p.bit })} />
                         <span>{p.name}</span>

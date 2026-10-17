@@ -1045,7 +1045,7 @@ export default function Shell({ store, onSignedOut }: { store: Store; onSignedOu
           loadSounds={store.reachableSounds} onClose={() => setDialog(null)} />
       )}
       {dialog?.kind === 'server' && g && (
-        <ServerSettingsDialog api={store.api} channels={g.channels} guild={g.guild} roles={g.roles ?? []} members={g.members} myPermissions={myPerms} meId={me?.id ?? ''}
+        <ServerSettingsDialog api={store.api} relayChoice={store.relayChoice} channels={g.channels} guild={g.guild} roles={g.roles ?? []} members={g.members} myPermissions={myPerms} meId={me?.id ?? ''}
           findMembers={g.membersPartial ? q => store.findMembers(g.guild.id, q) : undefined} moreMembers={g.membersPartial && !store.membersEnded[g.guild.id] ? () => void store.loadMoreMembers(g.guild.id) : undefined}
           onHideOwner={store.setGuildHideOwner} onRename={store.renameGuild} onIcon={store.setGuildIcon} onBanner={store.setGuildBanner} onOutside={store.setGuildOutside} onExpressionsChanged={store.forgetUsable} onListing={store.setGuildListing} tagSymbols={store.tagSymbols} onSetTag={store.setGuildTag} onRemoveTag={store.removeGuildTag} onCountRolls={store.setGuildCountRolls} onWelcome={store.setGuildWelcome} onCreateRole={store.createRole} onUpdateRole={store.updateRole} onDeleteRole={store.deleteRole} onSetMemberRoles={store.setMemberRoles}
           onClose={() => setDialog(null)} />

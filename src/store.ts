@@ -215,6 +215,17 @@ export function useMaplecord() {
     wantRelay: () => !allowDirectRef.current,
     changed: setTransfers,
   }))
+  /**
+   * Whether this server lets people choose to join P2P channels through the relay only (an admin switch, off unless
+   * turned on; a server older than the switch always lets them). Not until the server has said. While it is off the
+   * person's saved choice is not used: an app on the relay only and one connecting directly do not reach each other.
+   */
+  const [relayChoice, setRelayChoice] = useState(false)
+  const relayChoiceRef = useRef(false)
+  relayChoiceRef.current = relayChoice
+  /** "Join P2P channels through the relay", where this server lets people choose it. */
+  const viaRelayNow = () => relayChoiceRef.current && !!settingsRef.current.p2pViaRelay
+
   // ---- P2P text (see p2pText.ts). What is typed in a P2P channel goes straight between apps; the history is kept here.
   /** For the P2P channel being read: whether we are connected to it, and to how many of the people there. */
   const [p2pText, setP2pText] = useState<{ channelId: string; state: 'ask' | 'blocked' | 'connecting' | 'on' | 'failed'; reachable: number; present: number; note: string } | null>(null)
@@ -243,9 +254,8 @@ export function useMaplecord() {
     connectsTo: (channelId, peer) => {
       if (!peer.bot) return true
       // A bot: only one this person agreed to by name, and never while they keep their own address behind the relay.
-      const s = settingsRef.current
-      const viaRelay = !!s.p2pViaRelay
-      const agreed = !!s.p2pBotsAccepted?.[peer.userId] && !viaRelay
+      const viaRelay = viaRelayNow()
+      const agreed = !!settingsRef.current.p2pBotsAccepted?.[peer.userId] && !viaRelay
       if (!agreed) queueMicrotask(() => setP2pBotsWaiting(all => (all.some(x => !x.voice && x.channelId === channelId && x.userId === peer.userId) ? all : [...all, { channelId, userId: peer.userId, username: peer.username, viaRelay }])))
       return agreed
     },
@@ -254,7 +264,7 @@ export function useMaplecord() {
     rtcConfig: async channelId => {
       const ice = await api.iceServers(channelId)
       // The person's choice to go through the relay in P2P channels holds for text as it does for voice.
-      const viaRelay = !!settingsRef.current.p2pViaRelay
+      const viaRelay = viaRelayNow()
       if (viaRelay && !ice.some(s => s.urls.some(u => /^turns?:/i.test(u))))
         throw new Error('The relay is not available to you in P2P channels on this server. To connect directly, turn off "Join P2P channels through the relay" under Settings, Voice & audio.')
       return { iceServers: ice.map(s => ({ urls: s.urls, username: s.username ?? undefined, credential: s.credential ?? undefined })), iceTransportPolicy: viaRelay ? 'relay' : 'all' }
@@ -324,7 +334,7 @@ export function useMaplecord() {
    * bot while they keep their own address behind the relay. (Nowhere else: an ordinary channel's voice is relayed.)
    */
   const [refusesVoiceBot] = useState(() => (p: VoiceParticipantDto, direct: boolean) =>
-    !!p.bot && direct && !(settingsRef.current.p2pBotsAccepted?.[p.userId] && !settingsRef.current.p2pViaRelay))
+    !!p.bot && direct && !(settingsRef.current.p2pBotsAccepted?.[p.userId] && !viaRelayNow()))
   /** The most a file may be to cross the relay in a P2P channel: what this server takes as an upload. */
   const p2pRelayedLimit = useRef(32 * 1024 * 1024)
   /** The files on the P2P messages on screen, by channel and hash. */
@@ -1070,7 +1080,7 @@ export function useMaplecord() {
         const keptAway = cur?.channelId === c && refusesVoiceBot(p, !!cur.directSince)
         if (keptAway) {
           voiceEngine.refuse(p.connectionId)
-          setP2pBotsWaiting(all => (all.some(x => x.voice && x.channelId === c && x.userId === p.userId) ? all : [...all, { channelId: c, userId: p.userId, username: p.username, viaRelay: !!settingsRef.current.p2pViaRelay, voice: true }]))
+          setP2pBotsWaiting(all => (all.some(x => x.voice && x.channelId === c && x.userId === p.userId) ? all : [...all, { channelId: c, userId: p.userId, username: p.username, viaRelay: viaRelayNow(), voice: true }]))
         }
         setVoice(v => (v && v.channelId === c && !v.participants.some(x => x.connectionId === p.connectionId)
           ? { ...v, participants: [...v.participants, { ...p, state: keptAway ? 'not connected' : 'connecting', speaking: false }] } : v))
@@ -2528,7 +2538,7 @@ export function useMaplecord() {
       voiceEngine.relayedAudioKbps = serverKbps
       voiceEngine.maxAudioKbps = (directSince && s.p2pAudioKbps) || serverKbps
       // A P2P channel is joined directly unless this person chose to go through the relay there.
-      const viaRelay = !!directSince && !!s.p2pViaRelay
+      const viaRelay = !!directSince && viaRelayNow()
       const policy = voiceEngine.configure(ice, directSince && !viaRelay ? 'direct' : 'relay')
       if (!directSince && policy !== 'relay') throw new Error('No voice relay is available right now, so this channel cannot connect.')
       if (viaRelay && policy !== 'relay') throw new Error('The relay is not available to you in P2P channels on this server. To join directly, turn off "Join P2P channels through the relay" under Settings, Voice & audio.')
@@ -3054,6 +3064,13 @@ export function useMaplecord() {
     .filter(c => c.directSince && settings.directAcknowledged[c.id] === c.directSince && (c.id === p2pChannelId || c.id === voice?.channelId || settings.p2pSubscribed?.[c.id]))
     .map(c => c.id).sort()
   const p2pWantedKey = p2pWanted.join(',')
+  // Whether the relay may be chosen in P2P channels, asked once signed in and again whenever the chat connection comes back.
+  useEffect(() => {
+    if (!ready) return
+    let gone = false
+    void api.meta(settingsRef.current.serverUrl).then(m => { if (!gone) setRelayChoice(m?.relayChoiceInDirect !== false) }, () => { /* asked again on reconnecting */ })
+    return () => { gone = true }
+  }, [ready, hubEpoch, api])
   useEffect(() => {
     // After the chat connection came back the server has forgotten us everywhere: start from nothing.
     p2pEngine.closedAll()
@@ -3467,7 +3484,7 @@ export function useMaplecord() {
     markVoiceGap: () => voiceRecorder.mark(), voiceReport: () => voiceRecorder.report(__APP_VERSION__), clearVoiceReport: () => voiceRecorder.clear(),
     farewell, queueAhead, deleteStep, openDeleteAccount: (step: 'explain' | 'confirm' = 'explain') => setDeleteStep(step), closeDeleteAccount: () => setDeleteStep(null), reauthenticateForDelete, deleteAccount,
     reauthenticateForAccount, accountChange, signOutEverywhere,
-    p2pText, askDirectText, setP2pSubscribed, setP2pBroadcast, p2pFiles, loadP2pFile, saveP2pFile, p2pNewApps, acceptP2pApp, p2pBotsWaiting, acceptP2pBot, dismissP2pBot,
+    p2pText, relayChoice, askDirectText, setP2pSubscribed, setP2pBroadcast, p2pFiles, loadP2pFile, saveP2pFile, p2pNewApps, acceptP2pApp, p2pBotsWaiting, acceptP2pBot, dismissP2pBot,
     allowDirect, setAllowDirect, reauthenticateForDirect, reauthProviders, directPrompt, confirmDirect, dismissDirectPrompt: () => setDirectPrompt(null), setChannelDirect,
     setAudioDevices, me: () => settingsRef.current.user,
     MessageKind,

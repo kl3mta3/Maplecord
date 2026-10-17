@@ -224,14 +224,19 @@ export function VoiceAudioSettings({ store, onAllowDirect }: {
       {p2pLogShown !== null && <textarea className="phonelog" readOnly value={p2pLogShown} rows={10} aria-label="P2P connection log" />}
       {store.allowDirect && (
         <>
-          <label className="row">
-            <input type="checkbox" checked={!!s.p2pViaRelay} onChange={e => store.updateSettings({ p2pViaRelay: e.target.checked })} />
-            <span>Join P2P channels through the relay</span>
-          </label>
-          <div className="muted">
-            Nobody in the channel learns your address, and what you send and receive there is held to the ordinary relayed limits.
-            Only where the server allows it. It applies from the next P2P channel you join.
-          </div>
+          {/* Only where this server lets people choose it (an admin switch). */}
+          {store.relayChoice && (
+            <>
+              <label className="row">
+                <input type="checkbox" checked={!!s.p2pViaRelay} onChange={e => store.updateSettings({ p2pViaRelay: e.target.checked })} />
+                <span>Join P2P channels through the relay</span>
+              </label>
+              <div className="muted">
+                Nobody in the channel learns your address, and what you send and receive there is held to the ordinary relayed limits.
+                Only where the server allows it. It applies from the next P2P channel you join.
+              </div>
+            </>
+          )}
           <label className="row">
             <span className="muted grow">Voice quality in P2P</span>
             <select value={s.p2pAudioKbps ?? 0} aria-label="Voice quality in P2P" onChange={e => store.updateSettings({ p2pAudioKbps: Number(e.target.value) })}>
