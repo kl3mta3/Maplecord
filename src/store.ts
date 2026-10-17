@@ -337,7 +337,13 @@ export function useMaplecord() {
   const muteAskedRef = useRef<(muted: boolean) => void>(() => {})
   const hangUpAskedRef = useRef<() => void>(() => {})
   // In the iPhone app the shell does the sound, so that it carries on in the background (see nativeVoice.ts).
-  const [voiceEngine] = useState<VoiceEngine | NativeVoiceEngine>(() => isNativeApp() ? new NativeVoiceEngine(voiceHub, voiceEvents()) : new VoiceEngine(voiceHub, voiceEvents()))
+  const [voiceEngine] = useState<VoiceEngine | NativeVoiceEngine>(() => {
+    if (isNativeApp()) {
+      try { return new NativeVoiceEngine(voiceHub, voiceEvents()) }
+      catch (e) { console.error('[voice] the phone app\'s voice could not be reached; using the page\'s own:', e) }
+    }
+    return new VoiceEngine(voiceHub, voiceEvents())
+  })
   function voiceEvents(): VoiceEngineEvents { return {
     peerState: (id, state) => setVoice(v => (v ? { ...v, participants: v.participants.map(p => (p.connectionId === id ? { ...p, state } : p)) } : v)),
     speaking: (id, speaking) => {

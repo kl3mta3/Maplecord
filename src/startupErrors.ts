@@ -5,12 +5,14 @@
  * app has drawn itself, it stands aside.
  */
 const root = () => document.getElementById('root')
+let shown = false
 
 function show(what: string) {
   const at = root()
-  if (!at || at.childElementCount > 0) return
+  if (shown || !at || at.childElementCount > 0) return
+  shown = true
   const box = document.createElement('pre')
-  box.style.cssText = 'margin:0;padding:24px 16px;white-space:pre-wrap;word-break:break-word;font:13px/1.4 ui-monospace,monospace;color:#ffb4b4;background:#0b0b10;min-height:100vh;box-sizing:border-box'
+  box.style.cssText = 'position:fixed;inset:0;z-index:2147483647;overflow:auto;margin:0;padding:calc(24px + env(safe-area-inset-top, 0px)) 16px 24px;white-space:pre-wrap;word-break:break-word;font:13px/1.4 ui-monospace,monospace;color:#ffb4b4;background:#0b0b10;box-sizing:border-box'
   box.textContent = 'Maplecord could not start.\n\n' + what + '\n\n' + navigator.userAgent
   document.body.appendChild(box)
 }

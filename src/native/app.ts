@@ -103,10 +103,16 @@ export interface NativeAppEvents {
   callAnswered: { callId: string; channelId: string; direct: boolean; callerName: string }
 }
 
+/**
+ * What the shell puts on the page (Capacitor's bridge, written into the page by the app before anything else runs).
+ * Only these are there: the rest of Capacitor (registerPlugin and so on) lives in its own JavaScript package, which this
+ * app does not carry; the two plugins here are reached through the bridge directly instead (see nativePlugin).
+ */
 interface CapacitorGlobal {
   isNativePlatform?: () => boolean
   getPlatform?: () => string
-  registerPlugin?: (name: string) => unknown
+  nativePromise?: (plugin: string, method: string, options?: unknown) => Promise<unknown>
+  addListener?: (plugin: string, event: string, handler: (data: unknown) => void) => { remove: () => Promise<void> }
 }
 
 const capacitor = (): CapacitorGlobal | undefined => (globalThis as { Capacitor?: CapacitorGlobal }).Capacitor
@@ -114,14 +120,29 @@ const capacitor = (): CapacitorGlobal | undefined => (globalThis as { Capacitor?
 /** Whether this page is the one inside the iPhone (or iPad) app. */
 export const isNativeApp = (): boolean => capacitor()?.isNativePlatform?.() === true
 
+/**
+ * One of the shell's plugins, by name: each method is a call to it that answers with a promise, and addListener
+ * hears the events it tells the page. What Capacitor's registerPlugin does for a plugin the shell has, without it.
+ */
+function nativePlugin<T>(name: string): T {
+  const cap = capacitor()
+  if (!cap?.nativePromise || !cap.addListener) throw new Error('Not inside the Maplecord app.')
+  const { nativePromise, addListener } = cap
+  return new Proxy({}, {
+    get(_target, method) {
+      // Not a promise itself, whatever is asked of it: "then" is what tells a promise apart.
+      if (typeof method !== 'string' || method === 'then') return undefined
+      if (method === 'addListener') return (event: string, handler: (data: unknown) => void) => Promise.resolve(addListener(name, event, handler))
+      return (options?: unknown) => nativePromise(name, method, options ?? {})
+    },
+  }) as T
+}
+
 let plugin: NativeVoicePlugin | null = null
 
 /** The shell's voice plugin. Only ever asked for inside the app (see isNativeApp). */
 export function nativeVoice(): NativeVoicePlugin {
-  if (plugin) return plugin
-  const register = capacitor()?.registerPlugin
-  if (!register) throw new Error('Not inside the Maplecord app.')
-  plugin = register('MaplecordVoice') as NativeVoicePlugin
+  plugin ??= nativePlugin<NativeVoicePlugin>('MaplecordVoice')
   return plugin
 }
 
@@ -132,10 +153,7 @@ let appPlugin: NativeAppPlugin | null = null
 
 /** The shell's app plugin (sign-in sheet, notifications). Only ever asked for inside the app. */
 export function nativeApp(): NativeAppPlugin {
-  if (appPlugin) return appPlugin
-  const register = capacitor()?.registerPlugin
-  if (!register) throw new Error('Not inside the Maplecord app.')
-  appPlugin = register('MaplecordApp') as NativeAppPlugin
+  appPlugin ??= nativePlugin<NativeAppPlugin>('MaplecordApp')
   return appPlugin
 }
 
