@@ -140,6 +140,16 @@ export const p2pLogText = () => logLines.join('\n')
 const who = (peer: { info: DirectTextPeer }) => `${peer.info.username}${peer.info.bot ? ' (bot)' : ''} [${peer.info.connectionId.slice(0, 6)}]`
 const chan = (channelId: string) => `channel ${channelId.slice(0, 8)}`
 const why = (e: unknown) => (e instanceof Error ? `${e.name}: ${e.message}` : String(e))
+/** "host udp, by local name" for a route the other app sent, from its description. The address is only checked for
+ *  being a local network name (one ending in .local), never written down. */
+function routeKindOf(text: string): string {
+  if (!text) return 'end of their routes'
+  const parts = text.split(' ')
+  const type = / typ (\w+)/.exec(text)?.[1] ?? 'unknown'
+  const protocol = (parts[2] ?? '').toLowerCase()
+  const named = (parts[4] ?? '').toLowerCase().endsWith('.local')
+  return `${type}${protocol ? ' ' + protocol : ''}${named ? ', by local name' : ''}`
+}
 /** "relay udp" for a route found, from what the browser says about it. No address is read. */
 function routeKind(candidate: RTCIceCandidate): string {
   const type = candidate.type ?? / typ (\w+)/.exec(candidate.candidate)?.[1] ?? 'unknown'
@@ -534,21 +544,36 @@ export class P2PTextEngine {
           peer = this.make(channelId, room, peer.info, false)
         }
         await peer.pc.setRemoteDescription(JSON.parse(payload))
-        for (const candidate of peer.pendingIce.splice(0)) await peer.pc.addIceCandidate(candidate)
+        for (const candidate of peer.pendingIce.splice(0)) this.addRoute(peer, candidate)
         await peer.pc.setLocalDescription(await peer.pc.createAnswer())
         await this.tell(channelId, peer, 'answer', JSON.stringify(peer.pc.localDescription))
       } else if (kind === 'answer') {
         await peer.pc.setRemoteDescription(JSON.parse(payload))
-        for (const candidate of peer.pendingIce.splice(0)) await peer.pc.addIceCandidate(candidate)
+        for (const candidate of peer.pendingIce.splice(0)) this.addRoute(peer, candidate)
       } else if (kind === 'ice') {
         const candidate = JSON.parse(payload) as RTCIceCandidateInit
-        if (peer.pc.remoteDescription) await peer.pc.addIceCandidate(candidate)
+        p2pLog(`${who(peer)}: one of their routes arrived: ${routeKindOf(candidate.candidate ?? '')}`)
+        if (peer.pc.remoteDescription) this.addRoute(peer, candidate)
         else peer.pendingIce.push(candidate)
       }
     } catch (e) { p2pLog(`${who(peer)}: their ${kind} could not be used: ${why(e)}`) /* that connection simply does not come up */ }
   }
 
   // ---- internals --------------------------------------------------------------------------------------------------
+
+  /**
+   * Adds a route the other app found, without waiting for it. A browser can sit on one for a long time: an iPhone
+   * app asked for a route by a local network name (how Chrome names the address on its own network) waits for
+   * permission to look that name up, which it may never get. Waited on one after another, as these used to be, every
+   * route behind that one waited too, the relay among them, and the connection never came up.
+   */
+  private addRoute(peer: Peer, candidate: RTCIceCandidateInit) {
+    const kind = routeKindOf(candidate.candidate ?? '')
+    const slow = window.setTimeout(() => p2pLog(`${who(peer)}: one of their routes (${kind}) is still not added after 5 s`), 5000)
+    peer.pc.addIceCandidate(candidate).then(
+      () => window.clearTimeout(slow),
+      e => { window.clearTimeout(slow); p2pLog(`${who(peer)}: one of their routes (${kind}) could not be used: ${why(e)}`) })
+  }
 
   private make(channelId: string, room: Room, info: DirectTextPeer, offerer: boolean, tries = 0): Peer {
     const existing = room.peers.get(info.connectionId)
