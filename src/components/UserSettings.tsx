@@ -288,6 +288,7 @@ export function UserSettingsDialog({ store, initial, onOpen, onAllowDirect, onSi
                 <button onClick={() => onOpen('plugins')}>Game plugins</button>
               </div>
               <div className="muted">Maplecord {__APP_VERSION__}{desktop ? ' · updates itself when it starts' : ''}</div>
+              <div className="muted small">Emoji pictures: <a href="https://github.com/jdecked/twemoji" target="_blank" rel="noopener noreferrer">Twemoji</a>, by Twitter, Inc. and other contributors, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC-BY 4.0</a></div>
             </>
           )}
         </div>

@@ -1,4 +1,5 @@
 import type { MessageDto, PollDto, ReactionDto, ReplyToDto } from './types.ts'
+import { isEmoji } from './emojiMatch.ts'
 
 /**
  * Posts, threads, replies, reactions, edits, pins and polls in a P2P channel.
@@ -57,13 +58,6 @@ const LONGEST_ID = 120
 /** What p2pText.ts calls a picture. */
 const PICTURE = /^image\/(png|jpeg|gif|webp)$/
 
-/** What can be reacted with in a P2P channel: the same choices the server gives for the channels it keeps. */
-export const P2P_REACTIONS = [
-  '👍', '👎', '❤️', '😂', '😮', '😢', '😡', '🎉', '🔥', '👀', '✅', '❌', '💯', '🙏', '👏', '🤔',
-  '😀', '😁', '😅', '🤣', '😊', '😍', '😎', '😴', '😭', '😱', '🤯', '🥳', '😇', '🙃', '😬', '🤝',
-  '💀', '👻', '🤖', '💩', '🙌', '💪', '🤞', '✌️', '👋', '🫡', '⭐', '✨', '⚡', '💥', '💎', '🏆',
-  '🎲', '🎯', '🎮', '🍀', '🍁', '🌙', '☀️', '🌈', '❄️', '🍕', '🍺', '☕', '🎁', '🚀', '💤', '❓',
-]
 /** How many different reactions one message shows, as on the server. */
 export const MOST_P2P_REACTIONS = 20
 
@@ -105,7 +99,7 @@ export function unpackP2p(content: string): { meta: P2PMeta; text: string } {
   const part = (v: unknown) => (typeof v === 'object' && v !== null && !Array.isArray(v) ? v as Record<string, unknown> : undefined)
 
   const rx = part(from.rx)
-  if (rx && idOk(rx.id) && typeof rx.e === 'string' && P2P_REACTIONS.includes(rx.e) && typeof rx.on === 'boolean') return { meta: { rx: { id: rx.id, e: rx.e, on: rx.on } }, text }
+  if (rx && idOk(rx.id) && typeof rx.e === 'string' && isEmoji(rx.e) && typeof rx.on === 'boolean') return { meta: { rx: { id: rx.id, e: rx.e, on: rx.on } }, text }
   if (idOk(from.ed)) return { meta: { ed: from.ed, ...(typeof from.t === 'string' && from.t.trim().length > 0 ? { t: from.t.trim().slice(0, P2P_TITLE) } : {}) }, text }
   const pin = part(from.pin)
   if (pin && idOk(pin.id) && typeof pin.on === 'boolean') return { meta: { pin: { id: pin.id, on: pin.on } }, text }

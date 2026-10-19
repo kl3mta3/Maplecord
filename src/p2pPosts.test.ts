@@ -1,5 +1,5 @@
 // Run with: node src/p2pPosts.test.ts
-import { foldP2p, foldP2pChat, isP2pNote, isP2pNoteText, p2pShape, packP2p, searchP2pChat, searchP2pGallery, unpackP2p, MOST_P2P_PINS, MOST_P2P_REACTIONS, P2P_META_ROOM, P2P_REACTIONS, P2P_TITLE } from './p2pPosts.ts'
+import { foldP2p, foldP2pChat, isP2pNote, isP2pNoteText, p2pShape, packP2p, searchP2pChat, searchP2pGallery, unpackP2p, MOST_P2P_PINS, MOST_P2P_REACTIONS, P2P_META_ROOM, P2P_TITLE } from './p2pPosts.ts'
 /** The most a P2P message's text may be (MAX_P2P_TEXT in p2pText.ts, which cannot be loaded outside the app). */
 const MAX_P2P_TEXT = 4000
 import type { MessageDto } from './types.ts'
@@ -27,7 +27,9 @@ const strange = unpackP2p('\u0002{"t":7,"th":"","rx":{"id":"u1:post","e":"<b>","
 check(Object.keys(strange.meta).length === 0 && strange.text === 'hi', 'a title that is not text, an empty post id, and a reaction that is not one of the choices are all ignored')
 check(unpackP2p('\u0002{"rx":{"id":"u1:post","e":"❤️","on":"yes"}}\u0003').meta.rx === undefined && unpackP2p('\u0002{"th":"' + 'a'.repeat(200) + '"}\u0003x').meta.th === undefined,
   'so is a reaction that does not say on or off, and a post id too long to be one')
-check(P2P_REACTIONS.length === 64 && new Set(P2P_REACTIONS).size === 64, 'there are 64 different reactions to choose from')
+const reacts = (e: string) => unpackP2p(packP2p({ rx: { id: 'u1:post', e, on: true } }, '')).meta.rx?.e === e
+check(reacts('🫎') && reacts('👋🏽') && reacts('🏳️‍🌈') && reacts('🇯🇵'), 'any one emoji can be reacted with: a new one, a skin tone, a joined one, a flag')
+check(!reacts('lol') && !reacts('👍👍') && !reacts('👍 ') && !reacts('❤'), 'but not words, two emojis, an emoji with more after it, or a heart written as text')
 
 // ---- A channel's messages as posts, comments and reactions ----
 let n = 0
@@ -65,7 +67,8 @@ check(!asCat.said.has('gone') && asCat.posts[1]!.reactions === null, 'something 
 const late = [...held, rx('r6', 'ben', 'p1', '❤️', true)]
 check(foldP2p(late.slice().reverse(), 'cat').posts[0]!.reactions![0]!.count === 2 && foldP2p([...late, late.at(-1)!], 'cat').posts[0]!.reactions![0]!.count === 2,
   'the last thing someone said about a reaction is what counts, in whatever order it arrived, and the same message twice counts once')
-const everything = [...held, ...P2P_REACTIONS.map((e, i) => rx('m' + i, 'dan', 'p2', e, true))]
+const reactionsOfDan = ['👍', '👎', '❤️', '😂', '😮', '😢', '😡', '🎉', '🔥', '👀', '✅', '❌', '💯', '🙏', '👏', '🤔', '😀', '😁', '😅', '🤣', '😊', '😍', '😎', '😴']
+const everything = [...held, ...reactionsOfDan.map((e, i) => rx('m' + i, 'dan', 'p2', e, true))]
 check(foldP2p(everything, 'cat').posts[1]!.reactions!.length === MOST_P2P_REACTIONS, `one message shows at most ${MOST_P2P_REACTIONS} different reactions`)
 
 // ---- A text channel: answers, threads and reactions ----

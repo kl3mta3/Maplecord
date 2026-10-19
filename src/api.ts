@@ -255,8 +255,6 @@ export class Api {
   search(channelId: string, q: string, before?: string | null) {
     return this.request<SearchResultDto>('GET', `/api/channels/${channelId}/search?q=${encodeURIComponent(q)}${before ? `&before=${encodeURIComponent(before)}` : ''}`)
   }
-  /** What a message can be reacted to with. */
-  reactions() { return this.request<string[]>('GET', '/api/reactions') }
   transferSettings() { return this.request<TransferSettingsDto>('GET', '/api/transfers/settings') }
   /** Connection details for one transfer: `requester` is the connection id of the app that asked for the file. */
   transferIce(offerId: string, requester: string) { return this.request<IceServerDto[]>('GET', `/api/transfers/ice?offerId=${offerId}&requester=${encodeURIComponent(requester)}`) }

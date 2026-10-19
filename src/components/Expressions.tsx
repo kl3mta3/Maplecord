@@ -4,6 +4,7 @@ import type { ExpressionDto, ExpressionLibraryDto, GuildExpressionsDto, UsableEx
 import { CustomEmoji, nameFromFile, soundToWav } from '../expressions'
 import { ChevronDown, Search, Star, Volume2, VolumeX } from 'lucide-react'
 import { ConfirmDialog } from './Dialogs'
+import { EmojiBrowser, type EmojiGroup, type Picked } from './EmojiPicker'
 import { checkBeforeSending } from '../pictureCheck'
 
 const KIND_NAMES = ['emoji', 'sticker', 'sound'] as const
@@ -32,36 +33,57 @@ function Popover({ x, y, fromLeft, className, label, onClose, children }: { x: n
 }
 
 /**
- * Emojis and stickers to put in a message: this server's, one's own and one's other servers' (where the server allows
- * those), and the ordinary emojis. An emoji goes into the message box as :name:, a sticker is sent at once.
+ * The custom emojis one may use here, by server, for the emoji picker: this server's, and where it allows emojis from
+ * outside it, one's own and one's other servers'. Only what may be used: nothing is shown that cannot be.
  */
-export function ExpressionPicker({ x, y, fromLeft, usable, unicode, startOn, onEmoji, onSticker, onClose }: {
-  x: number; y: number; fromLeft?: boolean; usable: UsableExpressionsDto | null; unicode: string[]; startOn: 'emoji' | 'sticker'
-  onEmoji: (emoji: string | ExpressionDto) => void; onSticker?: (sticker: ExpressionDto) => void; onClose: () => void
+export function emojiGroupsOf(usable: UsableExpressionsDto | null, here: { name: string; icon: string | null } | null, iconOf: (url: string | null) => string | null): EmojiGroup[] {
+  if (!usable?.emojis) return []
+  const emojis = (list: ExpressionDto[]) => list.filter(e => e.kind === 0)
+  const out: EmojiGroup[] = [{ key: 'here', title: here?.name ?? 'This server', icon: here?.icon ?? null, items: emojis(usable.here) }]
+  if (usable.outside) {
+    out.push({ key: 'mine', title: 'Yours', icon: null, items: emojis(usable.mine) })
+    for (const g of usable.others) out.push({ key: g.guildId, title: g.name, icon: iconOf(g.iconUrl), items: emojis(g.items) })
+  }
+  return out
+}
+
+/**
+ * Emojis and stickers to put in a message. Emojis: every one (see EmojiBrowser), a custom one going into the message
+ * box as :name:. Stickers: this server's, one's own and one's other servers' (where the server allows those), sent at once.
+ */
+export function ExpressionPicker({ x, y, fromLeft, usable, emojiGroups, loading, startOn, onEmoji, onSticker, onClose }: {
+  x: number; y: number; fromLeft?: boolean; usable: UsableExpressionsDto | null; emojiGroups: EmojiGroup[]; loading?: boolean; startOn: 'emoji' | 'sticker'
+  onEmoji: (emoji: Picked) => void; onSticker?: (sticker: ExpressionDto) => void; onClose: () => void
 }) {
   const [tab, setTab] = useState(startOn)
   const [find, setFind] = useState('')
-  const kind = tab === 'emoji' ? 0 : 1
   const groups = useMemo(() => {
     if (!usable) return []
-    const match = (e: ExpressionDto) => e.kind === kind && (!find || e.name.toLowerCase().includes(find.toLowerCase()))
+    const match = (e: ExpressionDto) => e.kind === 1 && (!find || e.name.toLowerCase().includes(find.toLowerCase()))
     const out: { title: string; items: ExpressionDto[] }[] = [{ title: 'This server', items: usable.here.filter(match) }]
     if (usable.outside) {
       out.push({ title: 'Yours', items: usable.mine.filter(match) })
       for (const g of usable.others) out.push({ title: g.name, items: g.items.filter(match) })
     }
     return out.filter(g => g.items.length > 0)
-  }, [usable, kind, find])
+  }, [usable, find])
   const stickers = !!usable?.stickers && !!onSticker
+  const tabs = stickers && (
+    <div className="tabs">
+      <button className={tab === 'emoji' ? 'on' : ''} onClick={() => setTab('emoji')}>Emojis</button>
+      <button className={tab === 'sticker' ? 'on' : ''} onClick={() => setTab('sticker')}>Stickers</button>
+    </div>
+  )
+  if (tab === 'emoji') return (
+    <Popover x={x} y={y} fromLeft={fromLeft} className="exprpicker emojipop" label="Emojis" onClose={onClose}>
+      {tabs}
+      <EmojiBrowser groups={emojiGroups} loading={loading} onPick={picked => onEmoji(picked)} />
+    </Popover>
+  )
   return (
-    <Popover x={x} y={y} fromLeft={fromLeft} className="exprpicker" label={tab === 'emoji' ? 'Emojis' : 'Stickers'} onClose={onClose}>
+    <Popover x={x} y={y} fromLeft={fromLeft} className="exprpicker" label="Stickers" onClose={onClose}>
       <div className="row">
-        {stickers ? (
-          <div className="tabs">
-            <button className={tab === 'emoji' ? 'on' : ''} onClick={() => setTab('emoji')}>Emojis</button>
-            <button className={tab === 'sticker' ? 'on' : ''} onClick={() => setTab('sticker')}>Stickers</button>
-          </div>
-        ) : <b className="grow">Emojis</b>}
+        {tabs}
         <input className="grow" placeholder="Find by name" value={find} onChange={e => setFind(e.target.value)} aria-label="Find by name" autoFocus />
       </div>
       <div className="exprgroups">
@@ -69,23 +91,17 @@ export function ExpressionPicker({ x, y, fromLeft, usable, unicode, startOn, onE
         {groups.map(g => (
           <section key={g.title}>
             <div className="exprtitle">{g.title}</div>
-            <div className={tab === 'emoji' ? 'emojigrid' : 'stickergrid'}>
+            <div className="stickergrid">
               {g.items.map(e => (
-                <button key={e.id} title={`:${e.name}:`} aria-label={e.name} onClick={() => { if (tab === 'emoji') onEmoji(e); else { onSticker?.(e); onClose() } }}>
+                <button key={e.id} title={`:${e.name}:`} aria-label={e.name} onClick={() => { onSticker?.(e); onClose() }}>
                   <img src={e.url} alt="" loading="lazy" draggable={false} />
                 </button>
               ))}
             </div>
           </section>
         ))}
-        {usable && groups.length === 0 && (tab === 'sticker' || find) && (
+        {usable && groups.length === 0 && (
           <div className="muted small">{find ? 'Nothing by that name.' : usable.outside ? 'No stickers here or in your library yet. Someone who manages a server adds them in its settings, under Emojis & sounds.' : 'This server has no stickers, and only allows its own.'}</div>
-        )}
-        {tab === 'emoji' && !find && (
-          <section>
-            <div className="exprtitle">Emoji</div>
-            <div className="emojigrid plain">{unicode.map(u => <button key={u} aria-label={u} onClick={() => onEmoji(u)}>{u}</button>)}</div>
-          </section>
         )}
       </div>
     </Popover>

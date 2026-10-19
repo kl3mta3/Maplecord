@@ -7,7 +7,8 @@ import { Dialog } from './Dialogs'
 import { postedWhen } from './Calendar'
 import { MarkdownBox } from './Markdown'
 import { markdownFirstLine } from '../markdown'
-import { ReactionGlyph, plainEmojis, reactionLabel } from '../expressions'
+import { ReactionGlyph, plainEmojis, reactionLabel, tokenOf } from '../expressions'
+import { EmojiBrowser, type EmojiGroup } from './EmojiPicker'
 
 // The parts of the chat that belong to one message beyond its text: what it answers, its reactions, its poll, the
 // thread hanging off it. And the lists a channel can be looked at through: its pins, a search, a forum's posts, a
@@ -46,19 +47,20 @@ export function Reactions({ reactions, onToggle, onMore }: { reactions: Reaction
   )
 }
 
-/** Everything a message can be reacted with, opened where the pointer was. */
-export function ReactionPicker({ x, y, choices, onPick, onClose }: { x: number; y: number; choices: () => Promise<string[]>; onPick: (emoji: string) => void; onClose: () => void }) {
-  const [list, setList] = useState<string[]>(QUICK_REACTIONS)
+/** Everything a message can be reacted with (any emoji, and the custom ones one may use here), opened where the
+ *  pointer was. Picking one with Shift held keeps it open for another. */
+export function ReactionPicker({ x, y, groups, onPick, onClose }: { x: number; y: number; groups: () => Promise<EmojiGroup[]>; onPick: (emoji: string) => void; onClose: () => void }) {
+  const [custom, setCustom] = useState<EmojiGroup[] | null>(null)
   const box = useRef<HTMLDivElement>(null)
   const [at, setAt] = useState({ left: x, top: y })
-  useEffect(() => { let alive = true; void choices().then(all => { if (alive && all.length > 0) setList(all) }); return () => { alive = false } }, [choices])
+  useEffect(() => { let alive = true; void groups().then(g => { if (alive) setCustom(g) }, () => { if (alive) setCustom([]) }); return () => { alive = false } }, [groups])
   // Kept inside the window, wherever it was opened.
   useEffect(() => {
     const el = box.current
     if (!el) return
     const r = el.getBoundingClientRect()
     setAt({ left: Math.max(8, Math.min(x, window.innerWidth - r.width - 8)), top: Math.max(8, Math.min(y, window.innerHeight - r.height - 8)) })
-  }, [x, y, list.length])
+  }, [x, y])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
@@ -66,8 +68,8 @@ export function ReactionPicker({ x, y, choices, onPick, onClose }: { x: number; 
   }, [onClose])
   return (
     <div className="pickerback" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div ref={box} className="reactpicker" role="listbox" aria-label="React with" style={{ left: at.left, top: at.top }}>
-        {list.map(emoji => <button key={emoji} aria-label={reactionLabel(emoji)} title={reactionLabel(emoji)} onClick={() => { onPick(emoji); onClose() }}><ReactionGlyph emoji={emoji} /></button>)}
+      <div ref={box} className="emojipop reactpop" role="dialog" aria-label="React with" style={{ left: at.left, top: at.top }}>
+        <EmojiBrowser groups={custom ?? []} loading={custom === null} onPick={(picked, more) => { onPick(typeof picked === 'string' ? picked : tokenOf(picked)); if (!more) onClose() }} />
       </div>
     </div>
   )

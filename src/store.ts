@@ -1874,9 +1874,6 @@ export function useMaplecord() {
   const pinMessage = useCallback(async (messageId: string, on: boolean) => { await run(() => hub.pin(messageId, on)) }, [hub])
   const votePoll = useCallback(async (messageId: string, options: number[]) => { await run(() => hub.vote(messageId, options)) }, [hub])
   const closePoll = useCallback(async (messageId: string) => { await run(() => hub.closePoll(messageId)) }, [hub])
-  /** What can be reacted with: asked for once, the first time someone opens the choice. */
-  const reactionList = useRef<Promise<string[]> | null>(null)
-  const reactionChoices = useCallback(() => (reactionList.current ??= api.reactions().catch(() => { reactionList.current = null; return [] as string[] })), [api])
   const loadPins = useCallback(async (): Promise<MessageDto[]> => {
     const channelId = selected.current.channel
     return channelId ? api.pins(channelId) : []
@@ -3516,7 +3513,7 @@ export function useMaplecord() {
     answerCommunityPoll: async (answers: CommunityPollAnswerDto[]) => { if (communityPoll) setCommunityPoll(await api.answerPoll(communityPoll.id, answers)) },
     declineCommunityPoll: async () => { if (communityPoll) { setCommunityPoll(await api.declinePoll(communityPoll.id).catch(() => communityPoll)); setCommunityPollShown(false) } },
     thread, viewingPast, highlight, setHighlight, openThread, closeThread, loadOlderThread, createPost, editMessage, react, reactToPicture, calendarChange, invitations, calendarTarget, openEvent, eventLink, pinMessage, votePoll, closePoll,
-    reactionChoices, loadPins, searchMessages, jumpTo, backToPresent, loadNewer, setFollowing,
+    loadPins, searchMessages, jumpTo, backToPresent, loadNewer, setFollowing,
     pendingFriendLink, openFriendLink, acceptFriendLink, dismissFriendLink, loadFriendLink, resetFriendLink,
     connectionsEpoch, loadConnections, startConnection, setConnectionShown, removeConnection,
     loadSignIn, startSignInMethod, removeSignInMethod, setContactEmail, clearContactEmail,

@@ -5,6 +5,8 @@
  */
 import type { ReactNode } from 'react'
 import type { ExpressionDto, UsableExpressionsDto } from './types'
+import { Twemoji } from './emoji'
+import { emojisIn } from './emojiMatch'
 
 /** One custom emoji in a message's text. */
 export const EMOJI_TOKEN = /<:([A-Za-z0-9_]{2,32}):([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})>/g
@@ -26,34 +28,47 @@ export function CustomEmoji({ name, id, big }: { name: string; id: string; big?:
   return <img className={'cemoji' + (big ? ' big' : '')} src={expressionUrl(id)} alt={`:${name}:`} title={`:${name}:`} draggable={false} loading="lazy" data-emoji={id} data-emoji-name={name} />
 }
 
-/** A reaction: an ordinary emoji as it is, a custom one as its picture. */
+/** A reaction: an ordinary emoji or a custom one, drawn. */
 export function ReactionGlyph({ emoji }: { emoji: string }) {
   const custom = parseToken(emoji)
-  return custom ? <CustomEmoji name={custom.name} id={custom.id} /> : <>{emoji}</>
+  return custom ? <CustomEmoji name={custom.name} id={custom.id} /> : <Twemoji emoji={emoji} />
 }
 
 /** What a reaction is called, for a label. */
 export const reactionLabel = (emoji: string) => { const custom = parseToken(emoji); return custom ? `:${custom.name}:` : emoji }
 
-/** Text with its custom emojis drawn; plain text stays a string. `big`: they are drawn large (the text is nothing else). */
+/** Text with its emojis drawn, custom and ordinary; plain text stays a string. `big`: they are drawn large (the text is nothing else). */
 export function withEmojis(text: string, big = false): ReactNode {
-  if (!text.includes('<:')) return text
   const out: ReactNode[] = []
   let last = 0
-  for (const m of text.matchAll(EMOJI_TOKEN)) {
-    if (m.index! > last) out.push(text.slice(last, m.index))
+  const plain = (to: number) => {
+    const from = last
+    for (const m of emojisIn(text.slice(from, to))) {
+      const at = from + m.index!
+      if (at > last) out.push(text.slice(last, at))
+      out.push(<Twemoji key={'u' + at} emoji={m[0]} big={big} />)
+      last = at + m[0].length
+    }
+    if (to > last) out.push(text.slice(last, to))
+    last = to
+  }
+  if (text.includes('<:')) for (const m of text.matchAll(EMOJI_TOKEN)) {
+    plain(m.index!)
     out.push(<CustomEmoji key={'e' + m.index} name={m[1]} id={m[2]} big={big} />)
     last = m.index! + m[0].length
   }
-  if (last === 0) return text
-  if (last < text.length) out.push(text.slice(last))
-  return out
+  plain(text.length)
+  return out.length === 1 && typeof out[0] === 'string' ? out[0] : out
 }
 
-/** A message that is only custom emojis (and spaces), and not many of them, is drawn with them large. */
+/** A message that is only emojis (and spaces), and not many of them, is drawn with them large. */
 export function onlyEmojis(text: string): boolean {
-  const tokens = text.match(EMOJI_TOKEN)
-  return !!tokens && tokens.length <= 27 && text.replace(EMOJI_TOKEN, '').trim() === ''
+  let count = 0
+  const rest = text.replace(EMOJI_TOKEN, () => { count++; return ' ' })
+  let left = '', last = 0
+  for (const m of emojisIn(rest)) { count++; left += rest.slice(last, m.index); last = m.index! + m[0].length }
+  left += rest.slice(last)
+  return count > 0 && count <= 27 && left.trim() === ''
 }
 
 /** The text with each custom emoji written :name:, for where pictures cannot go. */

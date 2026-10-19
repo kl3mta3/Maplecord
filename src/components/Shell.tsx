@@ -37,7 +37,8 @@ import { PastedDialog, AllowDirectDialog, BanDialog, ConfirmDialog, CreateChanne
 import { OverlaySettingsDialog, ServerSettingsDialog } from './Settings'
 import { CheckedPicture } from './CheckedPicture'
 import { readyPictureCheck, setPictureCheckOn } from '../pictureCheck'
-import { ExpressionPicker, SoundboardPanel, StickerView } from './Expressions'
+import { ExpressionPicker, SoundboardPanel, StickerView, emojiGroupsOf } from './Expressions'
+import { Twemoji } from '../emoji'
 import { onlyEmojis, setExpressionServer, toTokens, withEmojis } from '../expressions'
 import type { ExpressionDto, UsableExpressionsDto } from '../types'
 import Friends from './Home'
@@ -53,7 +54,7 @@ import { TermsGate } from './Terms'
 import { UpdateButton } from './UpdateButton'
 import { CALENDAR_BACKGROUNDS } from '../calendarLooks'
 import { MAX_P2P_TEXT, P2P_PICTURE, type P2PFile } from '../p2pText'
-import { foldP2p, foldP2pChat, P2P_GALLERY_POLLS, P2P_META_ROOM, P2P_REACTIONS } from '../p2pPosts'
+import { foldP2p, foldP2pChat, P2P_GALLERY_POLLS, P2P_META_ROOM } from '../p2pPosts'
 import { soundPackNames } from '../sounds'
 import { DEFAULT_GATE_LEVEL, DEFAULT_NOTIFY, type NotifyLevel } from '../settings'
 import { ContextMenu, type MenuEntry } from './ContextMenu'
@@ -1492,14 +1493,13 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
     await store.sendMessage(sent, null, { replyToId: answering?.id ?? null })
   }
 
-  /** The usual reactions, then the custom emojis one may use here. */
-  const withCustomReactions = useCallback(async () => {
-    const usual = await store.reactionChoices()
-    const u = channel?.id ? await store.usableExpressions(channel.id) : null
-    if (!u?.emojis) return usual
-    const custom = [...u.here, ...(u.outside ? [...u.mine, ...u.others.flatMap(g => g.items)] : [])].filter(e => e.kind === 0)
-    return [...usual, ...custom.map(e => `<:${e.name}:${e.id}>`)]
-  }, [store.reactionChoices, store.usableExpressions, channel?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  /** This server, and how a server's picture is addressed, for the emoji pickers' custom emojis. */
+  const hereGuild = store.selectedGuild?.guild
+  const thisServer = hereGuild ? { name: hereGuild.name, icon: serverAssetUrl(store.settings.serverUrl, hereGuild.iconUrl) } : null
+  const iconOf = (url: string | null) => serverAssetUrl(store.settings.serverUrl, url)
+  /** The custom emojis one may react with here (none in a P2P channel: they are not used there). */
+  const reactionGroups = useCallback(async () => (p2pChat || !channel?.id ? [] : emojiGroupsOf(await store.usableExpressions(channel.id), thisServer, iconOf)),
+    [store.usableExpressions, channel?.id, p2pChat, thisServer?.name, thisServer?.icon]) // eslint-disable-line react-hooks/exhaustive-deps
   const nameOfMessage = (m: MessageDto) => (m.webhookId ? m.authorName : nameIn(m.authorId, m.authorName))
   const goTo = (m: MessageDto) => { if (!postsList && shown.some(x => x.id === m.id)) store.setHighlight(m.id); else void (p2pChat ? store.jumpP2p(m) : store.jumpTo(m)) }
   const reactTo = (id: string, emoji: string, on: boolean) => void (p2pChat ? store.reactP2p(id, emoji, on) : store.react(id, emoji, on))
@@ -1537,7 +1537,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
         ? <button className="threadlink" onClick={() => store.openP2pPost(m.id)}>💬 {m.threadCount} {m.threadCount === 1 ? 'reply' : 'replies'} <span className="muted">· open thread</span></button> : undefined,
       tools: !connected ? undefined : (
         <span className="msgtools">
-          {QUICK_REACTIONS.slice(0, 3).map(emoji => <button key={emoji} title={`React with ${emoji}`} aria-label={`React with ${emoji}`} onClick={() => react(m, emoji)}>{emoji}</button>)}
+          {QUICK_REACTIONS.slice(0, 3).map(emoji => <button key={emoji} title={`React with ${emoji}`} aria-label={`React with ${emoji}`} onClick={() => react(m, emoji)}><Twemoji emoji={emoji} /></button>)}
           <button title="More reactions" aria-label="More reactions" onClick={e => setPicker({ id: m.id, x: e.clientX, y: e.clientY })}>＋</button>
           {p2pTalk && <button title="Reply" aria-label="Reply" onClick={() => setReplyingTo(m)}>↩</button>}
           {mayThread && <button title={(m.threadCount ?? 0) > 0 ? 'Open thread' : 'Reply in a thread'} aria-label="Thread" onClick={() => store.openP2pPost(m.id)}>💬</button>}
@@ -1573,7 +1573,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
         ? <button className="threadlink" onClick={() => void store.openThread(m)}>💬 {m.threadCount} {m.threadCount === 1 ? 'reply' : 'replies'} <span className="muted">· open thread</span></button> : undefined,
       tools: (
         <span className="msgtools">
-          {QUICK_REACTIONS.slice(0, 3).map(emoji => <button key={emoji} title={`React with ${emoji}`} aria-label={`React with ${emoji}`} onClick={() => react(m, emoji)}>{emoji}</button>)}
+          {QUICK_REACTIONS.slice(0, 3).map(emoji => <button key={emoji} title={`React with ${emoji}`} aria-label={`React with ${emoji}`} onClick={() => react(m, emoji)}><Twemoji emoji={emoji} /></button>)}
           <button title="More reactions" aria-label="More reactions" onClick={e => setPicker({ id: m.id, x: e.clientX, y: e.clientY })}>＋</button>
           <button title="Reply" aria-label="Reply" onClick={() => setReplyingTo(m)}>↩</button>
           {mayThread && <button title={(m.threadCount ?? 0) > 0 ? 'Open thread' : 'Reply in a thread'} aria-label="Thread" onClick={() => void store.openThread(m)}>💬</button>}
@@ -1734,7 +1734,8 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
           onConfirm={() => void store.deleteMessage(deleting.id)} onClose={() => setDeleting(null)} />
       )}
       {exprPicker && (
-        <ExpressionPicker x={exprPicker.x} y={exprPicker.y} fromLeft usable={exprPicker.usable} startOn={exprPicker.tab} unicode={QUICK_EMOJI}
+        <ExpressionPicker x={exprPicker.x} y={exprPicker.y} fromLeft usable={exprPicker.usable} startOn={exprPicker.tab}
+          emojiGroups={emojiGroupsOf(exprPicker.usable, thisServer, iconOf)} loading={!p2pChat && !exprPicker.usable}
           onEmoji={picked => {
             const insert = typeof picked === 'string' ? picked : `:${picked.name}:`
             if (typeof picked !== 'string') pickedEmojis.current.set(picked.name.toLowerCase(), picked)
@@ -1747,7 +1748,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
           onSticker={kept ? sticker => void store.sendSticker(sticker.id) : undefined}
           onClose={() => setExprPicker(null)} />
       )}
-      {picker && <ReactionPicker x={picker.x} y={picker.y} choices={p2pChat ? p2pReactionChoices : withCustomReactions} onClose={() => setPicker(null)}
+      {picker && <ReactionPicker x={picker.x} y={picker.y} groups={reactionGroups} onClose={() => setPicker(null)}
         onPick={emoji => {
           const m = shown.find(x => x.id === picker.id)
           if (!m) return
@@ -1959,7 +1960,6 @@ function FileTray({ items, onRemove }: { items: TrayItem[]; onRemove: (key: stri
 }
 
 /** Ordinary emojis offered in the message box's picker. */
-const QUICK_EMOJI = ['😀', '😂', '🥲', '😊', '😍', '😎', '🤔', '😮', '😢', '😡', '👍', '👎', '👏', '🙏', '💪', '🔥', '✨', '🎉', '❤️', '💔', '💯', '✅', '❌', '⚔️', '🛡️', '🏹', '🎲', '🪙', '💰', '🍕', '☕', '🌙']
 
 /** An invite link somewhere in a message: this server's invite page, or the app's own kind of link. */
 const INVITE_LINK = /(https?:\/\/[^\s<>"']+\/(?:invite|add)\/[A-Za-z0-9]{4,32}(?:\?[^\s<>"']*)?|https?:\/\/[^\s<>"']+\/event\/[0-9a-fA-F-]{36}(?:\?[^\s<>"']*)?|maplecord:\/\/(?:invite|add|event)\/[^\s<>"']+)/g
@@ -2187,13 +2187,6 @@ function FileOfferView({ store, offer, mine }: { store: Store; offer: FileOfferD
   )
 }
 
-/**
- * One file on a message in a P2P channel. It is not on the server: its contents come from the app of someone
- * connected who has them. A picture of an ordinary size is fetched and shown by itself; anything else waits to be
- * asked for. Once fetched it is kept on this device with the message.
- */
-const p2pReactionChoices = () => Promise.resolve(P2P_REACTIONS)
-
 /** A picture on a P2P message, as a tile of the media grid: fetched from whoever connected has it, like anywhere else. */
 function P2PTile({ store, channelId, authorId, file }: { store: Store; channelId: string; authorId: string; file: P2PFile }) {
   const view = store.p2pFiles[`${channelId}|${file.hash}`]
@@ -2220,6 +2213,11 @@ function P2PCover({ store, m }: { store: Store; m: MessageDto }) {
     : view?.state === 'nobody' ? 'Nobody connected has this picture right now' : view?.state === 'relay' ? 'Too large to fetch through the relay' : !byItself ? 'A large picture: open the post to fetch it' : 'Fetching…'}</span>
 }
 
+/**
+ * One file on a message in a P2P channel. It is not on the server: its contents come from the app of someone
+ * connected who has them. A picture of an ordinary size is fetched and shown by itself; anything else waits to be
+ * asked for. Once fetched it is kept on this device with the message.
+ */
 function P2PFileChip({ store, channelId, authorId, file }: { store: Store; channelId: string; authorId: string; file: P2PFile }) {
   const view = store.p2pFiles[`${channelId}|${file.hash}`]
   const picture = P2P_PICTURE.test(file.type)
