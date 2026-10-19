@@ -137,7 +137,7 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, fin
   onListing: (patch: { isPublic: boolean; description: string; topics: string[]; featurable: boolean }) => Promise<void>
   /** The server's tag: the symbols one can carry, setting it, and taking it away. */
   tagSymbols: () => Promise<string[]>
-  onSetTag: (guildId: string, text: string, symbol: string | null) => Promise<void>
+  onSetTag: (guildId: string, text: string, symbol: string | null, look: string | null) => Promise<void>
   onRemoveTag: (guildId: string) => Promise<void>
   /** Whether rolls in this server's P2P channels add to people's roll totals. */
   onCountRolls: (guildId: string, countRolls: boolean) => Promise<void>
@@ -233,7 +233,7 @@ export function ServerSettingsDialog({ api, channels, guild, roles, members, fin
           </div>
           <ListingSettings key={`${guild.isPublic}|${guild.description ?? ''}|${(guild.topics ?? []).join(',')}|${!!guild.noFeature}`} isPublic={!!guild.isPublic} description={guild.description ?? ''} topics={guild.topics ?? []} featurable={!guild.noFeature} onSave={onListing} />
           <TagSettings guild={guild} people={members.filter(m => !m.isBot).length} symbols={tagSymbols}
-            onSave={(text, symbol) => onSetTag(guild.id, text, symbol)} onRemove={() => onRemoveTag(guild.id)} />
+            onSave={(text, symbol, look) => onSetTag(guild.id, text, symbol, look)} onRemove={() => onRemoveTag(guild.id)} />
           {/* Where newcomers are greeted. Only an ordinary text channel can be it: nothing can be posted for anyone in a P2P one. */}
           {(() => {
             const places = channels.filter(c => c.type === ChannelType.Text && !c.directSince)

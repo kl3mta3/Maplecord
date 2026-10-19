@@ -2010,7 +2010,7 @@ export function useMaplecord() {
   const tagSymbolsRef = useRef<Promise<string[]> | null>(null)
   /** The symbols a tag can carry: asked for once. */
   const tagSymbols = useCallback(() => (tagSymbolsRef.current ??= api.tagSymbols().catch(e => { tagSymbolsRef.current = null; throw e })), [api])
-  const setGuildTag = useCallback(async (guildId: string, text: string, symbol: string | null) => { const guild = await api.setGuildTag(guildId, text, symbol); patchGuild(guildId, x => ({ ...x, guild })) }, [api, patchGuild])
+  const setGuildTag = useCallback(async (guildId: string, text: string, symbol: string | null, look: string | null = null) => { const guild = await api.setGuildTag(guildId, text, symbol, look); patchGuild(guildId, x => ({ ...x, guild })) }, [api, patchGuild])
   const removeGuildTag = useCallback(async (guildId: string) => { const guild = await api.removeGuildTag(guildId); patchGuild(guildId, x => ({ ...x, guild })) }, [api, patchGuild])
   /** Which of our servers' tags we wear, or none. Everyone who can see us is told by the server, ourselves included. */
   const wearTag = useCallback(async (guildId: string | null) => { const user = await api.wearTag(guildId); updateSettings({ user }) }, [api, updateSettings])

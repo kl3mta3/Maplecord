@@ -144,7 +144,7 @@ export class Api {
   discoverOne(id: string) { return this.request<DiscoverGuildDto>('GET', `/api/discover/${id}`) }
   /** The symbols a server tag can carry. */
   tagSymbols() { return this.request<string[]>('GET', '/api/tags/symbols') }
-  setGuildTag(guildId: string, text: string, symbol: string | null) { return this.request<GuildDto>('PUT', `/api/guilds/${guildId}/tag`, { text, symbol }) }
+  setGuildTag(guildId: string, text: string, symbol: string | null, look: string | null = null) { return this.request<GuildDto>('PUT', `/api/guilds/${guildId}/tag`, { text, symbol, look }) }
   removeGuildTag(guildId: string) { return this.request<GuildDto>('DELETE', `/api/guilds/${guildId}/tag`) }
   /** Wears the tag of one of our servers beside our name, or with null none. */
   wearTag(guildId: string | null) { return this.request<UserDto>('PUT', '/api/me/tag', { guildId }) }

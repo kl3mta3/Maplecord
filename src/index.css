@@ -967,7 +967,13 @@ button.chip { cursor: pointer; }
 .tagpill .sym { font-size: 11px; line-height: 1; display: inline-flex; align-items: center; }
 /* The Maplecord logo as a tag's symbol: the size of the letters beside it in a tag, of the other symbols in the picker. */
 .taglogo { width: 1.2em; height: 1.2em; object-fit: contain; vertical-align: middle; }
-.tagpill .taglogo { width: 12px; height: 12px; }
+.tagpill .taglogo, .tagpill img.emoji { width: 12px; height: 12px; margin: 0; vertical-align: middle; }
+.tagsettings img.emoji { width: 20px; height: 20px; margin: 0; vertical-align: middle; }
+/* A tag symbol drawn in a style (Tags.tsx): its border may reach past its square. */
+svg.tagsil { display: inline-block; width: 1.2em; height: 1.2em; vertical-align: middle; overflow: visible; }
+.tagpill svg.tagsil { width: 12px; height: 12px; }
+.tagsettings svg.tagsil { width: 20px; height: 20px; }
+.tagstyle input[type=color] { width: 40px; height: 28px; padding: 0 2px; }
 /* A name in a narrow list: the name gives way and is cut short, and the tag after it always stays in view. */
 .nameline { display: flex; align-items: center; min-width: 0; }
 .nameline > .uname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -980,7 +986,7 @@ button.chip { cursor: pointer; }
 .tagcard .name { font-weight: 700; font-size: 16px; }
 .tagcard .facts { display: flex; flex-wrap: wrap; gap: 4px 14px; }
 .tagsettings { display: grid; gap: 6px; margin-top: 14px; }
-.tagsettings .symbols { display: grid; grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)); gap: 4px; max-height: 180px; overflow: auto; padding: 6px; background: var(--bg1); border: 1px solid var(--border); border-radius: 8px; }
+.tagsettings .symbols { display: grid; grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)); gap: 4px; max-height: 240px; overflow: auto; padding: 6px; background: var(--bg1); border: 1px solid var(--border); border-radius: 8px; }
 .tagsettings .symbols button { padding: 4px 0; font-size: 16px; }
 .tagsettings .symbols button.sel { border-color: var(--accent2); }
 
