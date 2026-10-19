@@ -420,6 +420,14 @@ function refuseUnneededPermissions() {
   session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => callback(!NEVER_ALLOWED.has(permission)))
   session.defaultSession.setPermissionCheckHandler((_contents, permission) => !NEVER_ALLOWED.has(permission))
   session.defaultSession.setDevicePermissionHandler(() => false)
+  // Something saved through the page itself (a video's own download button): asked where, with its extension kept,
+  // as the app's own saving does (see saveFilters).
+  session.defaultSession.on('will-download', (_event, item) => {
+    const given = item.getFilename() || 'download'
+    const ext = EXTENSIONS[item.getMimeType().split(';')[0]!.trim().toLowerCase()]
+    const name = path.extname(given) || !ext ? given : given + '.' + ext
+    item.setSaveDialogOptions({ title: 'Save file', defaultPath: path.join(app.getPath('downloads'), name), filters: saveFilters(name) })
+  })
 }
 
 function registerDisplayCapture() {
@@ -442,11 +450,25 @@ function registerDisplayCapture() {
 
 // Files received from other people are written to disk as they arrive (see electron/saveStreams.ts).
 const saves = new SaveStreams()
+/** The usual extension of a kind of file, for a name that came without one. */
+const EXTENSIONS: Record<string, string> = {
+  'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/avif': 'avif', 'image/bmp': 'bmp',
+  'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov', 'video/ogg': 'ogv',
+  'audio/mpeg': 'mp3', 'audio/mp4': 'm4a', 'audio/ogg': 'ogg', 'audio/webm': 'weba', 'audio/wav': 'wav', 'application/pdf': 'pdf',
+}
+/**
+ * What the save dialog is told about a file's kind, from its extension. Without it, Windows set to hide extensions shows
+ * the name without one and can save the file without one; with it, the extension is kept (or put back if taken off).
+ */
+function saveFilters(name: string): Electron.FileFilter[] | undefined {
+  const ext = path.extname(name).slice(1)
+  return ext ? [{ name: ext.toUpperCase() + ' file', extensions: [ext] }, { name: 'All files', extensions: ['*'] }] : undefined
+}
 handle('save-begin', async (_event, name: string) => {
   if (!win) return null
   // Only the name: whatever folders the sender's file name claims are not followed.
   const safe = path.basename(String(name)).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_') || 'file'
-  const picked = await dialog.showSaveDialog(win, { title: 'Save file', defaultPath: path.join(app.getPath('downloads'), safe) })
+  const picked = await dialog.showSaveDialog(win, { title: 'Save file', defaultPath: path.join(app.getPath('downloads'), safe), filters: saveFilters(safe) })
   return picked.canceled || !picked.filePath ? null : saves.begin(picked.filePath)
 })
 handle('save-write', (_event, id: string, data: Uint8Array) => saves.write(id, data))

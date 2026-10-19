@@ -3,7 +3,7 @@ import { TagCardDialog, onTagOpened } from './Tags'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { p2pMedia, type Store, type TrayItem } from '../store'
-import { openSink, type TransferView } from '../transfer'
+import { openSink, withExtension, type TransferView } from '../transfer'
 import { ChannelType, isPostsChannel, MessageKind, Permission, UserStatus, RollChoice, RollKind, RollRange, RpsChoice, hasPermission, type AttachmentDto, type ChannelBotDto, type FileOfferDto, type CommandDto, type MemberDto, type MediaItem, type MessageDto, type RoleDto } from '../types'
 
 const RPS_ICON: Record<number, string> = { [RpsChoice.Rock]: '✊', [RpsChoice.Paper]: '✋', [RpsChoice.Scissors]: '✌️' }
@@ -2248,13 +2248,14 @@ function P2PFileChip({ store, channelId, authorId, file }: { store: Store; chann
  * Saves a picture that is being shown to wherever the person chooses. It is fetched from where it is shown from, so
  * what is saved is the picture as it was sent.
  */
-async function savePicture(src: string, name: string) {
+async function savePicture(src: string, given: string) {
   const reply = await fetch(src)
   if (!reply.ok) throw new Error('The picture could not be fetched to save it.')
+  const name = withExtension(given || 'picture', reply.headers.get('content-type'))
   // The iPhone app: to the phone's share sheet, where Save Image puts it in Photos (a page's downloads go nowhere there).
-  if (sharesOnPhone()) { await shareOnPhone(await reply.blob(), name || 'picture'); return }
+  if (sharesOnPhone()) { await shareOnPhone(await reply.blob(), name); return }
   const bytes = new Uint8Array(await reply.arrayBuffer())
-  const sink = await openSink(name || 'picture', bytes.byteLength, bridge() ?? phoneSave())
+  const sink = await openSink(name, bytes.byteLength, bridge() ?? phoneSave())
   if (!sink) return
   try {
     for (let at = 0; at < bytes.byteLength; at += 1024 * 1024) await sink.write(bytes.subarray(at, at + 1024 * 1024))

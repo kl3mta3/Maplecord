@@ -425,6 +425,19 @@ export async function ownEndRelayed(pc: RTCPeerConnection): Promise<boolean> {
 /** The most a browser without a way to write straight to disk will hold in memory before saving. */
 export const MEMORY_SINK_LIMIT = 512 * 1024 * 1024
 
+/** The usual extension of a kind of file, for a name that came without one (a picture pasted in is often called just "image"). */
+const EXTENSIONS: Record<string, string> = {
+  'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/avif': 'avif', 'image/bmp': 'bmp',
+  'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov', 'video/ogg': 'ogv',
+  'audio/mpeg': 'mp3', 'audio/mp4': 'm4a', 'audio/ogg': 'ogg', 'audio/webm': 'weba', 'audio/wav': 'wav', 'application/pdf': 'pdf',
+}
+/** The name with an extension: its own if it has one, else the usual one for the kind of file it is, if that is known. */
+export function withExtension(name: string, contentType?: string | null): string {
+  if (/\.[A-Za-z0-9]{1,5}$/.test(name)) return name
+  const ext = EXTENSIONS[(contentType ?? '').split(';')[0]!.trim().toLowerCase()]
+  return ext ? `${name}.${ext}` : name
+}
+
 interface DesktopSave {
   saveBegin(name: string): Promise<string | null>
   saveWrite(id: string, data: Uint8Array): Promise<void>
