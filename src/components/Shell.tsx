@@ -40,7 +40,7 @@ import type { ExpressionDto, UsableExpressionsDto } from '../types'
 import Friends from './Home'
 import { serverMediaUrl } from '../itemIcons'
 import { bridge, isElectron } from '../platform'
-import { isNativeApp, nativeApp } from '../native/app'
+import { isNativeApp, nativeApp, phoneSave, shareOnPhone, sharesOnPhone } from '../native/app'
 import { CallBubble } from './CallBubble'
 import { listAudioChoices, systemDefaultLabel, type AudioChoice } from '../audioDevices'
 import { linkRanOut, useFileLink } from '../fileLinks'
@@ -1262,8 +1262,9 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
   const canSendDirect = store.allowDirect && p2pPlace && store.transferLimits?.enabled !== false
   // A voice message: recorded here, sent like any file. The server's upload limit is looked up when one is started.
   const [voiceMessage, setVoiceMessage] = useState<{ maxBytes: number } | null>(null)
-  // An iPhone has one microphone to give out: recording while in voice would take it away from the call.
-  const voiceBusy = appleTouch() && !!store.voice
+  // An iPhone has one microphone to give out: recording while in voice would take it away from the call. So does the
+  // Android app, whose shell holds the microphone for the call.
+  const voiceBusy = (appleTouch() || isNativeApp()) && !!store.voice
   const startVoiceMessage = async () => {
     const rules = await store.api.uploadSettings().catch(() => null)
     if (rules && !rules.enabled) { store.setError('Uploads are turned off on this server right now.'); return }
@@ -1578,7 +1579,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
       {messageMenu && (
         <ContextMenu x={messageMenu.x} y={messageMenu.y} onClose={() => setMessageMenu(null)} entries={[
           ...(messageMenu.picture ? [
-            { kind: 'item', label: 'Download picture', icon: '⬇', onClick: () => { const p = messageMenu.picture!; void savePicture(p.src, p.name).catch(e => store.setError(e instanceof Error ? e.message : 'The picture could not be saved.')) } } as MenuEntry,
+            { kind: 'item', label: sharesOnPhone() ? 'Share or save picture' : 'Download picture', icon: '⬇', onClick: () => { const p = messageMenu.picture!; void savePicture(p.src, p.name).catch(e => store.setError(e instanceof Error ? e.message : 'The picture could not be saved.')) } } as MenuEntry,
             { kind: 'sep' } as MenuEntry,
           ] : []),
           ...(kept ? [
@@ -1600,6 +1601,8 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
             { kind: 'sep' } as MenuEntry,
           ] : []),
           ...(messageMenu.m.content ? [{ kind: 'item', label: 'Copy text', onClick: () => { void navigator.clipboard.writeText(messageMenu.m.content).catch(() => { /* no clipboard */ }) } } as MenuEntry] : []),
+          // Every message has its own ID (a P2P one too): for pointing someone at exactly this message, as reports already do.
+          { kind: 'item', label: 'Copy message ID', icon: '🆔', onClick: () => { void navigator.clipboard.writeText(messageMenu.m.id).catch(() => { /* no clipboard */ }) } } as MenuEntry,
           // Reporting, to whoever runs this Maplecord: a picture the server keeps (never one sent P2P), or whoever wrote it.
           ...(kept && reportsOn.pictures && messageMenu.m.authorId !== me?.id && messageMenu.picture?.fileId
             ? [{ kind: 'item', label: 'Report picture…', icon: '⚑', onClick: () => onReport({ kind: 'picture', picture: 'attachment', id: messageMenu.picture!.fileId!, what: 'this picture' }) } as MenuEntry] : []),
@@ -2143,8 +2146,10 @@ function P2PFileChip({ store, channelId, authorId, file }: { store: Store; chann
 async function savePicture(src: string, name: string) {
   const reply = await fetch(src)
   if (!reply.ok) throw new Error('The picture could not be fetched to save it.')
+  // The iPhone app: to the phone's share sheet, where Save Image puts it in Photos (a page's downloads go nowhere there).
+  if (sharesOnPhone()) { await shareOnPhone(await reply.blob(), name || 'picture'); return }
   const bytes = new Uint8Array(await reply.arrayBuffer())
-  const sink = await openSink(name || 'picture', bytes.byteLength, bridge())
+  const sink = await openSink(name || 'picture', bytes.byteLength, bridge() ?? phoneSave())
   if (!sink) return
   try {
     for (let at = 0; at < bytes.byteLength; at += 1024 * 1024) await sink.write(bytes.subarray(at, at + 1024 * 1024))
@@ -2174,7 +2179,7 @@ function Picture({ src, name, onError, fileId }: { src: string; name: string; on
           <div className="bar" onClick={e => e.stopPropagation()}>
             <span className="grow name">{name}</span>
             {failed && <span className="muted">{failed}</span>}
-            <button onClick={save} title="Save this picture">⬇ Download</button>
+            <button onClick={save} title="Save this picture">{sharesOnPhone() ? 'Share or save' : '⬇ Download'}</button>
             <button className="subtle" onClick={() => setBig(false)} title="Close">✕</button>
           </div>
           <img src={src} alt={name} onClick={e => e.stopPropagation()} />

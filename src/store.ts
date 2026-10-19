@@ -20,7 +20,7 @@ import { readPackZip } from './soundPackZip'
 import { applyTheme } from './theme'
 import { VoiceConnectError, VoiceEngine, type IcePolicy, type VoiceEngineEvents } from './voice'
 import { NativeVoiceEngine } from './nativeVoice'
-import { isNativeApp, nativeApp, type NativeAppEvents } from './native/app'
+import { isNativeApp, nativeApp, nativePlatform, phoneSave, type NativeAppEvents } from './native/app'
 import { nativeSignIn } from './native/signIn'
 import { phoneChoices } from './pushChoices'
 import { signInProblem } from './components/SignIn'
@@ -1019,9 +1019,10 @@ export function useMaplecord() {
       if (now !== cur.directSince) { dropForKindChange(now); return }
       void (async () => {
         // Where the channel's sound goes through a stream server, the server keeps our place for a few seconds and we
-        // take it back: the sound never stopped, so nothing else is done. Mute and deafen are said again, in case they
-        // were changed while the connection was down.
-        if (!cur.directSince && await voiceHub.resumeVoice(cur.channelId, cur.participants)) {
+        // take it back: the sound never stopped, so nothing else is done. So too in any channel for the phone apps,
+        // whose sound goes on while the phone freezes this page, for as long as the phone checks in. Mute and deafen
+        // are said again, in case they were changed while the connection was down.
+        if (await voiceHub.resumeVoice(cur.channelId, cur.participants)) {
           voiceRecorder.note('Back in the same place in the voice channel; the call carried on.')
           void voiceHub.setMuted(voiceEngine.mutedNow).catch(() => { /* said again at the next change */ })
           void voiceHub.setDeafened(voiceEngine.deafenedNow)
@@ -1194,6 +1195,7 @@ export function useMaplecord() {
   // of changes; it is forgotten when signing out. A tapped notification opens its conversation.
   const phoneToken = useRef<string | null>(null)
   const phoneVoipToken = useRef<string | null>(null)
+  const phoneSandbox = useRef(false)
   const openFromPush = useRef<string | null>(null)
   const registerPhone = useCallback(async () => {
     try {
@@ -1201,7 +1203,8 @@ export function useMaplecord() {
       if (!got.token) { console.debug('[push]', got.error ?? 'no token'); return }
       phoneToken.current = got.token
       phoneVoipToken.current = got.voipToken ?? null
-      await api.pushDevice({ platform: 'ios', token: got.token, voipToken: got.voipToken ?? null, sandbox: got.sandbox, choices: phoneChoices(settingsRef.current) })
+      phoneSandbox.current = got.sandbox
+      await api.pushDevice({ platform: nativePlatform(), token: got.token, voipToken: got.voipToken ?? null, sandbox: got.sandbox, choices: phoneChoices(settingsRef.current) })
     } catch (e) { console.debug('[push] not registered:', e instanceof Error ? e.message : e) }
   }, [api])
   // The shell keeps the sign-in for calls that come in while the page is not running (see native/app.ts setSession).
@@ -1229,7 +1232,7 @@ export function useMaplecord() {
   useEffect(() => {
     if (!isNativeApp() || !phoneToken.current || !ready) return
     const token = phoneToken.current
-    const t = window.setTimeout(() => { void api.pushDevice({ platform: 'ios', token, voipToken: phoneVoipToken.current, sandbox: false, choices: phoneChoices(settingsRef.current) }).catch(() => {}) }, 1500)
+    const t = window.setTimeout(() => { void api.pushDevice({ platform: nativePlatform(), token, voipToken: phoneVoipToken.current, sandbox: phoneSandbox.current, choices: phoneChoices(settingsRef.current) }).catch(() => {}) }, 1500)
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-sent when the choices it carries change
   }, [pushPrefsKey, ready, api])
@@ -1574,7 +1577,7 @@ export function useMaplecord() {
     await run(async () => {
       const bytes = await loadP2pFile(channelId, file, authorId, true)
       if (!bytes) return
-      const sink = await openSink(file.name, file.size, bridge())
+      const sink = await openSink(file.name, file.size, bridge() ?? phoneSave())
       if (!sink) return
       try {
         for (let at = 0; at < bytes.byteLength; at += 1024 * 1024) await sink.write(bytes.subarray(at, at + 1024 * 1024))
@@ -1611,7 +1614,7 @@ export function useMaplecord() {
   /** Ask where to save an offered file, then ask its sender for it. */
   const downloadFile = useCallback(async (offer: FileOfferDto) => {
     await run(async () => {
-      const sink = await openSink(offer.fileName, offer.size, bridge())
+      const sink = await openSink(offer.fileName, offer.size, bridge() ?? phoneSave())
       if (!sink) return
       transferEngine.receive(offer.id, offer.fileName, offer.size, sink)
       try { await hub.requestFile(offer.id, allowDirectRef.current) }

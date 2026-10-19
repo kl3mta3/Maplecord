@@ -105,8 +105,8 @@ export function VoiceAudioSettings({ store, onAllowDirect }: {
       {phone ? <PhoneSpeakerTest volume={s.outputVolume ?? 1} /> : <SpeakerTest deviceId={s.audioOutputDeviceId ?? null} volume={s.outputVolume ?? 1} />}
       {phone && (
         <div className="muted">
-          On an iPhone a Bluetooth headset's microphone and its sound go together. A headset's microphone is listed once
-          a call has started or the microphone test is running.
+          On a phone a Bluetooth headset's microphone and its sound go together. On an iPhone a headset's microphone is
+          listed once a call has started or the microphone test is running.
         </div>
       )}
       <label className="row sensitivity">

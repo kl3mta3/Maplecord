@@ -5,6 +5,7 @@ import { leafPath, leafQr, qrPath, LEAF_CODE, LEAF_DOT, LEAF_EDGE, LEAF_PAPER, t
 import { CARDS, CARD_SCALE, cardFonts, cardSize, drawCard, type CardKind, type CardWho, type QrLook, type RealCard } from '../friendCard'
 import { shownName } from '../profile'
 import { ConfirmDialog } from './Dialogs'
+import { shareOnPhone, sharesOnPhone } from '../native/app'
 
 /** The empty margin a QR code needs around it to be read, in squares. */
 const MARGIN = 3
@@ -75,6 +76,8 @@ function FriendCard({ kind, look, qr, seed, who, what, innerRef }: { kind: RealC
 
 /** Saves something made in the app as a file, the way a download is saved. */
 export function saveAs(blob: Blob, name: string) {
+  // The iPhone app: the phone's share sheet (Messages, Mail, Save Image...), since a page's downloads go nowhere there.
+  if (sharesOnPhone()) { void shareOnPhone(blob, name).catch(() => { /* the sheet was closed, or could not open */ }); return }
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -155,7 +158,7 @@ export function QrPanel({ store, qr, seed, who, what, file, children }: {
             </select>
           </label>
         )}
-        <button onClick={savePicture}>Save as a picture</button>
+        <button onClick={savePicture}>{sharesOnPhone() ? 'Share or save' : 'Save as a picture'}</button>
         {children}
       </div>
     </div>

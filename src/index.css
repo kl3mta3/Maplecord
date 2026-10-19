@@ -1306,5 +1306,9 @@ img.sticker { display: block; width: 160px; height: 160px; object-fit: contain; 
 /* iOS (Safari and the iPhone app): it gives a dropdown its own fixed height and puts the padding inside it, which cut the
    bottom off the text. Drawn here instead, tall enough for the text, with an arrow of our own. */
 @supports (-webkit-touch-callout: none) {
+  /* A long press on a message opens Maplecord's own menu (Copy text, Reply...), so iOS's own pop-up (Copy, Look Up, Save
+     to Photos) is not shown over it as well. Typing and editing stay as they are. */
+  .message { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+  .message textarea, .message input { -webkit-touch-callout: default; -webkit-user-select: text; user-select: text; }
   select { -webkit-appearance: none; appearance: none; min-height: 44px; padding: 10px 34px 10px 12px; line-height: 1.25; background-image: url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 12 8%27%3E%3Cpath d=%27M1 1.5l5 5 5-5%27 fill=%27none%27 stroke=%27%239a9ab0%27 stroke-width=%271.8%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; background-size: 12px 8px; }
 }

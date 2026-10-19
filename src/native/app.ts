@@ -1,6 +1,6 @@
 /**
- * The iPhone app: this same page inside a native shell (Capacitor), where voice is done by the shell rather than
- * the page, so that it carries on with the screen off or another app in front (see nativeVoice.ts).
+ * The iPhone and Android apps: this same page inside a native shell (Capacitor; Maplecord-iOS and Maplecord-Android),
+ * where voice is done by the shell rather than the page, so that it carries on with the screen off or another app in front (see nativeVoice.ts).
  *
  * Nothing of the shell is imported here. The shell puts `window.Capacitor` on the page as it loads, and that is how
  * the page tells it is inside one; the page then asks it for the voice plugin by name. On the web and in the desktop
@@ -109,11 +109,18 @@ export interface NativeAppPlugin {
   pushRegister(): Promise<{ token: string | null; voipToken?: string | null; sandbox: boolean; error?: string }>
   /** The App Store country this app came from, as three letters ("USA"), or null when the phone cannot say. */
   storefront(): Promise<{ country: string | null }>
+  /** iPhone: the phone's share sheet for a file (Messages, Mail, Save Image and the rest). data is base64. Answers whether it was used. */
+  share?(o: { name: string; mimeType: string; data: string }): Promise<{ done: boolean }>
   /**
    * The sign-in, for the moments the page is not running: a call that comes in while the app is closed is looked up,
    * and declined if declined, by the shell itself. Given on signing in and whenever the token is renewed; null on signing out.
    */
   setSession(o: { serverUrl: string | null; token: string | null }): Promise<void>
+  /** Android only: saving a file from a chat onto the phone, in pieces (see phoneSave). */
+  saveBegin?(o: { name: string }): Promise<{ id: string }>
+  saveWrite?(o: { id: string; data: string }): Promise<void>
+  saveEnd?(o: { id: string }): Promise<void>
+  saveAbort?(o: { id: string }): Promise<void>
   addListener<K extends keyof NativeAppEvents>(event: K, handler: (data: NativeAppEvents[K]) => void): Promise<{ remove: () => Promise<void> }>
 }
 
@@ -138,8 +145,14 @@ interface CapacitorGlobal {
 
 const capacitor = (): CapacitorGlobal | undefined => (globalThis as { Capacitor?: CapacitorGlobal }).Capacitor
 
-/** Whether this page is the one inside the iPhone (or iPad) app. */
+/**
+ * Whether this page is the one inside the iPhone (or iPad) or Android app. Both shells have the same two plugins with the
+ * same calls and events (MaplecordVoice and MaplecordApp), so the page treats them alike.
+ */
 export const isNativeApp = (): boolean => capacitor()?.isNativePlatform?.() === true
+
+/** Which of the two: what a phone registers as for notifications. Outside either app, "ios" (never asked there). */
+export const nativePlatform = (): 'ios' | 'android' => (capacitor()?.getPlatform?.() === 'android' ? 'android' : 'ios')
 
 /**
  * One of the shell's plugins, by name: each method is a call to it that answers with a promise, and addListener
@@ -179,3 +192,43 @@ export function nativeApp(): NativeAppPlugin {
 }
 
 export function useNativeApp(standIn: NativeAppPlugin | null) { appPlugin = standIn }
+
+/**
+ * Saving a picture or a file from a chat onto the phone, in the Android app: an app's page cannot download there, so
+ * the shell saves it (to Pictures, Movies or Download). Shaped like the desktop app's save, so the page's openSink
+ * (transfer.ts) takes it as it is. Elsewhere, undefined: the iPhone's page saves through the phone's own sheet.
+ */
+export function phoneSave() {
+  if (!isNativeApp() || nativePlatform() !== 'android') return undefined
+  const app = nativeApp() as Required<Pick<NativeAppPlugin, 'saveBegin' | 'saveWrite' | 'saveEnd' | 'saveAbort'>>
+  const base64 = (bytes: Uint8Array) => {
+    let text = ''
+    for (let at = 0; at < bytes.length; at += 0x8000) text += String.fromCharCode(...bytes.subarray(at, at + 0x8000))
+    return btoa(text)
+  }
+  return {
+    saveBegin: async (name: string): Promise<string | null> => (await app.saveBegin({ name })).id,
+    saveWrite: (id: string, data: Uint8Array) => app.saveWrite({ id, data: base64(data) }),
+    saveEnd: (id: string) => app.saveEnd({ id }),
+    saveAbort: (id: string) => app.saveAbort({ id }),
+  }
+}
+
+/**
+ * In the iPhone app: hands a file to the phone's share sheet, from which it can be sent in Messages or Mail, given to
+ * another app, or saved (Save Image for a picture). A page's own downloads go nowhere on an iPhone. False anywhere
+ * else, where the caller saves it its usual way.
+ */
+export async function shareOnPhone(blob: Blob, name: string): Promise<boolean> {
+  if (!isNativeApp() || nativePlatform() !== 'ios') return false
+  const app = nativeApp()
+  if (!app.share) return false
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  let text = ''
+  for (let at = 0; at < bytes.length; at += 0x8000) text += String.fromCharCode(...bytes.subarray(at, at + 0x8000))
+  await app.share({ name, mimeType: blob.type || 'application/octet-stream', data: btoa(text) })
+  return true
+}
+
+/** Whether saving here goes through the phone's share sheet (the iPhone app), so a button can say "Share or save". */
+export const sharesOnPhone = () => isNativeApp() && nativePlatform() === 'ios'

@@ -272,8 +272,8 @@ export class VoiceHub {
 
   /**
    * After the connection dropped and came back: takes back the place in voice this app had, if the server kept it
-   * for us (it does where the channel's sound goes through a stream server, for a few seconds). Nothing about the call
-   * stops: the sound never went through this connection. The people in the channel are brought up to date with
+   * for us (it does where the channel's sound goes through a stream server, for a few seconds, and for a phone app
+   * in the background for as long as the phone checks in). Nothing about the call stops: the sound never went through this connection. The people in the channel are brought up to date with
    * whatever changed meanwhile. False if the place was not kept (or the server does not keep places): the app then
    * joins again as it always did.
    */

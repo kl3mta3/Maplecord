@@ -201,8 +201,8 @@ export class Api {
 
   privacy() { return this.request<PrivacyDto>('GET', '/api/me/privacy') }
   preferences() { return this.request<PreferencesDto>('GET', '/api/me/preferences') }
-  /** The phone this app runs on, to be told of messages while the app is closed (the iPhone app; see native/app.ts). */
-  pushDevice(body: { platform: 'ios'; token: string; voipToken?: string | null; sandbox: boolean; choices: PushChoices }) { return this.request<void>('PUT', '/api/me/push-devices', body) }
+  /** The phone this app runs on, to be told of messages while the app is closed (the iPhone or Android app; see native/app.ts). */
+  pushDevice(body: { platform: 'ios' | 'android'; token: string; voipToken?: string | null; sandbox: boolean; choices: PushChoices }) { return this.request<void>('PUT', '/api/me/push-devices', body) }
   forgetPushDevice(token: string) { return this.request<void>('DELETE', `/api/me/push-devices/${encodeURIComponent(token)}`) }
   setPreferences(p: PreferencesDto) { return this.request<PreferencesDto>('PUT', '/api/me/preferences', p) }
   blocks() { return this.request<UserDto[]>('GET', '/api/blocks') }
