@@ -13,6 +13,9 @@ const RPS_NAME: Record<number, string> = { [RpsChoice.Rock]: 'Rock', [RpsChoice.
 const GAME_RESULTS: ReadonlySet<number> = new Set([MessageKind.Roll, MessageKind.Dice, MessageKind.CoinFlip, MessageKind.Rps])
 
 /** Built-in commands handled by the client; they show up in the "/" list next to bot commands. */
+/** How many messages of a conversation are drawn at once, and how many more at a time on scrolling (see `win`). */
+const DRAW_MESSAGES = 100
+const DRAW_STEP = 40
 const BUILTIN_COMMANDS = [
   { name: 'roll', description: 'Start a roll for everyone (optional range, e.g. /roll 1-20)' },
   { name: 'need', description: 'Start a need / greed roll (optional range)' },
@@ -1275,14 +1278,103 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
   const noParty = 'Join a voice channel first: rolls go to the people in voice with you'
   const me = store.me()
 
-  // A conversation is read from its newest message, at the bottom; a list of posts from the top; and a message that
-  // was jumped to is brought into the middle of the screen.
-  const marked = store.highlight
-  useEffect(() => {
+  // Only part of a long conversation is drawn: about DRAW_MESSAGES around where it is being read, moved along as it
+  // is scrolled. Drawing all of it made every keypress redraw every message (measured: 0.9 s a key at 3,000).
+  // `win` is the first and last message drawn; null is the newest DRAW_MESSAGES, following what is said.
+  const [win, setWin] = useState<{ from: string; to: string | null } | null>(null)
+  const drawFrom = win ? Math.max(0, shown.findIndex(m => m.id === win.from)) : Math.max(0, shown.length - DRAW_MESSAGES)
+  const drawTo = win?.to ? shown.findIndex(m => m.id === win.to) + 1 || shown.length : shown.length
+  const drawn = shown.slice(drawFrom, Math.max(drawFrom, drawTo))
+  /** Read at the newest message: what is said stays in view. */
+  const atEnd = useRef(true)
+  /** A message on screen and where it was, so that it stays there when messages above it come or go. With `first`,
+   *  kept until older messages asked for have arrived (`first`, the first message before, is no longer first). */
+  const place = useRef<{ id: string; top: number; first?: string } | null>(null)
+  const keepPlace = (first?: string) => {
     const el = listRef.current
-    if (el && !marked) el.scrollTop = postsList ? 0 : el.scrollHeight
+    if (!el) return
+    const top = el.getBoundingClientRect().top
+    for (const node of el.querySelectorAll<HTMLElement>('.message[data-mid]')) {
+      const r = node.getBoundingClientRect()
+      if (r.bottom > top) { place.current = { id: node.dataset.mid!, top: r.top, first }; return }
+    }
+  }
+  useLayoutEffect(() => {
+    const p = place.current
+    const el = listRef.current
+    if (!p || !el || (p.first !== undefined && shown[0]?.id === p.first)) return
+    place.current = null
+    const node = el.querySelector<HTMLElement>(`[data-mid="${CSS.escape(p.id)}"]`)
+    if (node) el.scrollTop += node.getBoundingClientRect().top - p.top
+  })
+  const setAtEnd = (now: boolean) => {
+    if (now === atEnd.current) return
+    atEnd.current = now
+    // In a thread the channel underneath is not being read, so it may let go of its oldest messages.
+    store.setFollowing(now || !!thread)
+    // At the end again, the newest are drawn; scrolled away from it, what is drawn stays put as more is said.
+    if (now) setWin(null)
+    else setWin(w => w ?? (shown[drawFrom] ? { from: shown[drawFrom].id, to: null } : null))
+  }
+  /** Older messages are on their way; or, as `stuck`, were asked for before this first one and none came (an error,
+   *  or nothing more): not asked for again by scrolling, only with the button. */
+  const loadingOlder = useRef(false)
+  const stuck = useRef<string | null>(null)
+  const loadOlder = (byHand: boolean) => {
+    const first = shown[0]?.id
+    if (!first || loadingOlder.current || (!byHand && stuck.current === first)) return
+    loadingOlder.current = true
+    keepPlace(first)
+    void (thread ? store.loadOlderThread() : store.loadOlder()).finally(() => {
+      loadingOlder.current = false
+      stuck.current = first
+      // Nothing came: the place is not waited on any more.
+      window.setTimeout(() => { if (place.current?.first === first) place.current = null }, 0)
+    })
+  }
+  /** Near either end of what is drawn, more is drawn on that side and as much let go of on the other. At the top of
+   *  what is kept, the page before it is fetched; not in a P2P channel, where running out means asking the people
+   *  connected (and saying so when nobody is), which is left to the button. */
+  const drawMore = () => {
+    const el = listRef.current
+    if (!el || postsList || mediaOnly) return
+    const below = el.scrollHeight - el.scrollTop - el.clientHeight
+    if (el.scrollTop < 400 && drawFrom > 0) {
+      const from = Math.max(0, drawFrom - DRAW_STEP), to = Math.min(drawTo, from + DRAW_MESSAGES + DRAW_STEP)
+      keepPlace()
+      atEnd.current = false
+      store.setFollowing(!!thread)
+      setWin({ from: shown[from]!.id, to: to >= shown.length ? null : shown[to - 1]!.id })
+    } else if (el.scrollTop < 400 && drawFrom === 0 && !p2pChat && (thread ? thread.canLoadOlder : store.canLoadOlder)) {
+      loadOlder(false)
+    } else if (below < 400 && drawTo < shown.length) {
+      const to = Math.min(shown.length, drawTo + DRAW_STEP), from = Math.max(drawFrom, to - DRAW_MESSAGES - DRAW_STEP)
+      keepPlace()
+      setWin({ from: shown[from]!.id, to: to >= shown.length ? null : shown[to - 1]!.id })
+    } else if (below < 40 && store.viewingPast && !thread && !p2pChat) {
+      void store.loadNewer()
+    } else setAtEnd(below < 40 && drawTo >= shown.length && !store.viewingPast)
+  }
+  // Checked after every change as well as on scrolling: older messages that arrived while at the top are drawn at once.
+  useEffect(() => { drawMore() }) // eslint-disable-line react-hooks/exhaustive-deps -- after every change, on purpose
+
+  // A conversation is opened at its newest message, at the bottom; a list of posts at the top.
+  useLayoutEffect(() => {
+    setWin(null); place.current = null; atEnd.current = true; store.setFollowing(true)
+    const el = listRef.current
+    if (el) el.scrollTop = postsList ? 0 : el.scrollHeight
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- when what is open changes
+  }, [store.selectedChannel?.id, thread?.root.id, p2pRoot?.id, postsList])
+  // Read at the newest message, what is said stays in view. Further back the place is kept (above), and a message
+  // that was jumped to is brought into the middle of the screen (below).
+  const marked = store.highlight
+  /** The mark that has been brought into view: once, so that scrolling on from it is not undone. */
+  const markShown = useRef<string | null>(null)
+  useLayoutEffect(() => {
+    const el = listRef.current
+    if (el && !marked && !postsList && atEnd.current) el.scrollTop = el.scrollHeight
     // eslint-disable-next-line react-hooks/exhaustive-deps -- a mark fading must not send the list back to its end
-  }, [shown.length, store.selectedChannel?.id, thread?.root.id, p2pRoot?.id, postsList])
+  }, [shown.length, drawn.length])
   // The message box grows with what is in it: a line for each line typed or wrapped, up to a share of the window
   // (set in index.css), after which it scrolls. Someone reading the newest messages stays at the newest messages.
   const boxRef = useRef<HTMLTextAreaElement>(null)
@@ -1306,12 +1398,27 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
     return () => watch.disconnect()
   }, [fitBox, store.selectedChannel?.id, thread?.root.id, p2pRoot?.id])
   useEffect(() => {
-    if (!marked) return
-    listRef.current?.querySelector(`[data-mid="${marked}"]`)?.scrollIntoView({ block: 'center' })
+    if (!marked || markShown.current === marked) return
+    // Drawn around it first, if it is not.
+    const at = shown.findIndex(m => m.id === marked)
+    if (at >= 0 && (at < drawFrom || at >= drawTo)) {
+      const from = Math.max(0, at - DRAW_MESSAGES / 2), to = Math.min(shown.length, at + DRAW_MESSAGES / 2)
+      atEnd.current = false
+      setWin({ from: shown[from]!.id, to: to >= shown.length ? null : shown[to - 1]!.id })
+      return
+    }
+    const node = listRef.current?.querySelector(`[data-mid="${marked}"]`)
+    if (!node) return
+    node.scrollIntoView({ block: 'center' })
+    markShown.current = marked
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- when the mark changes, or the list it is in arrives
+  }, [marked, shown.length, drawFrom, drawTo])
+  useEffect(() => {
+    if (!marked) { markShown.current = null; return }
     const fade = window.setTimeout(() => store.setHighlight(null), 3000)
     return () => window.clearTimeout(fade)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- when the mark changes, or the list it is in arrives
-  }, [marked, shown.length])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once for each mark
+  }, [marked])
 
   const suggestions = useMemo(() => {
     if (!text.startsWith('/')) return []
@@ -1538,7 +1645,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
             <span className="muted"> · {(p2pRoot.threadCount ?? 0) === 0 ? 'nothing said about it yet' : `${p2pRoot.threadCount} ${p2pRoot.threadCount === 1 ? 'reply' : 'replies'}`}</span></span>
         </div>
       )}
-      <div className={'messages' + (postsList || mediaOnly ? ' posts' : '')} ref={listRef}>
+      <div className={'messages' + (postsList || mediaOnly ? ' posts' : '')} ref={listRef} onScroll={drawMore}>
         {mediaOnly ? (
           <MediaGrid items={mediaShown} more={media.more} busy={media.busy} nameOf={item => nameIn(item.authorId, item.authorName)} onOpen={openMedia} onMore={moreMedia}
             picture={item => (channel && item.p2pFile ? <P2PTile store={store} channelId={channel.id} authorId={item.authorId} file={item.p2pFile} /> : null)} />
@@ -1554,8 +1661,8 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
           </>
         ) : (
           <>
-        {(thread ? thread.canLoadOlder : store.canLoadOlder) && <div style={{ textAlign: 'center' }}><button className="subtle" onClick={thread ? store.loadOlderThread : store.loadOlder}>Load older messages</button></div>}
-        {shown.map(m => isIgnored(m.authorId) && !m.webhookId && !revealed.has(m.id)
+        {drawFrom === 0 && (thread ? thread.canLoadOlder : store.canLoadOlder) && <div style={{ textAlign: 'center' }}><button className="subtle" onClick={() => loadOlder(true)}>Load older messages</button></div>}
+        {drawn.map(m => isIgnored(m.authorId) && !m.webhookId && !revealed.has(m.id)
           ? <div key={m.id} className="message ignored"><span /><span className="muted">Message from {m.authorName}, who you ignore · <button className="subtle" onClick={() => setRevealed(new Set([...revealed, m.id]))}>show</button></span></div>
           : <Message key={m.id} m={m} extras={extrasFor(m)} color={colorOf(m.authorId)} icon={store.itemIcon(m.roll?.item)} serverUrl={store.settings.serverUrl} onEvent={id => void store.openEvent(id)} onInvite={link => void store.openInvite(link)} onPress={id => void store.pressButton(m.id, id)} onChoose={(selectId, values) => void store.chooseOption(m.id, selectId, values)}
               fileOffer={m.fileOffer ? <FileOfferView store={store} offer={m.fileOffer} mine={m.authorId === (me?.id ?? '')} /> : undefined}

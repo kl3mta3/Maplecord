@@ -45,6 +45,11 @@ import {
 /** A DM rendered as a channel so chat, rolls and the overlay treat it like any other. */
 const dmChannel = (dm: DmChannelDto): ChannelDto => ({ id: dm.channelId, guildId: null, parentId: null, name: dm.other.displayName || dm.other.username, type: ChannelType.DirectMessage, position: 0 })
 const EMPTY_FRIENDS: FriendsDto = { friends: [], incoming: [], outgoing: [] }
+/** At most this many messages of the open channel are kept in memory; the rest is fetched again on scrolling back to it.
+ *  Not for a P2P channel (what this device kept is read from it, and a thread's messages are among the channel's) or a
+ *  list of posts. Trimmed a batch at a time, not on every message. */
+export const KEEP_MESSAGES = 400
+const KEEP_SLACK = 50
 /** Whose remembered file offers are whose: one account on one server. */
 /**
  * Where one account's copy of a P2P channel is kept on this device. Another account that signs in here, and can open
@@ -446,6 +451,10 @@ export function useMaplecord() {
   const [viewingPast, setViewingPast] = useState(false)
   const viewingPastRef = useRef(false)
   viewingPastRef.current = viewingPast
+  /** The open channel is being read at its newest message (the chat says so as it is scrolled). Only then are the
+   *  oldest messages let go of, so that nothing is taken away from under someone reading further back. */
+  const [following, setFollowing] = useState(true)
+  const loadingNewer = useRef(false)
   /** The message to bring into view and mark, after jumping to it. */
   const [highlight, setHighlight] = useState<string | null>(null)
   /** The last thing heard about a calendar channel's events, for whichever calendar is on screen to take in. */
@@ -1310,7 +1319,7 @@ export function useMaplecord() {
 
   // Load history + active roll + commands when the channel changes.
   useEffect(() => {
-    setMessages([]); setTyping(null); setCanLoadOlder(false); setThread(null); setP2pPost(null); setViewingPast(false); setHighlight(null)
+    setMessages([]); setTyping(null); setCanLoadOlder(false); setThread(null); setP2pPost(null); setViewingPast(false); setHighlight(null); setFollowing(true)
     if (!selectedChannelId) return
     let cancelled = false
     ;(async () => {
@@ -1352,7 +1361,7 @@ export function useMaplecord() {
   // in place. Nothing shown is cleared, and a P2P channel is left alone: the server has none of it, and the apps of
   // the people there fill each other in.
   useEffect(() => {
-    if (hubEpoch === 0) return
+    if (hubEpoch === 0 || viewingPastRef.current) return
     const channelId = selected.current.channel
     const reading = channelId ? findChannel(channelId) : null
     if (!channelId || (reading?.guild && reading.channel.directSince) || reading?.channel.type === ChannelType.Calendar) return
@@ -1371,6 +1380,15 @@ export function useMaplecord() {
     }).catch(() => { /* what is on screen stays */ })
     return () => { cancelled = true }
   }, [api, hubEpoch])
+
+  // A long conversation read at its newest message keeps only its newest KEEP_MESSAGES (see there).
+  useEffect(() => {
+    if (!following || viewingPast || messages.length <= KEEP_MESSAGES + KEEP_SLACK) return
+    const reading = findChannel(selected.current.channel ?? '')
+    if (!reading || (reading.guild && reading.channel.directSince) || isPostsChannel(reading.channel)) return
+    setMessages(ms => ms.slice(-KEEP_MESSAGES))
+    setCanLoadOlder(true)
+  }, [following, viewingPast, messages.length])
 
   useEffect(() => {
     if (!selectedGuildId) { setCommands([]); return }
@@ -1774,8 +1792,43 @@ export function useMaplecord() {
       })
       return
     }
-    await run(async () => { const page = await api.messages(channelId, oldest.id); setMessages(ms => [...page.slice().reverse(), ...ms]); setCanLoadOlder(page.length >= 50) })
+    await run(async () => {
+      const page = await api.messages(channelId, oldest.id)
+      if (selected.current.channel !== channelId) return
+      // Far enough back, the newest ones are let go of (see KEEP_MESSAGES): this is then a page of the past, and
+      // scrolling down fetches what comes after it again (loadNewer).
+      setMessages(ms => { const all = [...page.slice().reverse(), ...ms]; return all.length > KEEP_MESSAGES ? all.slice(0, KEEP_MESSAGES) : all })
+      if (messages.length + page.length > KEEP_MESSAGES) setViewingPast(true)
+      setCanLoadOlder(page.length >= 50)
+    })
   }, [api, messages, p2pEngine])
+
+  /** On a page of the past, scrolled to its end: what was said after it, a page at a time, until now is reached. */
+  const loadNewer = useCallback(async () => {
+    const channelId = selected.current.channel
+    const newest = messages.at(-1)
+    if (!channelId || !newest || !viewingPastRef.current || loadingNewer.current) return
+    loadingNewer.current = true
+    try {
+      await run(async () => {
+        const page = (await api.messages(channelId, undefined, 50, { after: newest.id })).slice().reverse()
+        if (selected.current.channel !== channelId) return
+        const merge = (more: MessageDto[]) => setMessages(ms => {
+          const have = new Set(ms.map(m => m.id))
+          const all = [...ms, ...more.filter(m => !have.has(m.id))]
+          return all.length > KEEP_MESSAGES ? all.slice(-KEEP_MESSAGES) : all
+        })
+        merge(page)
+        if (messages.length + page.length > KEEP_MESSAGES) setCanLoadOlder(true)
+        if (page.length >= 50) return
+        // Now is reached: what is said from here on is added below again, and anything said while that page was on
+        // its way is fetched once more.
+        viewingPastRef.current = false
+        setViewingPast(false)
+        merge((await api.messages(channelId)).slice().reverse())
+      })
+    } finally { loadingNewer.current = false }
+  }, [api, messages])
 
   // ---- What a message can have: a thread, an edit, reactions, a pin, a poll; and finding one ----
 
@@ -3463,7 +3516,7 @@ export function useMaplecord() {
     answerCommunityPoll: async (answers: CommunityPollAnswerDto[]) => { if (communityPoll) setCommunityPoll(await api.answerPoll(communityPoll.id, answers)) },
     declineCommunityPoll: async () => { if (communityPoll) { setCommunityPoll(await api.declinePoll(communityPoll.id).catch(() => communityPoll)); setCommunityPollShown(false) } },
     thread, viewingPast, highlight, setHighlight, openThread, closeThread, loadOlderThread, createPost, editMessage, react, reactToPicture, calendarChange, invitations, calendarTarget, openEvent, eventLink, pinMessage, votePoll, closePoll,
-    reactionChoices, loadPins, searchMessages, jumpTo, backToPresent,
+    reactionChoices, loadPins, searchMessages, jumpTo, backToPresent, loadNewer, setFollowing,
     pendingFriendLink, openFriendLink, acceptFriendLink, dismissFriendLink, loadFriendLink, resetFriendLink,
     connectionsEpoch, loadConnections, startConnection, setConnectionShown, removeConnection,
     loadSignIn, startSignInMethod, removeSignInMethod, setContactEmail, clearContactEmail,
