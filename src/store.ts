@@ -38,7 +38,7 @@ import {
   ChannelType, MessageKind, RollChoice, RollKind, UserStatus, type PreferencesDto, type TransferSettingsDto,
   type ChannelDto, type CommandDto, type GuildSummaryDto, type MemberDto, type MessageDto, type RollItemDto, type RollResultDto, type RollSessionDto,
   type VoiceParticipantDto, type RpsSessionDto, type RpsResultDto, RpsChoice, type FriendsDto, type DmChannelDto, type RoleDto,
-  type DecorationDto, type QrDto, type UpdateProfileRequest, type UserDto, type UserProfileDto, type SystemMessageDto, type SignInMethodsDto, type ContactEmailDto, type ConnectionDto, type ConnectionServiceDto, type FriendLinkDto, type MediaItem, type SearchResultDto, type NewPollDto, isPostsChannel, type RollStatsDto, type FileOfferDto, type TokenResponse, type StreamSettingsDto,
+  type DecorationDto, type QrDto, type UpdateProfileRequest, type UserDto, type UserProfileDto, type SystemMessageDto, type MarkedFileDto, type SignInMethodsDto, type ContactEmailDto, type ConnectionDto, type ConnectionServiceDto, type FriendLinkDto, type MediaItem, type SearchResultDto, type NewPollDto, isPostsChannel, type RollStatsDto, type FileOfferDto, type TokenResponse, type StreamSettingsDto,
   type SfuPassDto, type InviteDto, type CalendarEventDto, EventAnswer,
 } from './types'
 
@@ -440,7 +440,8 @@ export function useMaplecord() {
   const [messages, setMessages] = useState<MessageDto[]>([])
   const [canLoadOlder, setCanLoadOlder] = useState(false)
   /** The thread being read, if one is open: the message it hangs off, and what was said in it, oldest first. */
-  const [thread, setThread] = useState<{ root: MessageDto; messages: MessageDto[]; canLoadOlder: boolean } | null>(null)
+  /** past: scrolled back far enough that its newest replies were let go (see KEEP_MESSAGES); new ones are not added below. */
+  const [thread, setThread] = useState<{ root: MessageDto; messages: MessageDto[]; canLoadOlder: boolean; past?: boolean } | null>(null)
   const threadRef = useRef<string | null>(null)
   threadRef.current = thread?.root.id ?? null
   /** The post that is open in a P2P gallery, or the message whose thread is open in a P2P text channel. Its messages are among the channel's own, so only which one is kept. */
@@ -454,6 +455,8 @@ export function useMaplecord() {
   /** The open channel is being read at its newest message (the chat says so as it is scrolled). Only then are the
    *  oldest messages let go of, so that nothing is taken away from under someone reading further back. */
   const [following, setFollowing] = useState(true)
+  /** The same for the open thread: read at its newest reply. */
+  const [threadFollowing, setThreadFollowing] = useState(true)
   const loadingNewer = useRef(false)
   /** The message to bring into view and mark, after jumping to it. */
   const [highlight, setHighlight] = useState<string | null>(null)
@@ -491,6 +494,9 @@ export function useMaplecord() {
   const [queueAhead, setQueueAhead] = useState<number | null>(null)
   /** Messages from the server's admin, shown until dismissed. */
   const [systemMessages, setSystemMessages] = useState<SystemMessageDto[]>([])
+  /** Files of mine marked to be removed for going unopened: shown as a notice until opened, or put away for now. */
+  const [markedFiles, setMarkedFiles] = useState<MarkedFileDto[]>([])
+  const dropMarkedFile = useCallback((id: string) => setMarkedFiles(list => list.filter(f => f.attachment.id !== id)), [])
   /** signOut is defined further down; the connection's status handler needs to reach it. */
   const signOutRef = useRef<() => Promise<void>>(async () => {})
   /**
@@ -865,7 +871,7 @@ export function useMaplecord() {
         // A thread goes with the message it hangs off.
         setThread(t => (!t ? t : t.root.id === messageId ? null : { ...t, messages: t.messages.filter(x => x.id !== messageId) }))
       },
-      ThreadMessage: m => { if (threadRef.current === m.threadId) setThread(t => (t && !t.messages.some(x => x.id === m.id) ? { ...t, messages: [...t.messages, m] } : t)) },
+      ThreadMessage: m => { if (threadRef.current === m.threadId) setThread(t => (t && !t.past && !t.messages.some(x => x.id === m.id) ? { ...t, messages: [...t.messages, m] } : t)) },
       ThreadChanged: (_channelId, rootId, count, lastAt) => patchMessage(rootId, m => ({ ...m, threadCount: count, threadLastAt: lastAt })),
       MessageEdited: (_channelId, messageId, content, title, editedAt) => patchMessage(messageId, m => ({ ...m, content, title: title ?? m.title, editedAt })),
       MessagePinned: (_channelId, messageId, pinnedAt) => patchMessage(messageId, m => ({ ...m, pinnedAt })),
@@ -998,7 +1004,11 @@ export function useMaplecord() {
       },
       FileOfferResumed: (_channelId, offerId) => setMessages(ms => ms.map(m => (m.fileOffer?.id === offerId ? { ...m, fileOffer: { ...m.fileOffer, available: true } } : m))),
       ConnectionsChanged: () => setConnectionsEpoch(n => n + 1),
-      SystemMessage: m => { if (!closedSystemMessages.current.has(m.id)) setSystemMessages(list => [...list.filter(x => x.id !== m.id), m].slice(-4)) },
+      SystemMessage: m => {
+        if (!closedSystemMessages.current.has(m.id)) setSystemMessages(list => [...list.filter(x => x.id !== m.id), m].slice(-4))
+        // It may be about files of mine to be removed: the list is asked for again.
+        void api.markedFiles().then(setMarkedFiles)
+      },
     })
 
     // The server knows voice membership per connection. After a reconnect (network blip, server restart) it has forgotten
@@ -1171,7 +1181,8 @@ export function useMaplecord() {
     void api.preferences().then(applyPreferences).catch(() => { /* shown as online */ })
     void api.blocks().then(setBlockedList).catch(() => { /* none shown */ })
     void api.transferSettings().then(setTransferLimits).catch(() => { /* the tooltip says less */ })
-    void api.uploadSettings().then(rules => { p2pRelayedLimit.current = rules.maxBytes }).catch(() => { /* the usual limit is assumed */ })
+    void api.uploadSettings().then(rules => { p2pRelayedLimit.current = rules.maxBytes ?? Infinity }).catch(() => { /* the usual limit is assumed */ })
+    void api.markedFiles().then(setMarkedFiles)
     const self = settingsRef.current.user
     if (self) void api.profile(self.id).then(p => setOwnLook({ accentColor: p.accentColor, bannerUrl: p.bannerUrl })).catch(() => { /* plain background */ })
     setDndUsers(new Set([
@@ -1380,6 +1391,12 @@ export function useMaplecord() {
     }).catch(() => { /* what is on screen stays */ })
     return () => { cancelled = true }
   }, [api, hubEpoch])
+
+  // A long thread read at its newest reply keeps only its newest KEEP_MESSAGES too.
+  useEffect(() => {
+    if (!thread || thread.past || !threadFollowing || thread.messages.length <= KEEP_MESSAGES + KEEP_SLACK) return
+    setThread(t => (t ? { ...t, messages: t.messages.slice(-KEEP_MESSAGES), canLoadOlder: true } : t))
+  }, [thread, threadFollowing])
 
   // A long conversation read at its newest message keeps only its newest KEEP_MESSAGES (see there).
   useEffect(() => {
@@ -1669,7 +1686,7 @@ export function useMaplecord() {
       // Ask first, so a file that is too big is refused before it is uploaded rather than after.
       const rules = await api.uploadSettings().catch(() => null)
       if (rules && !rules.enabled) throw new Error('Uploads are turned off on this server right now.')
-      if (rules && file.size > rules.maxBytes) {
+      if (rules && rules.maxBytes != null && file.size > rules.maxBytes) {
         // Too big to keep on the server, but it can still go straight to whoever is online.
         const direct = await api.transferSettings().catch(() => null)
         if (direct?.enabled) {
@@ -1706,7 +1723,7 @@ export function useMaplecord() {
     const publicPlace = inPublicServer(channelId)
     for (const file of files.slice(0, Math.max(0, room))) {
       // Too big to keep on the server: offered straight from this computer instead, or refused, as before.
-      if (rules && file.size > rules.maxBytes) { await sendFile(file); continue }
+      if (rules && rules.maxBytes != null && file.size > rules.maxBytes) { await sendFile(file); continue }
       const key = crypto.randomUUID()
       const shown = file.type.startsWith('image/') || file.type.startsWith('video/') ? URL.createObjectURL(file) : null
       const checking = publicPlace && file.type.startsWith('image/')
@@ -1847,7 +1864,12 @@ export function useMaplecord() {
     if (!open || open.messages.length === 0) return
     await run(async () => {
       const page = await api.messages(open.root.channelId, open.messages[0]!.id, 50, { thread: open.root.id })
-      setThread(t => (t?.root.id === open.root.id ? { ...t, messages: [...page.slice().reverse(), ...t.messages], canLoadOlder: page.length >= 50 } : t))
+      // Far enough back, the newest replies are let go: a page of the past, as in the channel (openThread is "back to the latest").
+      setThread(t => {
+        if (t?.root.id !== open.root.id) return t
+        const all = [...page.slice().reverse(), ...t.messages]
+        return all.length > KEEP_MESSAGES ? { ...t, messages: all.slice(0, KEEP_MESSAGES), canLoadOlder: page.length >= 50, past: true } : { ...t, messages: all, canLoadOlder: page.length >= 50 }
+      })
     })
   }, [api, thread])
 
@@ -3504,7 +3526,7 @@ export function useMaplecord() {
   }, [activeRoll, activeRps, dms, guilds, home, itemIcon, partyChannel, partyLabel, pendingDrops, ready, selectedDm, selectedGuild, settings.overlayEnabled, voiceChannelId])
 
   return {
-    api, hub, settings, updateSettings, ready, status, error, setError, systemMessages, dismissSystemMessage,
+    api, hub, settings, updateSettings, ready, status, error, setError, systemMessages, dismissSystemMessage, markedFiles, dropMarkedFile,
     guilds, selectedGuild, selectedChannel, selectedDm, home, friends, dms, dmUnread, messages, canLoadOlder, activeRoll, typing, commands, stats, setGuildCountRolls, setGuildWelcome,
     communityPoll, communityPollShown,
     /** Opens the newest poll from the link in settings, read afresh first. */
@@ -3513,7 +3535,7 @@ export function useMaplecord() {
     answerCommunityPoll: async (answers: CommunityPollAnswerDto[]) => { if (communityPoll) setCommunityPoll(await api.answerPoll(communityPoll.id, answers)) },
     declineCommunityPoll: async () => { if (communityPoll) { setCommunityPoll(await api.declinePoll(communityPoll.id).catch(() => communityPoll)); setCommunityPollShown(false) } },
     thread, viewingPast, highlight, setHighlight, openThread, closeThread, loadOlderThread, createPost, editMessage, react, reactToPicture, calendarChange, invitations, calendarTarget, openEvent, eventLink, pinMessage, votePoll, closePoll,
-    loadPins, searchMessages, jumpTo, backToPresent, loadNewer, setFollowing,
+    loadPins, searchMessages, jumpTo, backToPresent, loadNewer, setFollowing, setThreadFollowing,
     pendingFriendLink, openFriendLink, acceptFriendLink, dismissFriendLink, loadFriendLink, resetFriendLink,
     connectionsEpoch, loadConnections, startConnection, setConnectionShown, removeConnection,
     loadSignIn, startSignInMethod, removeSignInMethod, setContactEmail, clearContactEmail,

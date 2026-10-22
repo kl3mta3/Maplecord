@@ -1,5 +1,5 @@
 import type {
-  AccountDeletionDto, MemberPageDto, ConnectionTestDto, ConnectionTestPassDto, TestRelayDto, CommunityPollDto, CommunityPollAnswerDto, CalendarEventDto, ApplicationDto, CommandRuleDto, CommandRulesDto, QrDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, NewServerKinds, SupportReportDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto, RollStatsDto, SearchResultDto, MediaItemDto, SignInMethodsDto, ContactEmailDto, ConnectionDto, ConnectionServiceDto, FriendLinkDto, FriendLinkOwnerDto, UsableExpressionsDto, GuildExpressionsDto, ExpressionLibraryDto, ExpressionDto, ExpressionGroupDto, PushChoices } from './types'
+  AccountDeletionDto, MemberPageDto, ConnectionTestDto, ConnectionTestPassDto, TestRelayDto, CommunityPollDto, CommunityPollAnswerDto, CalendarEventDto, ApplicationDto, CommandRuleDto, CommandRulesDto, QrDto, AttachmentDto, ChannelBotDto, ChannelOverrideDto, DiscoverGuildDto, NewServerKinds, SupportReportDto, InvitePreviewDto, WebhookDto, UploadSettingsDto, MarkedFileDto, TransferSettingsDto, StreamSettingsDto, PrivacyDto, PreferencesDto, ItemIconDto, ChannelDto, ServerMetaDto, MemberDto, DecorationDto, UpdateProfileRequest, UserProfileDto, CommandDto, DmChannelDto, FriendDto, FriendsDto, GuildDto, GuildSummaryDto, IceServerDto, InviteDto, MessageDto, RoleDto, TokenResponse, UserDto, TagCardDto, RollStatsDto, SearchResultDto, MediaItemDto, SignInMethodsDto, ContactEmailDto, ConnectionDto, ConnectionServiceDto, FriendLinkDto, FriendLinkOwnerDto, UsableExpressionsDto, GuildExpressionsDto, ExpressionLibraryDto, ExpressionDto, ExpressionGroupDto, PushChoices } from './types'
 
 /**
  * Asks the terms dialog (see TermsGate) to look again whether there are terms to agree to: sent when the server
@@ -263,8 +263,44 @@ export class Api {
   async upload(channelId: string, file: File) {
     const form = new FormData()
     form.append('file', file, file.name)
+    // A large file is sent in pieces, each small enough for Cloudflare and the server's proxy (see the server's ChunkedUploads).
+    if (file.size > 20 * 1048576) {
+      const rules = await this.uploadSettings().catch(() => null)
+      if (rules?.chunkAbove != null && file.size > rules.chunkAbove) return this.uploadInPieces(channelId, file)
+    }
     return this.request<AttachmentDto>('POST', `/api/channels/${channelId}/attachments`, undefined, form)
   }
+  private async uploadInPieces(channelId: string, file: File) {
+    const started = await this.request<{ id: string; pieceBytes: number }>('POST', `/api/channels/${channelId}/attachments/chunked`, { fileName: file.name, size: file.size, contentType: file.type || null })
+    const address = `${this.serverUrl().replace(/\/$/, '')}/api/uploads/chunked/${started.id}`
+    let offset = 0
+    let failures = 0
+    try {
+      for (;;) {
+        let res: Response | null = null
+        try {
+          const token = this.token()
+          res = await fetch(`${address}?offset=${offset}`, { method: 'PUT', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: file.slice(offset, offset + started.pieceBytes) })
+        } catch { /* the connection dropped: the piece is sent again */ }
+        const data = res ? await res.json().catch(() => null) : null
+        if (res?.status === 201) return data as AttachmentDto
+        if (res?.ok || res?.status === 409) {
+          // Taken, or out of order (an answer was lost): go on from what the server has.
+          if (typeof data?.received === 'number') { offset = data.received; if (res.ok) failures = 0 }
+          if (res.ok) continue
+        }
+        if (res && res.status !== 409 && res.status < 500) throw new ApiError(data?.error ?? res.statusText ?? `HTTP ${res.status}`, res.status)
+        if (++failures > 4) throw new ApiError('The upload kept failing. Check your connection and try again.', res?.status ?? 0)
+        await new Promise(resolve => setTimeout(resolve, 1000 * failures))
+      }
+    } catch (e) {
+      // Given up: what arrived of it is let go of on the server.
+      void this.request('DELETE', `/api/uploads/chunked/${started.id}`).catch(() => { /* cleared within a day anyway */ })
+      throw e
+    }
+  }
+  /** Files of mine marked to be removed for going unopened (see the server's FileRules). Empty from a server too old to say. */
+  markedFiles() { return this.request<{ noticeDays: number; files: MarkedFileDto[] }>('GET', '/api/uploads/marked').then(r => r.files).catch(() => [] as MarkedFileDto[]) }
 
   // ---- server settings ----
   updateGuild(guildId: string, name: string) { return this.request<GuildDto>('PATCH', `/api/guilds/${guildId}`, { name }) }

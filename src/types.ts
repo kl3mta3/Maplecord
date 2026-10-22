@@ -222,7 +222,10 @@ export interface PostedEventDto { eventId: string; calendarId: string; title: st
 export interface FileOfferDto { id: string; fileName: string; size: number; available: boolean; withdrawn?: boolean }
 /** Limits on direct transfers; 0 means no limit. */
 export interface TransferSettingsDto { enabled: boolean; maxRelayedBytes: number; maxDirectBytes: number; relayedKbps: number }
-export interface UploadSettingsDto { maxBytes: number; keepDays: number; enabled: boolean }
+/** maxBytes: this person's own limit (null: none, for an owner of the server). Files over chunkAbove are sent in pieces of pieceBytes (missing from an older server). */
+export interface UploadSettingsDto { maxBytes: number | null; keepDays: number; enabled: boolean; chunkAbove?: number | null; pieceBytes?: number }
+/** A file of mine marked to be removed for going unopened: opening it (by anyone) keeps it. */
+export interface MarkedFileDto { attachment: AttachmentDto; channelId: string; messageId: string; removeAt: string }
 export interface EmbedFieldDto { name: string; value: string; inline: boolean }
 export interface EmbedDto { title: string | null; description: string | null; url: string | null; color: number | null; fields?: EmbedFieldDto[] | null; imageUrl?: string | null; footer?: string | null }
 export interface RollItemDto { pluginId: string | null; itemId: string | null; name: string; iconUrl: string | null; quantity: number }

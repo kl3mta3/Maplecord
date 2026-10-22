@@ -1313,6 +1313,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
     atEnd.current = now
     // In a thread the channel underneath is not being read, so it may let go of its oldest messages.
     store.setFollowing(now || !!thread)
+    if (thread) store.setThreadFollowing(now)
     // At the end again, the newest are drawn; scrolled away from it, what is drawn stays put as more is said.
     if (now) setWin(null)
     else setWin(w => w ?? (shown[drawFrom] ? { from: shown[drawFrom].id, to: null } : null))
@@ -1345,6 +1346,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
       keepPlace()
       atEnd.current = false
       store.setFollowing(!!thread)
+      if (thread) store.setThreadFollowing(false)
       setWin({ from: shown[from]!.id, to: to >= shown.length ? null : shown[to - 1]!.id })
     } else if (el.scrollTop < 400 && drawFrom === 0 && !p2pChat && (thread ? thread.canLoadOlder : store.canLoadOlder)) {
       loadOlder(false)
@@ -1361,7 +1363,7 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
 
   // A conversation is opened at its newest message, at the bottom; a list of posts at the top.
   useLayoutEffect(() => {
-    setWin(null); place.current = null; atEnd.current = true; store.setFollowing(true)
+    setWin(null); place.current = null; atEnd.current = true; store.setFollowing(true); store.setThreadFollowing(true)
     const el = listRef.current
     if (el) el.scrollTop = postsList ? 0 : el.scrollHeight
     // eslint-disable-next-line react-hooks/exhaustive-deps -- when what is open changes
@@ -1838,6 +1840,12 @@ function Chat({ store, openRollDialog, canRoll, colorOf, onUserMenu, isIgnored, 
           <button className="subtle" title="Not now" onClick={() => store.dismissP2pBot(x.channelId, x.userId, true)}>×</button>
         </div>
       ))}
+      {thread?.past && (
+        <div className="p2pbar wide" role="status">
+          <span className="grow">You are looking at older replies. Newer ones are not shown below them.</span>
+          <button className="accent" onClick={() => void store.openThread(thread.root)}>Back to the latest</button>
+        </div>
+      )}
       {kept && store.viewingPast && !thread && (
         <div className="p2pbar wide" role="status">
           <span className="grow">You are looking at older messages. What is being said now is not shown below them.</span>

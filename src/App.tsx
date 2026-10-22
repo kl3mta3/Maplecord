@@ -5,6 +5,7 @@ import Login from './components/Login'
 import Overlay from './components/Overlay'
 import Shell from './components/Shell'
 import InstallHint from './components/InstallHint'
+import MarkedFiles from './components/MarkedFiles'
 import { PENDING_ACCOUNT, PENDING_DELETE, PENDING_DIRECT, useMaplecord } from './store'
 import { hasValidToken } from './settings'
 import { ApiError } from './api'
@@ -27,6 +28,9 @@ function MainApp() {
   const [signedIn, setSignedIn] = useState(false)
   /** Set when the server no longer accepts this build. */
   const [outdated, setOutdated] = useState(false)
+  /** The notice about files of mine to be removed: its list open, or put away until the next start. */
+  const [markedOpen, setMarkedOpen] = useState(false)
+  const [markedLater, setMarkedLater] = useState(false)
 
   // Auto-login with a stored token, and finish a browser-mode OAuth redirect (?code=...).
   useEffect(() => {
@@ -120,8 +124,22 @@ function MainApp() {
   return (
     <>
       <InstallHint store={store} />
-      {store.systemMessages.length > 0 && (
+      {markedOpen && <MarkedFiles store={store} onClose={() => setMarkedOpen(false)} />}
+      {(store.systemMessages.length > 0 || (store.markedFiles.length > 0 && !markedLater)) && (
         <div className="sysmsgs" role="status">
+          {store.markedFiles.length > 0 && !markedLater && (
+            <div className="sysmsg">
+              <div className="grow">
+                <div className="from">Files to be removed</div>
+                <div className="text">
+                  {store.markedFiles.length === 1 ? 'A file you posted has' : `${store.markedFiles.length} files you posted have`} not been opened in a long while
+                  and will be removed from the server. Open {store.markedFiles.length === 1 ? 'it' : 'them'} to keep {store.markedFiles.length === 1 ? 'it' : 'them'}, or save a copy.
+                </div>
+                <div className="row"><button className="accent" onClick={() => setMarkedOpen(true)}>Show {store.markedFiles.length === 1 ? 'it' : 'them'}</button></div>
+              </div>
+              <button className="subtle" aria-label="Later" title="Later" onClick={() => setMarkedLater(true)}>×</button>
+            </div>
+          )}
           {store.systemMessages.map(m => (
             <div className="sysmsg" key={m.id}>
               <div className="grow">
