@@ -1,5 +1,5 @@
 // Run with: node electron/updateRules.test.ts
-import { fileFor, isNewer, trustedUrl, type LatestRelease } from './updateRules.ts'
+import { appImageFor, fileFor, isNewer, trustedUrl, type LatestRelease } from './updateRules.ts'
 
 let failures = 0
 function check(ok: boolean, what: string) {
@@ -38,6 +38,14 @@ check(fileFor({ ...latest, installer: { ...latest.installer!, name: 'Setup.zip' 
   'an installed copy is never handed a zip to run, nor a portable one a program');
 check(fileFor({ ...latest, installer: { ...latest.installer!, sha256: null } }, true) === null && fileFor({ ...latest, installer: { ...latest.installer!, sha256: 'not a digest' } }, true) === null,
   'nor a file whose SHA-256 the release does not state');
+
+// A Linux AppImage takes the release's .AppImage, only with its digest stated, and nothing else.
+{
+  const image = { url: 'https://github.com/a/b/releases/download/0.6.0/Maplecord-0.6.0.AppImage', name: 'Maplecord-0.6.0.AppImage', size: 10, sha256: 'a'.repeat(64) }
+  check(appImageFor({ ...latest, appImage: image })?.name === image.name, 'an AppImage takes the release\'s AppImage')
+  check(appImageFor({ ...latest, appImage: null }) === null && appImageFor(latest) === null && appImageFor({ ...latest, appImage: { ...image, sha256: null } }) === null
+    && appImageFor({ ...latest, appImage: { ...image, name: 'Maplecord.deb' } }) === null, 'without a stated digest, or not an AppImage, there is nothing to take')
+}
 
 console.log(failures === 0 ? '\nALL PASSED' : `\n${failures} FAILED`)
 process.exit(failures === 0 ? 0 : 1)

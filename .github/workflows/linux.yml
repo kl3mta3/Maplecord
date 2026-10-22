@@ -1,0 +1,72 @@
+# The Linux app: an AppImage (one file that runs on most distributions and updates itself) and a .deb (Ubuntu, Debian,
+# Mint), built from this repository as it is on the branch chosen. Run by hand (Actions, "Linux build", Run workflow).
+#
+# Give a release tag (as the Windows files are published, e.g. 0.5.13) and both files are attached to that release,
+# replacing any with the same name; the release must already exist. Without one they are left on the run, to download.
+# The version is version.txt's; give the tag of a release with that version, or the app will not see itself as updated.
+name: Linux build
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Release tag to attach the files to (leave empty to keep them on the run only)
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # The server the app opens on and asks for updates (scripts/need-server.mjs refuses to build without it).
+      VITE_SERVER_URL: https://api.maplecord.app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Icon
+        # build/ is not kept in the repository; the app's own 512px icon is used.
+        run: mkdir -p build && cp public/icon-512.png build/icon.png
+
+      - name: Build
+        run: npm run dist:linux -- --publish never
+
+      - name: Files
+        id: files
+        run: |
+          ls -l release
+          version=$(cat version.txt | tr -d '[:space:]')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: maplecord-linux-${{ steps.files.outputs.version }}
+          path: |
+            release/*.AppImage
+            release/*.deb
+          if-no-files-found: error
+
+      - name: Attach to the release
+        if: ${{ inputs.release != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release }}
+          VERSION: ${{ steps.files.outputs.version }}
+        run: |
+          tag=$(echo "$TAG" | tr -d '[:space:]')
+          if [ "${tag#v}" != "$VERSION" ]; then
+            echo "::warning::The release $tag is not version.txt's $VERSION: apps on Linux will keep seeing themselves as out of date."
+          fi
+          gh release view "$tag" > /dev/null || { echo "::error::There is no release $tag. Publish it first, then run this again."; exit 1; }
+          gh release upload "$tag" release/*.AppImage release/*.deb --clobber

@@ -106,9 +106,30 @@
     },
     "linux": {
       "target": [
-        "AppImage"
+        "AppImage",
+        "deb"
       ],
-      "category": "Network"
+      "category": "Network",
+      "artifactName": "Maplecord-${version}.${ext}",
+      "maintainer": "Maplecord <support@maplecord.app>",
+      "synopsis": "Chat, voice and streaming for your friends",
+      "desktop": {
+        "StartupWMClass": "Maplecord"
+      }
+    },
+    "deb": {
+      "artifactName": "Maplecord-${version}-amd64.${ext}",
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0"
+      ]
     }
   }
 }

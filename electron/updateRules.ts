@@ -2,7 +2,7 @@
 
 export interface ReleaseFile { url: string; name: string; size: number; sha256: string | null }
 /** What a Maplecord server says the newest release is (GET /api/client/latest). */
-export interface LatestRelease { version: string | null; repo: string; installer: ReleaseFile | null; portable: ReleaseFile | null }
+export interface LatestRelease { version: string | null; repo: string; installer: ReleaseFile | null; portable: ReleaseFile | null; appImage?: ReleaseFile | null }
 
 const parts = (version: string) => version.trim().replace(/^v/i, '').split(/[.+-]/).map(p => (/^\d+$/.test(p) ? Number(p) : NaN))
 
@@ -39,6 +39,14 @@ export function trustedUrl(url: string, repo: string, version: string): boolean 
  * not, and only one whose SHA-256 the release states, so that what arrives is checked against it before it is run.
  */
 export function fileFor(latest: LatestRelease, installed: boolean): ReleaseFile | null {
-  const file = installed ? latest.installer : latest.portable
-  return file && file.size > 0 && (installed ? /\.exe$/i : /\.zip$/i).test(file.name) && /^[0-9a-f]{64}$/i.test(file.sha256 ?? '') ? file : null
+  return checked(installed ? latest.installer : latest.portable, installed ? /\.exe$/i : /\.zip$/i)
+}
+
+/** The file a Linux AppImage updates itself with: the release's .AppImage, again only with its SHA-256 stated. */
+export function appImageFor(latest: LatestRelease): ReleaseFile | null {
+  return checked(latest.appImage ?? null, /\.AppImage$/i)
+}
+
+function checked(file: ReleaseFile | null, ending: RegExp): ReleaseFile | null {
+  return file && file.size > 0 && ending.test(file.name) && /^[0-9a-f]{64}$/i.test(file.sha256 ?? '') ? file : null
 }

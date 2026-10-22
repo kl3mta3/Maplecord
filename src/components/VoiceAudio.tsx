@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { Store } from '../store'
 import { DEFAULT_GATE_LEVEL } from '../settings'
 import { listAudioChoices, systemDefaultLabel, watchAudioChoices, type AudioChoice } from '../audioDevices'
-import { isElectron } from '../platform'
+import { bridge, isElectron } from '../platform'
 import { DEFAULT_PUSH_KEY, pushKeyFrom, setChoosingPushKey, type PushKey } from '../pushToTalk'
 import { P2PInfo } from './Dialogs'
 import { P2P_VIDEO_RATES, P2P_VOICE_RATES } from '../stream'
@@ -119,6 +119,7 @@ export function VoiceAudioSettings({ store, onAllowDirect }: {
       <h4>When your microphone is sent</h4>
       <label className="choice"><input type="radio" name="voicemode" checked={!push} onChange={() => store.updateSettings({ voiceMode: 'activity' })} /><span><b>Voice activity</b> <span className="muted">while you are talking</span></span></label>
       <label className="choice"><input type="radio" name="voicemode" checked={push} onChange={() => store.updateSettings({ voiceMode: 'push' })} /><span><b>Push to talk</b> <span className="muted">while you hold a key</span></span></label>
+      {push && bridge()?.wayland && <div className="muted">On Wayland, Linux may only let Maplecord hear your key while Maplecord is the window in front.</div>}
 
       {!push && phone && (
         <>

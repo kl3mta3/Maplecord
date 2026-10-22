@@ -12,6 +12,8 @@ const subscribe = <T,>(channel: string, handler: (payload: T) => void) => {
 contextBridge.exposeInMainWorld('maplecord', {
   isElectron: true,
   platform: process.platform,
+  /** A Linux desktop on Wayland, which lets an app hear keys only while it is in front (see electron/pushKey.ts). */
+  wayland: process.platform === 'linux' && (process.env.XDG_SESSION_TYPE === 'wayland' || !!process.env.WAYLAND_DISPLAY),
   oauthLogin: (serverUrl: string, provider: string): Promise<string> => ipcRenderer.invoke('oauth-login', serverUrl, provider),
   oauthSignIn: (serverUrl: string, provider: string): Promise<{ code?: string; pending?: string; email?: string; error?: string }> => ipcRenderer.invoke('oauth-sign-in', serverUrl, provider),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('open-external', url),

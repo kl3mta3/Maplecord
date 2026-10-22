@@ -64,6 +64,8 @@ export interface ShareSource { id: string; name: string; kind: 'screen' | 'windo
 export interface MaplecordBridge {
   isElectron: true
   platform: string
+  /** A Linux desktop on Wayland. */
+  wayland?: boolean
   oauthLogin(serverUrl: string, provider: string): Promise<string>
   /** Signs in through the system browser: a code to exchange, a ticket to wait with while an email is confirmed, or why it did not go through. */
   oauthSignIn(serverUrl: string, provider: string): Promise<{ code?: string; pending?: string; email?: string; error?: string }>

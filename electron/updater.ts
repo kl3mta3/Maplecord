@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileFor, isNewer, trustedUrl, type LatestRelease, type ReleaseFile } from './updateRules'
+import { appImageFor, fileFor, isNewer, trustedUrl, type LatestRelease, type ReleaseFile } from './updateRules'
 
 /**
  * Updating the desktop app: before its window opens, and when asked to from the window ("Update now", offered when
@@ -20,7 +20,10 @@ import { fileFor, isNewer, trustedUrl, type LatestRelease, type ReleaseFile } fr
  * Anything that goes wrong leaves the app as it was and opens it as usual. A version that was tried and did not
  * take is not tried again for a week, so a bad or mislabelled release cannot trap the app in a loop.
  *
- * Windows only, and only for the built app: a development run never updates.
+ * On Linux, an AppImage downloads the new AppImage beside itself, checks it the same way, puts it in its own place and
+ * starts it. A copy installed from the .deb cannot replace itself: it is told that a newer version is out.
+ *
+ * Windows and Linux, and only for the built app: a development run never updates.
  */
 export interface UpdateNotice { version: string; reason: string }
 
@@ -153,7 +156,8 @@ if ($rest.Count -gt 0) { Start-Process -FilePath (Join-Path $Dir $Exe) -Argument
 }
 
 /** A newer release this copy can put in place by itself. */
-export interface FoundUpdate { version: string; file: ReleaseFile; installed: boolean }
+/** `appImage`: on Linux, the AppImage file this copy runs from, which the new one replaces. */
+export interface FoundUpdate { version: string; file: ReleaseFile; installed: boolean; appImage?: string }
 
 /**
  * Asks the server whether there is something newer, and whether this copy can put it in place by itself: found, a
@@ -171,9 +175,12 @@ async function look(server: string, repo: string, quiet = false): Promise<{ foun
   }
   log(`this is ${current}; the newest release is ${latest.version}`)
 
-  const appDir = path.dirname(process.execPath)
-  const installed = fs.existsSync(path.join(appDir, `Uninstall ${app.getName()}.exe`))
-  const file = fileFor(latest, installed)
+  // On Linux only an AppImage replaces itself; a copy from the .deb is told to fetch the new one.
+  const appImage = process.platform === 'linux' ? process.env.APPIMAGE || null : null
+  if (process.platform === 'linux' && !appImage) { log('installed from a package, which cannot replace itself'); return { found: null, notice: { version: latest.version, reason: 'no file' } } }
+  const appDir = appImage ? path.dirname(appImage) : path.dirname(process.execPath)
+  const installed = !appImage && fs.existsSync(path.join(appDir, `Uninstall ${app.getName()}.exe`))
+  const file = appImage ? appImageFor(latest) : fileFor(latest, installed)
   if (!file || !trustedUrl(file.url, repo, latest.version)) { log('the release has no file this copy can use'); return { found: null, notice: { version: latest.version, reason: 'no file' } } }
 
   // Put in place already, and this is still the old version: either it did not take, or the release is labelled
@@ -195,7 +202,7 @@ async function look(server: string, repo: string, quiet = false): Promise<{ foun
     try { const probe = path.join(appDir, `.update-${process.pid}`); fs.writeFileSync(probe, ''); fs.rmSync(probe) }
     catch { log('this folder cannot be written to'); return { found: null, notice: { version: latest.version, reason: 'folder' } } }
   }
-  return { found: { version: latest.version, file, installed }, notice: null }
+  return { found: { version: latest.version, file, installed, ...(appImage ? { appImage } : {}) }, notice: null }
 }
 
 /**
@@ -203,6 +210,7 @@ async function look(server: string, repo: string, quiet = false): Promise<{ foun
  * the app must now quit and open nothing; false on a dry run. Throws if the download does not arrive whole.
  */
 async function putInPlace(found: FoundUpdate, progress: (fraction: number) => void, installing: () => void): Promise<boolean> {
+  if (found.appImage) return replaceAppImage(found, found.appImage, progress, installing)
   const dir = path.join(app.getPath('temp'), 'maplecord-update')
   fs.rmSync(dir, { recursive: true, force: true })
   fs.mkdirSync(dir, { recursive: true })
@@ -222,7 +230,29 @@ async function putInPlace(found: FoundUpdate, progress: (fraction: number) => vo
   return true
 }
 
-const canUpdate = (server: string) => app.isPackaged && process.platform === 'win32' && !!server
+/**
+ * Linux: the new AppImage is downloaded beside the one running (the same disk, so it can be moved into its place),
+ * checked, made runnable, moved over the old file (the running copy keeps the old one open until it quits), and
+ * started. True when the app must now quit.
+ */
+async function replaceAppImage(found: FoundUpdate, image: string, progress: (fraction: number) => void, installing: () => void): Promise<boolean> {
+  const coming = `${image}.update-${process.pid}`
+  try {
+    await download(found.file, coming, progress)
+    log(`downloaded ${found.file.name} (${found.file.size} bytes${found.file.sha256 ? ', digest checked' : ''})`)
+    fs.writeFileSync(path.join(app.getPath('userData'), 'update.json'), JSON.stringify({ attempted: found.version, at: Date.now() }))
+    installing()
+    if (DRY_RUN) { log(`dry run: would move ${coming} over ${image} and start it`); fs.rmSync(coming, { force: true }); return false }
+    fs.chmodSync(coming, 0o755)
+    fs.renameSync(coming, image)
+  } catch (e) { fs.rmSync(coming, { force: true }); throw e }
+  const args = process.argv.slice(1).filter(a => !a.toLowerCase().startsWith('maplecord://'))
+  await started(spawn(image, args, { detached: true, stdio: 'ignore' }))
+  log('started the new AppImage')
+  return true
+}
+
+const canUpdate = (server: string) => app.isPackaged && (process.platform === 'win32' || process.platform === 'linux') && !!server
 
 /**
  * Checks, and updates if there is something newer. Resolves with `quitting: true` when the app is about to be
@@ -230,7 +260,7 @@ const canUpdate = (server: string) => app.isPackaged && process.platform === 'wi
  * could not be put in place by itself.
  */
 export async function updateAtStartup(options: { server: string; repo: string; logo: string }): Promise<{ quitting: boolean; notice: UpdateNotice | null; done: () => void }> {
-  if (app.isPackaged && process.platform === 'win32' && !options.server) log(`this is ${app.getVersion()}; it was built without a server address, so it cannot look for updates`)
+  if (app.isPackaged && (process.platform === 'win32' || process.platform === 'linux') && !options.server) log(`this is ${app.getVersion()}; it was built without a server address, so it cannot look for updates`)
   if (!canUpdate(options.server)) return { quitting: false, notice: null, done: () => {} }
 
   const screen = splash(options.logo)
