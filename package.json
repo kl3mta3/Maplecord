@@ -4,7 +4,7 @@
   "private": true,
   "license": "GPL-3.0-or-later",
   "author": "Kenny Lasyone",
-  "version": "0.5.13",
+  "version": "0.5.14",
   "description": "Loot rolling, chat and voice for your party",
   "repository": "github:kl3mta3/Maplecord",
   "type": "module",
@@ -112,10 +112,7 @@
       "category": "Network",
       "artifactName": "Maplecord-${version}.${ext}",
       "maintainer": "Maplecord <support@maplecord.app>",
-      "synopsis": "Chat, voice and streaming for your friends",
-      "desktop": {
-        "StartupWMClass": "Maplecord"
-      }
+      "synopsis": "Chat, voice and streaming for your friends"
     },
     "deb": {
       "artifactName": "Maplecord-${version}-amd64.${ext}",
