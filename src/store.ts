@@ -2543,6 +2543,21 @@ export function useMaplecord() {
     return () => window.clearInterval(timer)
   }, [sharing, streamRules])
 
+  // Back in front, or the network back: a chat connection lost for good is made again now (see ChatHub.wake).
+  useEffect(() => {
+    const wake = () => { if (!document.hidden) hub.wake() }
+    document.addEventListener('visibilitychange', wake)
+    window.addEventListener('pageshow', wake)
+    window.addEventListener('online', wake)
+    window.addEventListener('focus', wake)
+    return () => {
+      document.removeEventListener('visibilitychange', wake)
+      window.removeEventListener('pageshow', wake)
+      window.removeEventListener('online', wake)
+      window.removeEventListener('focus', wake)
+    }
+  }, [hub])
+
   // Back in front after being in the background (a phone's browser minimised, mostly): see VoiceEngine.recover.
   useEffect(() => {
     const onBack = () => {

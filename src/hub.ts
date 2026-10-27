@@ -172,16 +172,50 @@ export class ChatHub {
 
   private connecting: Promise<void> | null = null
 
+  // ---- Staying connected --------------------------------------------------------------------------------------------
+  // The library reconnects by itself a few times (straight away, then after 2, 10 and 30 seconds) and then gives up.
+  // A phone's app is paused while it is in the background, and a computer asleep, so those few tries can all be spent
+  // while nothing can get through; the app was then left disconnected until it was started again. Instead, a
+  // connection lost for good is made again from here, a little less often each time (up to every 30 seconds), for
+  // as long as the app wants to be connected: from connect until disconnect.
+  private wanted = false
+  private handlers: Partial<ChatEvents> = {}
+  private retry: ReturnType<typeof setTimeout> | null = null
+  private retries = 0
+
+  private again(now = false) {
+    if (!this.wanted || this.retry || this.connecting || this.connected) return
+    const wait = now ? 0 : Math.min(30_000, 1000 * 2 ** Math.min(this.retries, 5))
+    this.retries++
+    this.retry = setTimeout(() => {
+      this.retry = null
+      if (!this.wanted) return
+      this.connect(this.handlers).then(() => { this.retries = 0 }, () => { this.setStatus('disconnected'); this.again() })
+    }, wait)
+  }
+
+  /** Back in front, or back online: a connection lost for good is tried again now, rather than at its next turn. */
+  wake() {
+    if (!this.wanted || this.connected || this.connecting) return
+    if (this.retry) { clearTimeout(this.retry); this.retry = null }
+    this.retries = 0
+    this.again(true)
+  }
+
   /** Idempotent: a second call while connected (or connecting) reuses the live connection instead of tearing it down. */
   async connect(handlers: Partial<ChatEvents>) {
+    this.wanted = true
+    this.handlers = handlers
     if (this.connecting) return this.connecting
     if (this.conn && this.conn.state !== HubConnectionState.Disconnected) return
-    this.connecting = this.connectCore(handlers).finally(() => { this.connecting = null })
-    return this.connecting
+    const connecting = this.connecting = this.connectCore(handlers).finally(() => { this.connecting = null })
+    // Not reached at all (no network as the app opens, say): tried again in a while, as a lost connection is.
+    connecting.catch(() => { this.setStatus('disconnected'); this.again() })
+    return connecting
   }
 
   private async connectCore(handlers: Partial<ChatEvents>): Promise<void> {
-    await this.disconnect()
+    await this.drop()
     const conn = new HubConnectionBuilder()
       // withCredentials=false: we authenticate with the bearer token, which lets the server use a permissive CORS policy.
       .withUrl(this.serverUrl().replace(/\/$/, '') + '/hubs/chat?app=' + encodeURIComponent(__APP_VERSION__), await hubOptions(this.serverUrl(), { accessTokenFactory: () => this.token() ?? '', withCredentials: false }))
@@ -211,7 +245,7 @@ export class ChatHub {
     conn.onreconnecting(() => { this.ownId = null; this.setStatus('reconnecting'); askAboutTerms() })
     // A connection that came back is a new one to the server, with a new id; it is known before anyone is told we are back.
     conn.onreconnected(() => { forget(); if (this.waiting) return; void connectionIdOf(conn).then(id => { this.ownId = id; this.setStatus('connected') }) })
-    conn.onclose(() => { this.setStatus('disconnected'); askAboutTerms() })
+    conn.onclose(() => { this.setStatus('disconnected'); askAboutTerms(); this.again() })
     this.setStatus('connecting')
     await conn.start()
     // A full server keeps new arrivals in line. Where this app stands is asked first: on a connection that is
@@ -234,7 +268,15 @@ export class ChatHub {
     this.setStatus('connected')
   }
 
+  /** Disconnects for good (signing out, another server): nothing is tried again until connect is asked for. */
   async disconnect() {
+    this.wanted = false
+    if (this.retry) { clearTimeout(this.retry); this.retry = null }
+    this.retries = 0
+    await this.drop()
+  }
+
+  private async drop() {
     const c = this.conn
     this.conn = null
     this.ownId = null
